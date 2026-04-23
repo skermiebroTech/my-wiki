@@ -10,7 +10,7 @@ Go to the appropriate driver download page:
 
 ---
 
-##  Step 2 – Find Your Device & Download Drivers
+##  Step 2 – Find Your Device & Download Drivers!
 
 - Search for your **exact model**
 - Download the **driver pack (.exe)**
