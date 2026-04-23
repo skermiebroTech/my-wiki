@@ -81,3 +81,8 @@ stop blanco from continuing and run regular windows update once
 ## Step 8 – Reboot
 
 Reboot system and let blanco run!
+
+
+---
+Author: Joel Skerman 
+Date: 23 Apr 2026
