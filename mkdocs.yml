@@ -29,7 +29,7 @@ theme:
 
 nav:
   - Home: index.md
-  - Driver Installation Guide: driver-installation.md
+  - Driver Installation Documentation: driver-installation.md
 
 markdown_extensions:
   - admonition
@@ -44,3 +44,6 @@ plugins:
 
 extra_javascript:
   - js/open_in_new_tab.js
+
+extra_css:
+  - stylesheets/extra.css
