@@ -14,6 +14,11 @@ Go to the appropriate driver download page:
 
 - Search for your **exact model**
 - Download the **driver pack (.exe)**
+	notes:
+	- ⚠️ **Dell Driver Packs** require you to select the "Line Of Business" before searching for the specific model eg: XPS or Latitude 
+	- ⚠️ **Lenovo** puts their most recent driver packages at the bottom of the page 
+	- ⚠️ It is best to use **Machine Type** to find **Lenovo** driver packs
+	- ⚠️ Use `ctrl+f` to find laptop models for **Dell** and **HP** 
 
 ---
 

@@ -21,3 +21,6 @@ markdown_extensions:
 plugins:
   - search
   - awesome-pages
+
+extra_javascript:
+  - js/open_in_new_tab.js
