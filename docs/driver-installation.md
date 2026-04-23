@@ -84,5 +84,4 @@ Reboot system and let blanco run!
 
 
 ---
-Author: Joel Skerman 
-Date: 23 Apr 2026
+Author: Joel Skerman | Date: 23 Apr 2026
