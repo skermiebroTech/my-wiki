@@ -1,0 +1,23 @@
+site_name: Laptop Deployment Docs
+site_description: Driver installation guide for Dell, HP, and Lenovo laptops
+site_author: Joel Skerman
+
+theme:
+  name: material
+  features:
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - Driver Installation Guide: driver-installation.md
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+
+plugins:
+  - search
+  - awesome-pages
