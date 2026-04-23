@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "docs/index.md",
+                "file": "docs/quick-start.md.old.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "index"
+              "title": "quick-start.md.old"
             }
           }
         ]
@@ -192,11 +192,11 @@
     "site/driver-installation/index.html",
     "site/driver-installation",
     "site/index.html",
-    "site/404.html",
-    "docs/driver-installation.md",
     "site/sitemap.xml.gz",
     "site/sitemap.xml",
+    "site/404.html",
     "docs/index.md",
+    "docs/driver-installation.md",
     "docs/quick-start.md.old.md",
     "site/assets/images/favicon.png",
     "README.md",
