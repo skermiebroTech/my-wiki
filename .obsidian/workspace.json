@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "docs/driver-installation.md",
+                "file": "docs/index.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "driver-installation"
+              "title": "index"
             }
           }
         ]
@@ -187,18 +187,17 @@
   "lastOpenFiles": [
     "site/search/search_index.json",
     "site/search",
-    "site/quick-start.md.old/index.html",
-    "site/quick-start.md.old",
     "site/driver-installation/index.html",
     "site/driver-installation",
     "site/index.html",
     "site/404.html",
-    "site/stylesheets/extra.css",
-    "site/stylesheets",
-    "docs/stylesheets/extra.css",
-    "docs/index.md",
-    "docs/quick-start.md.old.md",
     "docs/driver-installation.md",
+    "docs/index.md",
+    "site/sitemap.xml.gz",
+    "site/sitemap.xml",
+    "site/js/device.js",
+    "docs/js/device.js",
+    "docs/quick-start.md.old.md",
     "site/assets/images/favicon.png",
     "README.md",
     "docs/quick-start.md",

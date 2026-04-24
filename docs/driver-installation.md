@@ -24,25 +24,16 @@ Go to the appropriate driver download page:
 
 ##  Step 3 – Extract the Driver Package
 
-Run the `.exe` file to extract drivers.
+Run the `.exe` file you just downloaded to extract drivers.
 
-- This does not install drivers yet
-
----
-
-## Step 4 – Verify Extraction Location
-
-| Brand  | Location                       |
-| ------ | ------------------------------ |
-| Dell   | `C:\Users\<username>\<model>\` |
-| HP     | `C:\SWSetup\`                  |
-| Lenovo | `C:\DRIVERS\`                  |
+- ⚠️ This does not install drivers yet
 
 ---
 
-## Step 5 – Install Drivers
+## Step 4 – Install Drivers
 
-Open **Command Prompt as Administrator**.
+Open **Powershell as Administrator**.
+- ⚠️ If you are in audit mode you can do this by pressing `win+r` and typing `powershell`
 
 ### Dell
 
@@ -62,26 +53,35 @@ pnputil /add-driver "C:\DRIVERS\*.inf" /subdirs /install
 pnputil /add-driver "C:\SWSetup\*.inf" /subdirs /install
 ```
 
+### ⚠️ Troubleshooting 
+If these commands do not work verify the driver folder exists at one of these locations
+
+| Brand  | Location                       |
+| ------ | ------------------------------ |
+| Dell   | `C:\Users\<username>\<model>\` |
+| HP     | `C:\SWSetup\`                  |
+| Lenovo | `C:\DRIVERS\`                  |
+
 ---
-## Step 6 – Wait for Installation
+## Step 5 – Wait for Installation
 
-Drivers will install automatically.
-
----
-## Step 7 – Restart
-
-Restart the laptop after installation.
+Drivers will install automatically. Be patient this can take a while 
 
 ---
-## Step 8 – Run Windows Update
+## Step 6 – Restart
 
-stop blanco from continuing and run regular windows update once
+Restart the computer after installation if prompted.
+
+---
+## Step 7 – Run Windows Update
+
+stop blancco from continuing (if it is running) and run regular windows update once
 
 ---
 ## Step 8 – Reboot
 
-Reboot system and let blanco run!
-
+Reboot system and let blancco run!
+Now that you have read the documentation you can find a minified version of this page at `9dtr.com/w`
 
 ---
 Author: Joel Skerman | Date: 23 Apr 2026

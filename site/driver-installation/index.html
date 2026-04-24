@@ -356,26 +356,15 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#step-4-verify-extraction-location" class="md-nav__link">
+  <a href="#step-4-install-drivers" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 4 – Verify Extraction Location
+        Step 4 – Install Drivers
       
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#step-5-install-drivers" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Step 5 – Install Drivers
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Step 5 – Install Drivers">
+    <nav class="md-nav" aria-label="Step 4 – Install Drivers">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -411,16 +400,27 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ⚠️ Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#step-6-wait-for-installation" class="md-nav__link">
+  <a href="#step-5-wait-for-installation" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 6 – Wait for Installation
+        Step 5 – Wait for Installation
       
     </span>
   </a>
@@ -428,10 +428,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#step-7-restart" class="md-nav__link">
+  <a href="#step-6-restart" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 7 – Restart
+        Step 6 – Restart
       
     </span>
   </a>
@@ -439,10 +439,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#step-8-run-windows-update" class="md-nav__link">
+  <a href="#step-7-run-windows-update" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 8 – Run Windows Update
+        Step 7 – Run Windows Update
       
     </span>
   </a>
@@ -528,26 +528,15 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#step-4-verify-extraction-location" class="md-nav__link">
+  <a href="#step-4-install-drivers" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 4 – Verify Extraction Location
+        Step 4 – Install Drivers
       
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#step-5-install-drivers" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Step 5 – Install Drivers
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Step 5 – Install Drivers">
+    <nav class="md-nav" aria-label="Step 4 – Install Drivers">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -583,16 +572,27 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ⚠️ Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#step-6-wait-for-installation" class="md-nav__link">
+  <a href="#step-5-wait-for-installation" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 6 – Wait for Installation
+        Step 5 – Wait for Installation
       
     </span>
   </a>
@@ -600,10 +600,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#step-7-restart" class="md-nav__link">
+  <a href="#step-6-restart" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 7 – Restart
+        Step 6 – Restart
       
     </span>
   </a>
@@ -611,10 +611,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#step-8-run-windows-update" class="md-nav__link">
+  <a href="#step-7-run-windows-update" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 8 – Run Windows Update
+        Step 7 – Run Windows Update
       
     </span>
   </a>
@@ -672,12 +672,26 @@
 </ul>
 <hr />
 <h2 id="step-3-extract-the-driver-package">Step 3 – Extract the Driver Package<a class="headerlink" href="#step-3-extract-the-driver-package" title="Permanent link">&para;</a></h2>
-<p>Run the <code>.exe</code> file to extract drivers.</p>
+<p>Run the <code>.exe</code> file you just downloaded to extract drivers.</p>
 <ul>
-<li>This does not install drivers yet</li>
+<li>⚠️ This does not install drivers yet</li>
 </ul>
 <hr />
-<h2 id="step-4-verify-extraction-location">Step 4 – Verify Extraction Location<a class="headerlink" href="#step-4-verify-extraction-location" title="Permanent link">&para;</a></h2>
+<h2 id="step-4-install-drivers">Step 4 – Install Drivers<a class="headerlink" href="#step-4-install-drivers" title="Permanent link">&para;</a></h2>
+<p>Open <strong>Powershell as Administrator</strong>.
+- ⚠️ If you are in audit mode you can do this by pressing <code>win+r</code> and typing <code>powershell</code></p>
+<h3 id="dell">Dell<a class="headerlink" href="#dell" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>pnputil<span class="w"> </span>/add-driver<span class="w"> </span><span class="s2">&quot;C:\Users\Administrator\&lt;model&gt;\*.inf&quot;</span><span class="w"> </span>/subdirs<span class="w"> </span>/install
+</code></pre></div>
+<p>⚠️ Folder name changes per model. Replace <code>&lt;model&gt;</code> with folder name.</p>
+<h3 id="lenovo">Lenovo<a class="headerlink" href="#lenovo" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>pnputil<span class="w"> </span>/add-driver<span class="w"> </span><span class="s2">&quot;C:\DRIVERS\*.inf&quot;</span><span class="w"> </span>/subdirs<span class="w"> </span>/install
+</code></pre></div>
+<h3 id="hp">HP<a class="headerlink" href="#hp" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>pnputil<span class="w"> </span>/add-driver<span class="w"> </span><span class="s2">&quot;C:\SWSetup\*.inf&quot;</span><span class="w"> </span>/subdirs<span class="w"> </span>/install
+</code></pre></div>
+<h3 id="troubleshooting">⚠️ Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h3>
+<p>If these commands do not work verify the driver folder exists at one of these locations</p>
 <table>
 <thead>
 <tr>
@@ -701,30 +715,18 @@
 </tbody>
 </table>
 <hr />
-<h2 id="step-5-install-drivers">Step 5 – Install Drivers<a class="headerlink" href="#step-5-install-drivers" title="Permanent link">&para;</a></h2>
-<p>Open <strong>Command Prompt as Administrator</strong>.</p>
-<h3 id="dell">Dell<a class="headerlink" href="#dell" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>pnputil<span class="w"> </span>/add-driver<span class="w"> </span><span class="s2">&quot;C:\Users\Administrator\&lt;model&gt;\*.inf&quot;</span><span class="w"> </span>/subdirs<span class="w"> </span>/install
-</code></pre></div>
-<p>⚠️ Folder name changes per model. Replace <code>&lt;model&gt;</code> with folder name.</p>
-<h3 id="lenovo">Lenovo<a class="headerlink" href="#lenovo" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>pnputil<span class="w"> </span>/add-driver<span class="w"> </span><span class="s2">&quot;C:\DRIVERS\*.inf&quot;</span><span class="w"> </span>/subdirs<span class="w"> </span>/install
-</code></pre></div>
-<h3 id="hp">HP<a class="headerlink" href="#hp" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>pnputil<span class="w"> </span>/add-driver<span class="w"> </span><span class="s2">&quot;C:\SWSetup\*.inf&quot;</span><span class="w"> </span>/subdirs<span class="w"> </span>/install
-</code></pre></div>
+<h2 id="step-5-wait-for-installation">Step 5 – Wait for Installation<a class="headerlink" href="#step-5-wait-for-installation" title="Permanent link">&para;</a></h2>
+<p>Drivers will install automatically. Be patient this can take a while </p>
 <hr />
-<h2 id="step-6-wait-for-installation">Step 6 – Wait for Installation<a class="headerlink" href="#step-6-wait-for-installation" title="Permanent link">&para;</a></h2>
-<p>Drivers will install automatically.</p>
+<h2 id="step-6-restart">Step 6 – Restart<a class="headerlink" href="#step-6-restart" title="Permanent link">&para;</a></h2>
+<p>Restart the computer after installation if prompted.</p>
 <hr />
-<h2 id="step-7-restart">Step 7 – Restart<a class="headerlink" href="#step-7-restart" title="Permanent link">&para;</a></h2>
-<p>Restart the laptop after installation.</p>
-<hr />
-<h2 id="step-8-run-windows-update">Step 8 – Run Windows Update<a class="headerlink" href="#step-8-run-windows-update" title="Permanent link">&para;</a></h2>
-<p>stop blanco from continuing and run regular windows update once</p>
+<h2 id="step-7-run-windows-update">Step 7 – Run Windows Update<a class="headerlink" href="#step-7-run-windows-update" title="Permanent link">&para;</a></h2>
+<p>stop blancco from continuing (if it is running) and run regular windows update once</p>
 <hr />
 <h2 id="step-8-reboot">Step 8 – Reboot<a class="headerlink" href="#step-8-reboot" title="Permanent link">&para;</a></h2>
-<p>Reboot system and let blanco run!</p>
+<p>Reboot system and let blancco run!
+Now that you have read the documentation you can find a minified version of this page at <code>9dtr.com/w</code></p>
 <hr />
 <p>Author: Joel Skerman | Date: 23 Apr 2026</p>
 
