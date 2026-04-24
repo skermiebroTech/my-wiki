@@ -1,4 +1,8 @@
-function getDeviceInfo() {
+document.addEventListener("DOMContentLoaded", function () {
+  const el = document.getElementById("device-info");
+
+  if (!el) return;
+
   const ua = navigator.userAgent;
 
   let device = "Unknown device";
@@ -15,7 +19,5 @@ function getDeviceInfo() {
     device = "Windows PC";
   }
 
-  document.getElementById("device-info").innerText = device;
-}
-
-window.onload = getDeviceInfo;
+  el.innerText = device;
+});
