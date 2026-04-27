@@ -409,8 +409,19 @@
 - ⚠️  Note: Pressing <code>win+x</code> brings up a menu where you can click on device manager </p>
 <hr />
 <h1 id="step-4">Step 4<a class="headerlink" href="#step-4" title="Permanent link">&para;</a></h1>
-<p>Download this file <a href="https://na.panasonic.com/computer/cab/G1F_Mk2_Win10x64_1803_V1.00.cab">Download</a>
-Follow steps outlined in <a href="../../cab-file-driver-installation/">cab file install guide</a></p>
+<ul>
+<li>Download this file <a href="https://na.panasonic.com/computer/cab/G1F_Mk2_Win10x64_1803_V1.00.cab">Download</a></li>
+<li><strong>After Download Is complete</strong> run the following in powershell as Administrator</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="nv">$cab</span><span class="p">=</span><span class="s2">&quot;C:\Users\Administrator\Downloads\G1F_Mk2_Win10x64_1803_V1.00.cab&quot;</span>
+<span class="nv">$out</span><span class="p">=</span><span class="s2">&quot;C:\Drivers\FZ-G1&quot;</span>
+<span class="n">mkdir</span> <span class="nv">$out</span> <span class="n">-Force</span> <span class="p">|</span> <span class="nb">Out-Null</span>
+<span class="n">expand</span> <span class="o">-F</span><span class="p">:*</span> <span class="nv">$cab</span> <span class="nv">$out</span>
+<span class="n">pnputil</span> <span class="p">/</span><span class="nb">add-driver</span> <span class="s2">&quot;$out\*.inf&quot;</span> <span class="p">/</span><span class="n">subdirs</span> <span class="p">/</span><span class="n">install</span>
+</code></pre></div>
+<ul>
+<li>Reboot after complete</li>
+</ul>
 <h1 id="step-5">Step 5<a class="headerlink" href="#step-5" title="Permanent link">&para;</a></h1>
 <p>Run Windows update and reboot if prompted</p>
 
