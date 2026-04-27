@@ -30,8 +30,11 @@ theme:
 nav:
   - Home: index.md
   - Driver Installation Documentation: driver-installation.md
-  - CAB file drivers: cab-file-driver-installation.md
+  - Installing CAB file drivers: cab-file-driver-installation.md
   - todo: todo.md
+  - Useful Links: Useful-Links.md
+  - Panasonic:
+      - FZ-G1 Guide: Panasonic/panasonic-fzg1.md
 
 markdown_extensions:
   - admonition

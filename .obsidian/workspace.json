@@ -41,16 +41,44 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "docs/driver-installation.md",
+                "file": "docs/todo.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "driver-installation"
+              "title": "todo"
+            }
+          },
+          {
+            "id": "e3dd0bebc13aa4fd",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "docs/Useful-Links.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "Useful-Links"
+            }
+          },
+          {
+            "id": "f9fd9cddb5e054bf",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "docs/cab-file-driver-installation.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "cab-file-driver-installation"
             }
           }
         ],
-        "currentTab": 2
+        "currentTab": 4
       }
     ],
     "direction": "vertical"
@@ -212,25 +240,28 @@
       "bases:Create new base": false
     }
   },
-  "active": "bc6e2d34c3a4fe57",
+  "active": "f9fd9cddb5e054bf",
   "lastOpenFiles": [
-    "docs/cab-file-driver-installation.md",
-    "docs/driver-installation.md",
-    "docs/index.md",
-    "docs/todo.md",
     "site/search/search_index.json",
     "site/search",
+    "site/Panasonic/panasonic-fzg1/index.html",
+    "site/Panasonic/panasonic-fzg1",
+    "site/Panasonic",
     "site/todo/index.html",
     "site/todo",
     "site/driver-installation/index.html",
     "site/driver-installation",
     "site/cab-file-driver-installation/index.html",
     "site/cab-file-driver-installation",
-    "site/index.html",
-    "site/sitemap.xml.gz",
+    "docs/driver-installation.md",
+    "docs/cab-file-driver-installation.md",
+    "docs/Panasonic/panasonic-fzg1.md",
+    "docs/index.md",
+    "docs/Useful-Links.md",
+    "docs/todo.md",
+    "README.md",
     "docs/quick-start.md.old.md",
     "site/assets/images/favicon.png",
-    "README.md",
     "docs/quick-start.md",
     "docs/Default Passwords.md"
   ]
