@@ -704,13 +704,13 @@
 <p>This guide explains how to extract and install drivers from a <code>.cab</code> file located in the Downloads folder while in Audit Mode.</p>
 <hr />
 <h2 id="driver-file">Driver File<a class="headerlink" href="#driver-file" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>C:\Users\Administrator\Downloads\PDP_FZ-G1mk1_Win10x64_V1.02L10M00.cab
+<div class="highlight"><pre><span></span><code>C:\Users\Administrator\Downloads\G1F_Mk2_Win10x64_1709_V1.cab
 </code></pre></div>
 <hr />
 <h2 id="step-1-extract-the-cab-file">Step 1 — Extract the <code>.cab</code> File<a class="headerlink" href="#step-1-extract-the-cab-file" title="Permanent link">&para;</a></h2>
 <p>Use the built-in <code>expand</code> command:</p>
 <div class="highlight"><pre><span></span><code><span class="n">mkdir</span> <span class="s2">&quot;C:\Drivers\FZ-G1&quot;</span> <span class="n">-Force</span>
-<span class="n">expand</span> <span class="o">-F</span><span class="p">:*</span> <span class="s2">&quot;C:\Users\Administrator\Downloads\PDP_FZ-G1mk1_Win10x64_V1.02L10M00.cab&quot;</span> <span class="s2">&quot;C:\Drivers\FZ-G1\&quot;</span>
+<span class="n">expand</span> <span class="o">-F</span><span class="p">:*</span> <span class="s2">&quot;C:\Users\Administrator\Downloads\G1F_Mk2_Win10x64_1709_V1.cab&quot;</span> <span class="s2">&quot;C:\Drivers\FZ-G1\&quot;</span>
 </code></pre></div>
 <h3 id="explanation">Explanation:<a class="headerlink" href="#explanation" title="Permanent link">&para;</a></h3>
 <ul>
@@ -731,7 +731,7 @@
 </ul>
 <hr />
 <h2 id="one-liner-extract-install">One-Liner (Extract + Install)<a class="headerlink" href="#one-liner-extract-install" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="nv">$cab</span><span class="p">=</span><span class="s2">&quot;C:\Users\Administrator\Downloads\PDP_FZ-G1mk1_Win10x64_V1.02L10M00.cab&quot;</span>
+<div class="highlight"><pre><span></span><code><span class="nv">$cab</span><span class="p">=</span><span class="s2">&quot;C:\Users\Administrator\Downloads\G1F_Mk2_Win10x64_1709_V1.cab&quot;</span>
 <span class="nv">$out</span><span class="p">=</span><span class="s2">&quot;C:\Drivers\FZ-G1&quot;</span>
 <span class="n">mkdir</span> <span class="nv">$out</span> <span class="n">-Force</span> <span class="p">|</span> <span class="nb">Out-Null</span>
 <span class="n">expand</span> <span class="o">-F</span><span class="p">:*</span> <span class="nv">$cab</span> <span class="nv">$out</span>
