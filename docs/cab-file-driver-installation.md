@@ -4,7 +4,7 @@ This guide explains how to extract and install drivers from a `.cab` file locate
 
 ---
 
-## 📦 Driver File
+## Driver File
 
 ```
 C:\Users\Administrator\Downloads\PDP_FZ-G1mk1_Win10x64_V1.02L10M00.cab
@@ -12,7 +12,7 @@ C:\Users\Administrator\Downloads\PDP_FZ-G1mk1_Win10x64_V1.02L10M00.cab
 
 ---
 
-## 🔧 Step 1 — Extract the `.cab` File
+## Step 1 — Extract the `.cab` File
 
 Use the built-in `expand` command:
 
@@ -28,7 +28,7 @@ expand -F:* "C:\Users\Administrator\Downloads\PDP_FZ-G1mk1_Win10x64_V1.02L10M00.
 
 ---
 
-## 🔧 Step 2 — Install the Drivers
+## Step 2 — Install the Drivers
 
 After extracting, install the drivers using `pnputil`:
 
@@ -43,7 +43,7 @@ pnputil /add-driver "C:\Drivers\FZ-G1\*.inf" /subdirs /install
 
 ---
 
-## ⚡ One-Liner (Extract + Install)
+## One-Liner (Extract + Install)
 
 ```powershell
 $cab="C:\Users\Administrator\Downloads\PDP_FZ-G1mk1_Win10x64_V1.02L10M00.cab"
@@ -64,7 +64,7 @@ pnputil /add-driver "$out\*.inf" /subdirs /install
 
 ---
 
-## 🔍 Optional — List Installed Drivers
+## Optional — List Installed Drivers
 
 ```powershell
 pnputil /enum-drivers
@@ -72,7 +72,7 @@ pnputil /enum-drivers
 
 ---
 
-## 📁 Example Workflow
+## Example Workflow
 
 ```powershell
 expand -F:* "C:\Users\Administrator\Downloads\PDP_FZ-G1mk1_Win10x64_V1.02L10M00.cab" "C:\Drivers\FZ-G1"
@@ -81,10 +81,12 @@ pnputil /add-driver "C:\Drivers\FZ-G1\*.inf" /subdirs /install
 
 ---
 
-## ✅ Summary
+## Summary
 
 1. Extract the `.cab` file from Downloads  
 2. Install drivers using `pnputil`  
 3. Verify installation if needed  
 
 ---
+
+Author: Joel Skerman | Date: 27 Apr 2026
