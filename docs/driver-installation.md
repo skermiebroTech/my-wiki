@@ -1,5 +1,7 @@
 # Driver Installation Guide
 
+⚠️ This guide assumes that you are using audit mode accessible by pressing `ctrl+shift+f3` in windows OOBE (Out Of Box Experience)
+
 ## Step 1 – Open Driver Resource Page
 
 Go to the appropriate driver download page:

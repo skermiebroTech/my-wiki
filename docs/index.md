@@ -5,6 +5,7 @@
 - [Dell Driver Packs ](https://www.dell.com/support/kbdoc/en-au/000124139/dell-command-deploy-driver-packs-for-enterprise-client-os-deployment)
 - [HP Driver Packs](https://ftp.hp.com/pub/caps-softpaq/cmit/HP_Driverpack_Matrix_x64.html)
 - [Lenovo Driver Packs](https://download.lenovo.com/cdrt/ddrc/RecipeCardWeb.html)
+- [Panasonic Driver Packs](https://global-pc-support.connect.panasonic.com/driver/deployment-support-tools/driver-pack#topics03)
 - [Lenovo System Update](https://download.lenovo.com/pccbbs/thinkvantage_en/system_update_5.08.03.59.exe)
 - [Camera Test](https://openthecamera.com/camtest)
 

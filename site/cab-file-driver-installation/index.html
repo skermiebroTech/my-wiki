@@ -13,10 +13,8 @@
       
       
       
-        <link rel="prev" href="..">
+        <link rel="prev" href="../driver-installation/">
       
-      
-        <link rel="next" href="../cab-file-driver-installation/">
       
       
         
@@ -27,7 +25,7 @@
     
     
       
-        <title>Driver Installation Documentation - JJs Wiki</title>
+        <title>CAB file drivers - JJs Wiki</title>
       
     
     
@@ -80,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#driver-installation-guide" class="md-skip">
+        <a href="#installing-drivers-from-a-cab-file-using-powershell-audit-mode" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +114,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Driver Installation Documentation
+              CAB file drivers
             
           </span>
         </div>
@@ -262,6 +260,33 @@
       
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../driver-installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Driver Installation Documentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
     
   
   
@@ -281,7 +306,7 @@
   <span class="md-ellipsis">
     
   
-    Driver Installation Documentation
+    CAB file drivers
   
 
     
@@ -299,7 +324,7 @@
   <span class="md-ellipsis">
     
   
-    Driver Installation Documentation
+    CAB file drivers
   
 
     
@@ -325,10 +350,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#step-1-open-driver-resource-page" class="md-nav__link">
+  <a href="#driver-file" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 1 – Open Driver Resource Page
+        📦 Driver File
       
     </span>
   </a>
@@ -336,77 +361,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#step-2-find-your-device-download-drivers" class="md-nav__link">
+  <a href="#step-1-extract-the-cab-file" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 2 – Find Your Device &amp; Download Drivers!
+        🔧 Step 1 — Extract the .cab File
       
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#step-3-extract-the-driver-package" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Step 3 – Extract the Driver Package
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#step-4-install-drivers" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Step 4 – Install Drivers
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Step 4 – Install Drivers">
+    <nav class="md-nav" aria-label="🔧 Step 1 — Extract the .cab File">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#dell" class="md-nav__link">
+  <a href="#explanation" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Dell
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#lenovo" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Lenovo
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#hp" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        HP
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#troubleshooting" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ⚠️ Troubleshooting
+        Explanation:
       
     </span>
   </a>
@@ -419,10 +389,38 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#step-5-wait-for-installation" class="md-nav__link">
+  <a href="#step-2-install-the-drivers" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 5 – Wait for Installation
+        🔧 Step 2 — Install the Drivers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🔧 Step 2 — Install the Drivers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#explanation_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Explanation:
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#one-liner-extract-install" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ⚡ One-Liner (Extract + Install)
       
     </span>
   </a>
@@ -430,10 +428,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#step-6-restart" class="md-nav__link">
+  <a href="#important-notes" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 6 – Restart
+        ⚠️ Important Notes
       
     </span>
   </a>
@@ -441,10 +439,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#step-7-run-windows-update" class="md-nav__link">
+  <a href="#optional-list-installed-drivers" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 7 – Run Windows Update
+        🔍 Optional — List Installed Drivers
       
     </span>
   </a>
@@ -452,10 +450,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#step-8-reboot" class="md-nav__link">
+  <a href="#example-workflow" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 8 – Reboot
+        📁 Example Workflow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ✅ Summary
       
     </span>
   </a>
@@ -466,33 +475,6 @@
   
 </nav>
       
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../cab-file-driver-installation/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    CAB file drivers
-  
-
-    
-  </span>
-  
-  
-
-      </a>
     </li>
   
 
@@ -524,10 +506,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#step-1-open-driver-resource-page" class="md-nav__link">
+  <a href="#driver-file" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 1 – Open Driver Resource Page
+        📦 Driver File
       
     </span>
   </a>
@@ -535,77 +517,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#step-2-find-your-device-download-drivers" class="md-nav__link">
+  <a href="#step-1-extract-the-cab-file" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 2 – Find Your Device &amp; Download Drivers!
+        🔧 Step 1 — Extract the .cab File
       
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#step-3-extract-the-driver-package" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Step 3 – Extract the Driver Package
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#step-4-install-drivers" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Step 4 – Install Drivers
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Step 4 – Install Drivers">
+    <nav class="md-nav" aria-label="🔧 Step 1 — Extract the .cab File">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#dell" class="md-nav__link">
+  <a href="#explanation" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Dell
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#lenovo" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Lenovo
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#hp" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        HP
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#troubleshooting" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ⚠️ Troubleshooting
+        Explanation:
       
     </span>
   </a>
@@ -618,10 +545,38 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#step-5-wait-for-installation" class="md-nav__link">
+  <a href="#step-2-install-the-drivers" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 5 – Wait for Installation
+        🔧 Step 2 — Install the Drivers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="🔧 Step 2 — Install the Drivers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#explanation_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Explanation:
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#one-liner-extract-install" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ⚡ One-Liner (Extract + Install)
       
     </span>
   </a>
@@ -629,10 +584,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#step-6-restart" class="md-nav__link">
+  <a href="#important-notes" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 6 – Restart
+        ⚠️ Important Notes
       
     </span>
   </a>
@@ -640,10 +595,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#step-7-run-windows-update" class="md-nav__link">
+  <a href="#optional-list-installed-drivers" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 7 – Run Windows Update
+        🔍 Optional — List Installed Drivers
       
     </span>
   </a>
@@ -651,10 +606,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#step-8-reboot" class="md-nav__link">
+  <a href="#example-workflow" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 8 – Reboot
+        📁 Example Workflow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ✅ Summary
       
     </span>
   </a>
@@ -678,87 +644,68 @@
 
 
 
-<h1 id="driver-installation-guide">Driver Installation Guide<a class="headerlink" href="#driver-installation-guide" title="Permanent link">&para;</a></h1>
-<p>⚠️ This guide assumes that you are using audit mode accessible by pressing <code>ctrl+shift+f3</code> in windows OOBE (Out Of Box Experience)</p>
-<h2 id="step-1-open-driver-resource-page">Step 1 – Open Driver Resource Page<a class="headerlink" href="#step-1-open-driver-resource-page" title="Permanent link">&para;</a></h2>
-<p>Go to the appropriate driver download page:</p>
-<ul>
-<li><a href="https://www.dell.com/support/kbdoc/en-au/000124139/dell-command-deploy-driver-packs-for-enterprise-client-os-deployment">Dell Driver Packs </a></li>
-<li><a href="https://ftp.hp.com/pub/caps-softpaq/cmit/HP_Driverpack_Matrix_x64.html">HP Driver Packs</a></li>
-<li><a href="https://download.lenovo.com/cdrt/ddrc/RecipeCardWeb.html">Lenovo Driver Packs</a></li>
-</ul>
+<h1 id="installing-drivers-from-a-cab-file-using-powershell-audit-mode">Installing Drivers from a <code>.cab</code> File Using PowerShell (Audit Mode)<a class="headerlink" href="#installing-drivers-from-a-cab-file-using-powershell-audit-mode" title="Permanent link">&para;</a></h1>
+<p>This guide explains how to extract and install drivers from a <code>.cab</code> file located in the Downloads folder while in Audit Mode.</p>
 <hr />
-<h2 id="step-2-find-your-device-download-drivers">Step 2 – Find Your Device &amp; Download Drivers!<a class="headerlink" href="#step-2-find-your-device-download-drivers" title="Permanent link">&para;</a></h2>
-<ul>
-<li>Search for your <strong>exact model</strong></li>
-<li>Download the <strong>driver pack (.exe)</strong>
-    notes:<ul>
-<li>⚠️ <strong>Dell Driver Packs</strong> require you to select the "Line Of Business" before searching for the specific model eg: XPS or Latitude </li>
-<li>⚠️ <strong>Lenovo</strong> puts their most recent driver packages at the bottom of the page </li>
-<li>⚠️ It is best to use <strong>Machine Type</strong> to find <strong>Lenovo</strong> driver packs</li>
-<li>⚠️ Use <code>ctrl+f</code> to find laptop models for <strong>Dell</strong> and <strong>HP</strong> </li>
-</ul>
-</li>
-</ul>
-<hr />
-<h2 id="step-3-extract-the-driver-package">Step 3 – Extract the Driver Package<a class="headerlink" href="#step-3-extract-the-driver-package" title="Permanent link">&para;</a></h2>
-<p>Run the <code>.exe</code> file you just downloaded to extract drivers.</p>
-<ul>
-<li>⚠️ This does not install drivers yet</li>
-</ul>
-<hr />
-<h2 id="step-4-install-drivers">Step 4 – Install Drivers<a class="headerlink" href="#step-4-install-drivers" title="Permanent link">&para;</a></h2>
-<p>Open <strong>Powershell as Administrator</strong>.
-- ⚠️ If you are in audit mode you can do this by pressing <code>win+r</code> and typing <code>powershell</code></p>
-<h3 id="dell">Dell<a class="headerlink" href="#dell" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>pnputil<span class="w"> </span>/add-driver<span class="w"> </span><span class="s2">&quot;C:\Users\Administrator\&lt;model&gt;\*.inf&quot;</span><span class="w"> </span>/subdirs<span class="w"> </span>/install
+<h2 id="driver-file">📦 Driver File<a class="headerlink" href="#driver-file" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>C:\Users\Administrator\Downloads\PDP_FZ-G1mk1_Win10x64_V1.02L10M00.cab
 </code></pre></div>
-<p>⚠️ Folder name changes per model. Replace <code>&lt;model&gt;</code> with folder name.</p>
-<h3 id="lenovo">Lenovo<a class="headerlink" href="#lenovo" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>pnputil<span class="w"> </span>/add-driver<span class="w"> </span><span class="s2">&quot;C:\DRIVERS\*.inf&quot;</span><span class="w"> </span>/subdirs<span class="w"> </span>/install
+<hr />
+<h2 id="step-1-extract-the-cab-file">🔧 Step 1 — Extract the <code>.cab</code> File<a class="headerlink" href="#step-1-extract-the-cab-file" title="Permanent link">&para;</a></h2>
+<p>Use the built-in <code>expand</code> command:</p>
+<div class="highlight"><pre><span></span><code><span class="n">mkdir</span> <span class="s2">&quot;C:\Drivers\FZ-G1&quot;</span> <span class="n">-Force</span>
+<span class="n">expand</span> <span class="o">-F</span><span class="p">:*</span> <span class="s2">&quot;C:\Users\Administrator\Downloads\PDP_FZ-G1mk1_Win10x64_V1.02L10M00.cab&quot;</span> <span class="s2">&quot;C:\Drivers\FZ-G1\&quot;</span>
 </code></pre></div>
-<h3 id="hp">HP<a class="headerlink" href="#hp" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>pnputil<span class="w"> </span>/add-driver<span class="w"> </span><span class="s2">&quot;C:\SWSetup\*.inf&quot;</span><span class="w"> </span>/subdirs<span class="w"> </span>/install
+<h3 id="explanation">Explanation:<a class="headerlink" href="#explanation" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>-F:*</code> → Extracts all files from the <code>.cab</code></li>
+<li>First path → Location of the <code>.cab</code> file</li>
+<li>Second path → Destination folder for extracted files</li>
+</ul>
+<hr />
+<h2 id="step-2-install-the-drivers">🔧 Step 2 — Install the Drivers<a class="headerlink" href="#step-2-install-the-drivers" title="Permanent link">&para;</a></h2>
+<p>After extracting, install the drivers using <code>pnputil</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="n">pnputil</span> <span class="p">/</span><span class="nb">add-driver</span> <span class="s2">&quot;C:\Drivers\FZ-G1\*.inf&quot;</span> <span class="p">/</span><span class="n">subdirs</span> <span class="p">/</span><span class="n">install</span>
 </code></pre></div>
-<h3 id="troubleshooting">⚠️ Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h3>
-<p>If these commands do not work verify the driver folder exists at one of these locations</p>
-<table>
-<thead>
-<tr>
-<th>Brand</th>
-<th>Location</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Dell</td>
-<td><code>C:\Users\&lt;username&gt;\&lt;model&gt;\</code></td>
-</tr>
-<tr>
-<td>HP</td>
-<td><code>C:\SWSetup\</code></td>
-</tr>
-<tr>
-<td>Lenovo</td>
-<td><code>C:\DRIVERS\</code></td>
-</tr>
-</tbody>
-</table>
+<h3 id="explanation_1">Explanation:<a class="headerlink" href="#explanation_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>/add-driver</code> → Adds drivers to the Windows driver store</li>
+<li><code>/subdirs</code> → Searches all subfolders for <code>.inf</code> files</li>
+<li><code>/install</code> → Installs drivers if matching hardware is found</li>
+</ul>
 <hr />
-<h2 id="step-5-wait-for-installation">Step 5 – Wait for Installation<a class="headerlink" href="#step-5-wait-for-installation" title="Permanent link">&para;</a></h2>
-<p>Drivers will install automatically. Be patient this can take a while </p>
+<h2 id="one-liner-extract-install">⚡ One-Liner (Extract + Install)<a class="headerlink" href="#one-liner-extract-install" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="nv">$cab</span><span class="p">=</span><span class="s2">&quot;C:\Users\Administrator\Downloads\PDP_FZ-G1mk1_Win10x64_V1.02L10M00.cab&quot;</span>
+<span class="nv">$out</span><span class="p">=</span><span class="s2">&quot;C:\Drivers\FZ-G1&quot;</span>
+<span class="n">mkdir</span> <span class="nv">$out</span> <span class="n">-Force</span> <span class="p">|</span> <span class="nb">Out-Null</span>
+<span class="n">expand</span> <span class="o">-F</span><span class="p">:*</span> <span class="nv">$cab</span> <span class="nv">$out</span>
+<span class="n">pnputil</span> <span class="p">/</span><span class="nb">add-driver</span> <span class="s2">&quot;$out\*.inf&quot;</span> <span class="p">/</span><span class="n">subdirs</span> <span class="p">/</span><span class="n">install</span>
+</code></pre></div>
 <hr />
-<h2 id="step-6-restart">Step 6 – Restart<a class="headerlink" href="#step-6-restart" title="Permanent link">&para;</a></h2>
-<p>Restart the computer after installation if prompted.</p>
+<h2 id="important-notes">⚠️ Important Notes<a class="headerlink" href="#important-notes" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Run PowerShell <strong>as Administrator</strong></li>
+<li>If drivers do not install:</li>
+<li>The hardware may not be connected</li>
+<li>Drivers may already be installed</li>
+</ul>
 <hr />
-<h2 id="step-7-run-windows-update">Step 7 – Run Windows Update<a class="headerlink" href="#step-7-run-windows-update" title="Permanent link">&para;</a></h2>
-<p>stop blancco from continuing (if it is running) and run regular windows update once</p>
+<h2 id="optional-list-installed-drivers">🔍 Optional — List Installed Drivers<a class="headerlink" href="#optional-list-installed-drivers" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="n">pnputil</span> <span class="p">/</span><span class="n">enum-drivers</span>
+</code></pre></div>
 <hr />
-<h2 id="step-8-reboot">Step 8 – Reboot<a class="headerlink" href="#step-8-reboot" title="Permanent link">&para;</a></h2>
-<p>Reboot system and let blancco run!
-Now that you have read the documentation you can find a minified version of this page at <code>9dtr.com/w</code></p>
+<h2 id="example-workflow">📁 Example Workflow<a class="headerlink" href="#example-workflow" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="n">expand</span> <span class="o">-F</span><span class="p">:*</span> <span class="s2">&quot;C:\Users\Administrator\Downloads\PDP_FZ-G1mk1_Win10x64_V1.02L10M00.cab&quot;</span> <span class="s2">&quot;C:\Drivers\FZ-G1&quot;</span>
+<span class="n">pnputil</span> <span class="p">/</span><span class="nb">add-driver</span> <span class="s2">&quot;C:\Drivers\FZ-G1\*.inf&quot;</span> <span class="p">/</span><span class="n">subdirs</span> <span class="p">/</span><span class="n">install</span>
+</code></pre></div>
 <hr />
-<p>Author: Joel Skerman | Date: 23 Apr 2026</p>
+<h2 id="summary">✅ Summary<a class="headerlink" href="#summary" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Extract the <code>.cab</code> file from Downloads  </li>
+<li>Install drivers using <code>pnputil</code>  </li>
+<li>Verify installation if needed  </li>
+</ol>
+<hr />
 
 
 
