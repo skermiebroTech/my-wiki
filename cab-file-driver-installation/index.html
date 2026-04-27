@@ -78,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#installing-drivers-from-a-cab-file-using-powershell" class="md-skip">
+        <a href="#installing-drivers-from-a-cab-file-using-powershell-audit-mode" class="md-skip">
           Skip to content
         </a>
       
@@ -350,6 +350,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#driver-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📦 Driver File
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#step-1-extract-the-cab-file" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -495,6 +506,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#driver-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📦 Driver File
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#step-1-extract-the-cab-file" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -622,12 +644,16 @@
 
 
 
-<h1 id="installing-drivers-from-a-cab-file-using-powershell">Installing Drivers from a <code>.cab</code> File Using PowerShell<a class="headerlink" href="#installing-drivers-from-a-cab-file-using-powershell" title="Permanent link">&para;</a></h1>
-<p>This guide explains how to extract a <code>.cab</code> file and install drivers using PowerShell on Windows.</p>
+<h1 id="installing-drivers-from-a-cab-file-using-powershell-audit-mode">Installing Drivers from a <code>.cab</code> File Using PowerShell (Audit Mode)<a class="headerlink" href="#installing-drivers-from-a-cab-file-using-powershell-audit-mode" title="Permanent link">&para;</a></h1>
+<p>This guide explains how to extract and install drivers from a <code>.cab</code> file located in the Downloads folder while in Audit Mode.</p>
+<hr />
+<h2 id="driver-file">📦 Driver File<a class="headerlink" href="#driver-file" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>C:\Users\Administrator\Downloads\PDP_FZ-G1mk1_Win10x64_V1.02L10M00.cab
+</code></pre></div>
 <hr />
 <h2 id="step-1-extract-the-cab-file">🔧 Step 1 — Extract the <code>.cab</code> File<a class="headerlink" href="#step-1-extract-the-cab-file" title="Permanent link">&para;</a></h2>
 <p>Use the built-in <code>expand</code> command:</p>
-<div class="highlight"><pre><span></span><code><span class="n">expand</span> <span class="o">-F</span><span class="p">:*</span> <span class="s2">&quot;C:\path\to\driver.cab&quot;</span> <span class="s2">&quot;C:\path\to\extract&quot;</span>
+<div class="highlight"><pre><span></span><code><span class="n">expand</span> <span class="o">-F</span><span class="p">:*</span> <span class="s2">&quot;C:\Users\Administrator\Downloads\PDP_FZ-G1mk1_Win10x64_V1.02L10M00.cab&quot;</span> <span class="s2">&quot;C:\Drivers\FZ-G1&quot;</span>
 </code></pre></div>
 <h3 id="explanation">Explanation:<a class="headerlink" href="#explanation" title="Permanent link">&para;</a></h3>
 <ul>
@@ -638,7 +664,7 @@
 <hr />
 <h2 id="step-2-install-the-drivers">🔧 Step 2 — Install the Drivers<a class="headerlink" href="#step-2-install-the-drivers" title="Permanent link">&para;</a></h2>
 <p>After extracting, install the drivers using <code>pnputil</code>:</p>
-<div class="highlight"><pre><span></span><code><span class="n">pnputil</span> <span class="p">/</span><span class="nb">add-driver</span> <span class="s2">&quot;C:\path\to\extract\*.inf&quot;</span> <span class="p">/</span><span class="n">subdirs</span> <span class="p">/</span><span class="n">install</span>
+<div class="highlight"><pre><span></span><code><span class="n">pnputil</span> <span class="p">/</span><span class="nb">add-driver</span> <span class="s2">&quot;C:\Drivers\FZ-G1\*.inf&quot;</span> <span class="p">/</span><span class="n">subdirs</span> <span class="p">/</span><span class="n">install</span>
 </code></pre></div>
 <h3 id="explanation_1">Explanation:<a class="headerlink" href="#explanation_1" title="Permanent link">&para;</a></h3>
 <ul>
@@ -648,8 +674,8 @@
 </ul>
 <hr />
 <h2 id="one-liner-extract-install">⚡ One-Liner (Extract + Install)<a class="headerlink" href="#one-liner-extract-install" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="nv">$cab</span><span class="p">=</span><span class="s2">&quot;C:\path\to\driver.cab&quot;</span>
-<span class="nv">$out</span><span class="p">=</span><span class="s2">&quot;C:\temp\drivers&quot;</span>
+<div class="highlight"><pre><span></span><code><span class="nv">$cab</span><span class="p">=</span><span class="s2">&quot;C:\Users\Administrator\Downloads\PDP_FZ-G1mk1_Win10x64_V1.02L10M00.cab&quot;</span>
+<span class="nv">$out</span><span class="p">=</span><span class="s2">&quot;C:\Drivers\FZ-G1&quot;</span>
 <span class="n">mkdir</span> <span class="nv">$out</span> <span class="n">-Force</span> <span class="p">|</span> <span class="nb">Out-Null</span>
 <span class="n">expand</span> <span class="o">-F</span><span class="p">:*</span> <span class="nv">$cab</span> <span class="nv">$out</span>
 <span class="n">pnputil</span> <span class="p">/</span><span class="nb">add-driver</span> <span class="s2">&quot;$out\*.inf&quot;</span> <span class="p">/</span><span class="n">subdirs</span> <span class="p">/</span><span class="n">install</span>
@@ -660,7 +686,7 @@
 <li>Run PowerShell <strong>as Administrator</strong></li>
 <li>If drivers do not install:</li>
 <li>The hardware may not be connected</li>
-<li>The correct driver may already be installed</li>
+<li>Drivers may already be installed</li>
 </ul>
 <hr />
 <h2 id="optional-list-installed-drivers">🔍 Optional — List Installed Drivers<a class="headerlink" href="#optional-list-installed-drivers" title="Permanent link">&para;</a></h2>
@@ -668,16 +694,17 @@
 </code></pre></div>
 <hr />
 <h2 id="example-workflow">📁 Example Workflow<a class="headerlink" href="#example-workflow" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="n">expand</span> <span class="o">-F</span><span class="p">:*</span> <span class="s2">&quot;C:\Drivers\wifi.cab&quot;</span> <span class="s2">&quot;C:\Drivers\wifi&quot;</span>
-<span class="n">pnputil</span> <span class="p">/</span><span class="nb">add-driver</span> <span class="s2">&quot;C:\Drivers\wifi\*.inf&quot;</span> <span class="p">/</span><span class="n">subdirs</span> <span class="p">/</span><span class="n">install</span>
+<div class="highlight"><pre><span></span><code><span class="n">expand</span> <span class="o">-F</span><span class="p">:*</span> <span class="s2">&quot;C:\Users\Administrator\Downloads\PDP_FZ-G1mk1_Win10x64_V1.02L10M00.cab&quot;</span> <span class="s2">&quot;C:\Drivers\FZ-G1&quot;</span>
+<span class="n">pnputil</span> <span class="p">/</span><span class="nb">add-driver</span> <span class="s2">&quot;C:\Drivers\FZ-G1\*.inf&quot;</span> <span class="p">/</span><span class="n">subdirs</span> <span class="p">/</span><span class="n">install</span>
 </code></pre></div>
 <hr />
 <h2 id="summary">✅ Summary<a class="headerlink" href="#summary" title="Permanent link">&para;</a></h2>
 <ol>
-<li>Extract the <code>.cab</code> file using <code>expand</code></li>
-<li>Install drivers using <code>pnputil</code></li>
-<li>Verify installation if needed</li>
+<li>Extract the <code>.cab</code> file from Downloads  </li>
+<li>Install drivers using <code>pnputil</code>  </li>
+<li>Verify installation if needed  </li>
 </ol>
+<hr />
 
 
 
