@@ -31,6 +31,7 @@ nav:
   - Home: index.md
   - Driver Installation Documentation: driver-installation.md
   - CAB file drivers: cab-file-driver-installation.md
+  - todo: todo.md
 
 markdown_extensions:
   - admonition
