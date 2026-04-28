@@ -69,12 +69,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "docs/cab-file-driver-installation.md",
+                "file": "docs/todo.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "cab-file-driver-installation"
+              "title": "todo"
             }
           }
         ],
@@ -253,12 +253,12 @@
     "site/driver-installation",
     "site/cab-file-driver-installation/index.html",
     "site/cab-file-driver-installation",
-    "docs/driver-installation.md",
-    "docs/cab-file-driver-installation.md",
     "docs/Panasonic/panasonic-fzg1.md",
+    "docs/driver-installation.md",
+    "docs/todo.md",
     "docs/index.md",
     "docs/Useful-Links.md",
-    "docs/todo.md",
+    "docs/cab-file-driver-installation.md",
     "README.md",
     "docs/quick-start.md.old.md",
     "site/assets/images/favicon.png",

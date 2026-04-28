@@ -532,6 +532,56 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Step 5">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#step-51" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 5.1
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 6
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 7
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#links" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Links
+      
+    </span>
+  </a>
+  
 </li>
       
     </ul>
@@ -629,6 +679,56 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Step 5">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#step-51" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 5.1
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 6
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 7
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#links" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Links
+      
+    </span>
+  </a>
+  
 </li>
       
     </ul>
@@ -649,6 +749,7 @@
 
 
 <h1 id="preinstalling-the-panasonic-fz-g1-mk2">Preinstalling the Panasonic FZ-G1 (mk2)<a class="headerlink" href="#preinstalling-the-panasonic-fz-g1-mk2" title="Permanent link">&para;</a></h1>
+<p>⚠️ The MK2 has a 4th gen Intel CPU</p>
 <h2 id="step-1">Step 1<a class="headerlink" href="#step-1" title="Permanent link">&para;</a></h2>
 <p>Install Windows 10 from a USB</p>
 <hr />
@@ -671,11 +772,29 @@
 <span class="n">pnputil</span> <span class="p">/</span><span class="nb">add-driver</span> <span class="s2">&quot;$out\*.inf&quot;</span> <span class="p">/</span><span class="n">subdirs</span> <span class="p">/</span><span class="n">install</span>
 </code></pre></div>
 <ul>
-<li>Reboot after complete</li>
+<li>⚠️ Reboot after complete</li>
 </ul>
-<h2 id="step-5">Step 5<a class="headerlink" href="#step-5" title="Permanent link">&para;</a></h2>
-<p>Run Windows update and reboot if prompted</p>
+<p>If you need to rerun use the following:</p>
+<div class="highlight"><pre><span></span><code><span class="n">pnputil</span> <span class="p">/</span><span class="nb">add-driver</span> <span class="s2">&quot;C:\Drivers\FZ-G1\*.inf&quot;</span> <span class="p">/</span><span class="n">subdirs</span> <span class="p">/</span><span class="n">install</span>
+</code></pre></div>
 <hr />
+<h2 id="step-5">Step 5<a class="headerlink" href="#step-5" title="Permanent link">&para;</a></h2>
+<p>Run Windows Update and reboot If prompted </p>
+<h3 id="step-51">Step 5.1<a class="headerlink" href="#step-51" title="Permanent link">&para;</a></h3>
+<ul>
+<li>You may ignore this step if all devices show up in device manager</li>
+<li>Download the <a href="https://pc-dl.panasonic.co.jp/public/soft_update/d_driver/usb_serial/usbser_2.12.16_5086.exe">USB Serial Driver</a> from Panasonic</li>
+<li>open device manager and install driver from this directory <code>c:\util2\drivers\usbser</code></li>
+</ul>
+<hr />
+<h2 id="step-6">Step 6<a class="headerlink" href="#step-6" title="Permanent link">&para;</a></h2>
+<p>verify all drivers are installed by checking in device manager</p>
+<hr />
+<h2 id="step-7">Step 7<a class="headerlink" href="#step-7" title="Permanent link">&para;</a></h2>
+<p>Run Sysprep!</p>
+<hr />
+<h2 id="links">Links<a class="headerlink" href="#links" title="Permanent link">&para;</a></h2>
+<p><a href="https://global-pc-support.connect.panasonic.com/search">Panasonic Driver search</a></p>
 <p>Author: Joel Skerman | Date: 28 Apr 2026</p>
 
 
