@@ -10,7 +10,9 @@ Go to the appropriate driver download page:
 ## Step 2 – Run 
 Run `install.bat`
 
-- ⚠️  auto installer can be downloaded here
-	- 
+- ⚠️  auto installer can be downloaded here (you need both files on a USB)
+	- [install.bat](https://raw.githubusercontent.com/skermiebroTech/my-wiki/refs/heads/main/install.bat)
+	- [install-drivers.ps1](https://raw.githubusercontent.com/skermiebroTech/my-wiki/refs/heads/main/Install-Drivers.ps1)
+		- ⚠️ the script looks in the root dir of D:\ for install-drivers.ps1
 
 ---

@@ -35,6 +35,7 @@ nav:
   - Useful Links: Useful-Links.md
   - Panasonic:
       - FZ-G1 Guide: Panasonic/panasonic-fzg1.md
+  - Auto Installer: auto-driver-installer.md
 
 markdown_extensions:
   - admonition
