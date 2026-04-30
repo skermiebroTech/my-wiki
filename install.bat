@@ -1,3 +1,3 @@
 @echo off
-powershell -ExecutionPolicy Bypass -File "%~dp0Install-Drivers.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "D:\Install-Drivers.ps1"
 pause
