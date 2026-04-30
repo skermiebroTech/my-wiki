@@ -25,21 +25,4 @@ pnputil /add-driver "$out\*.inf" /subdirs /install
 
 ---
 
-## ⚠️ Important Notes
-
-- Run PowerShell **as Administrator**
-- If drivers do not install:
-  - The hardware may not be connected
-  - Drivers may already be installed
-
----
-
-## Optional — List Installed Drivers
-
-```powershell
-pnputil /enum-drivers
-```
-
----
-
 Author: Joel Skerman | Date: 27 Apr 2026 | Updated 28 Apr 2026

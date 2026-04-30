@@ -69,12 +69,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "docs/todo.md",
+                "file": "docs/driver-installation.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "todo"
+              "title": "driver-installation"
             }
           }
         ],
@@ -242,6 +242,12 @@
   },
   "active": "f9fd9cddb5e054bf",
   "lastOpenFiles": [
+    "Install-Drivers.ps1",
+    "install.bat",
+    "docs/install.bat",
+    "docs/Install-Drivers.ps1",
+    "docs/index.md",
+    "docs/todo.md",
     "site/search/search_index.json",
     "site/search",
     "site/Panasonic/panasonic-fzg1/index.html",
@@ -249,16 +255,10 @@
     "site/Panasonic",
     "site/todo/index.html",
     "site/todo",
-    "site/driver-installation/index.html",
-    "site/driver-installation",
-    "site/cab-file-driver-installation/index.html",
-    "site/cab-file-driver-installation",
+    "docs/cab-file-driver-installation.md",
     "docs/Panasonic/panasonic-fzg1.md",
     "docs/driver-installation.md",
-    "docs/todo.md",
-    "docs/index.md",
     "docs/Useful-Links.md",
-    "docs/cab-file-driver-installation.md",
     "README.md",
     "docs/quick-start.md.old.md",
     "site/assets/images/favicon.png",
