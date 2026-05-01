@@ -1,23 +1,7 @@
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-# =========================
-# ADMIN CHECK (EARLY)
-# =========================
-$identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-$principal = New-Object Security.Principal.WindowsPrincipal($identity)
-
-if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-
-    $scriptUrl = "https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers.ps1"
-
-    Start-Process powershell "-ExecutionPolicy Bypass -Command `"irm $scriptUrl | iex`"" -Verb RunAs
-    exit
-}
-
-# =========================
-# PREVENT SLEEP (AC ONLY)
-# =========================
+# Disable sleep and display timeout (AC power only)
 powercfg /change standby-timeout-ac 0
 powercfg /change monitor-timeout-ac 0
 
@@ -34,7 +18,6 @@ $title = New-Object System.Windows.Forms.Label
 $title.AutoSize = $true
 $title.Font = New-Object System.Drawing.Font("Segoe UI",14,[System.Drawing.FontStyle]::Bold)
 $title.Location = New-Object System.Drawing.Point(120,15)
-$title.Text = "Detecting system..."
 $form.Controls.Add($title)
 
 # Status box
@@ -123,6 +106,15 @@ function Start-Install {
 
     $button.Enabled = $false
     $progress.Value = 0
+
+    # Admin check
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+
+    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        Start-Process powershell "-ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
+        exit
+    }
 
     Log "Starting driver installation..."
 

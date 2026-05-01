@@ -9,7 +9,7 @@ Go to the appropriate driver download page:
 - ⚠️ after downloading run the .exe
 ---
 ## Step 2 – Run 
-Run `install.bat`
+Run `install.bat` 
 
 - ⚠️  auto installer can be downloaded here (you need both files on a USB)
 	- [install.bat](https://raw.githubusercontent.com/skermiebroTech/my-wiki/refs/heads/main/install.bat)
