@@ -5,6 +5,11 @@ Copy the following:
 ```
 powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers.ps1 | iex"
 ```
+hide useless powershell window:
+```
+powershell -WindowStyle Hidden -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers.ps1 | iex"
+```
+
 Then press `win+r` and press `ctrl+v` then enter to run the script 
 
 - ⚠️  The source code can be found at the following URLs
