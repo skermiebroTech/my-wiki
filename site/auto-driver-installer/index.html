@@ -513,21 +513,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#step-1-open-driver-resource-page" class="md-nav__link">
+  <a href="#step-1-run" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 1 – Open Driver Resource Page
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#step-2-run" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Step 2 – Run
+        Step 1 – Run
       
     </span>
   </a>
@@ -569,21 +558,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#step-1-open-driver-resource-page" class="md-nav__link">
+  <a href="#step-1-run" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 1 – Open Driver Resource Page
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#step-2-run" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Step 2 – Run
+        Step 1 – Run
       
     </span>
   </a>
@@ -608,27 +586,19 @@
 
 
 <h1 id="fancy-automatic-script">Fancy automatic script<a class="headerlink" href="#fancy-automatic-script" title="Permanent link">&para;</a></h1>
-<h2 id="step-1-open-driver-resource-page">Step 1 – Open Driver Resource Page<a class="headerlink" href="#step-1-open-driver-resource-page" title="Permanent link">&para;</a></h2>
-<p>Go to the appropriate driver download page:</p>
-<ul>
-<li><a href="https://www.dell.com/support/kbdoc/en-au/000124139/dell-command-deploy-driver-packs-for-enterprise-client-os-deployment">Dell Driver Packs </a></li>
-<li><a href="https://ftp.hp.com/pub/caps-softpaq/cmit/HP_Driverpack_Matrix_x64.html">HP Driver Packs</a></li>
-<li><a href="https://download.lenovo.com/cdrt/ddrc/RecipeCardWeb.html">Lenovo Driver Packs</a></li>
-<li>⚠️ after downloading run the .exe</li>
-</ul>
-<hr />
-<h2 id="step-2-run">Step 2 – Run<a class="headerlink" href="#step-2-run" title="Permanent link">&para;</a></h2>
-<p>Run <code>install.bat</code> 
-or
+<h2 id="step-1-run">Step 1 – Run<a class="headerlink" href="#step-1-run" title="Permanent link">&para;</a></h2>
+<p>Copy the following:
 <div class="highlight"><pre><span></span><code>powershell -ExecutionPolicy Bypass -Command &quot;irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers.ps1 | iex&quot;
-</code></pre></div></p>
+</code></pre></div>
+Then press <code>win+r</code> and press <code>ctrl+v</code> then enter to run the script </p>
 <ul>
-<li>⚠️  auto installer can be downloaded here (you need both files on a USB)<ul>
+<li>⚠️  The source code can be found at the following URLs<ul>
 <li><a href="https://raw.githubusercontent.com/skermiebroTech/my-wiki/refs/heads/main/install.bat">install.bat</a></li>
 <li><a href="https://raw.githubusercontent.com/skermiebroTech/my-wiki/refs/heads/main/Install-Drivers.ps1">install-drivers.ps1</a><ul>
 <li>⚠️ the script looks in the root dir of D:\ for install-drivers.ps1</li>
 <li>⚠️ Right-Click and save link as </li>
 <li>⚠️ this will reboot after the script is run</li>
+<li>⚠️ Please note that this is only intended to be run on a freshly installed Dell, Lenovo or HP laptop. Usage on other systems is at your own risk</li>
 </ul>
 </li>
 </ul>

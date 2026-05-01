@@ -1,5 +1,8 @@
 # ⚡ Quick Driver Installation
-
+## Automatic one liner:
+```
+powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers.ps1 | iex"
+```
 ## Links
 
 - [Dell Driver Packs ](https://www.dell.com/support/kbdoc/en-au/000124139/dell-command-deploy-driver-packs-for-enterprise-client-os-deployment)
