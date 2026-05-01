@@ -1,4 +1,4 @@
-# Fancy automatic script
+# Fancy semi-automatic script
 
 ## Step 1 – Run 
 Copy the following:
