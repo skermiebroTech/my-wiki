@@ -10,6 +10,10 @@ Go to the appropriate driver download page:
 ---
 ## Step 2 – Run 
 Run `install.bat` 
+or
+```
+powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers.ps1 | iex"
+```
 
 - ⚠️  auto installer can be downloaded here (you need both files on a USB)
 	- [install.bat](https://raw.githubusercontent.com/skermiebroTech/my-wiki/refs/heads/main/install.bat)
