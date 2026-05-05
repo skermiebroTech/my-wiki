@@ -155,8 +155,13 @@ function Get-LenovoDirectDownloadLink {
 
     # Extract the docId from the support page URL (e.g. ds549249 from .../downloads/ds549249)
     $docId = $null
-    if ($SupportPageUrl -match '/downloads/(ds\d+)', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase) {
-        $docId = $matches[1].ToUpper()
+    if ($SupportPageUrl -match '/downloads/(ds\d+)') {
+        $docId = $Matches[1].ToUpper()
+    }
+    if (-not $docId) {
+        # Try last path segment as fallback
+        $seg = ($SupportPageUrl.TrimEnd('/') -split '/')[-1]
+        if ($seg -match '^ds\d+') { $docId = $seg.ToUpper() }
     }
     if (-not $docId) {
         Log "Could not extract docId from URL: $SupportPageUrl"
