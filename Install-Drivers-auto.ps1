@@ -1,282 +1,652 @@
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-# =========================
-# ADMIN CHECK
-# =========================
-$identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-$principal = New-Object System.Security.Principal.WindowsPrincipal($identity)
-
-if (-not $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    $scriptUrl = "https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers.ps1"
-    Start-Process powershell "-ExecutionPolicy Bypass -Command `"irm $scriptUrl | iex`"" -Verb RunAs
-    exit
-}
+# Disable sleep and display timeout (AC power only)
+powercfg /change standby-timeout-ac 0
+powercfg /change monitor-timeout-ac 0
 
 # =========================
-# STATE
-# =========================
-$global:sync = [hashtable]::Synchronized(@{})
-$global:sync.Cancel = $false
-$global:sync.LogFile = "$env:TEMP\driver_tool_v6_1_log.txt"
-
-# =========================
-# UI
+# FORM SETUP
 # =========================
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "Driver Installer Tool V6.1"
-$form.Size = New-Object System.Drawing.Size(520,340)
+$form.Text = "Driver Installer Tool"
+$form.Size = New-Object System.Drawing.Size(560, 420)
 $form.StartPosition = "CenterScreen"
 
+# Title
 $title = New-Object System.Windows.Forms.Label
 $title.AutoSize = $true
-$title.Font = New-Object System.Drawing.Font("Segoe UI",14,[System.Drawing.FontStyle]::Bold)
-$title.Location = New-Object System.Drawing.Point(120,15)
-$title.Text = "Driver Installer"
+$title.Font = New-Object System.Drawing.Font("Segoe UI", 14, [System.Drawing.FontStyle]::Bold)
+$title.Location = New-Object System.Drawing.Point(120, 15)
 $form.Controls.Add($title)
 
+# Status box
 $statusBox = New-Object System.Windows.Forms.TextBox
 $statusBox.Multiline = $true
-$statusBox.Size = New-Object System.Drawing.Size(460,140)
-$statusBox.Location = New-Object System.Drawing.Point(20,60)
+$statusBox.ScrollBars = "Vertical"
+$statusBox.Size = New-Object System.Drawing.Size(500, 220)
+$statusBox.Location = New-Object System.Drawing.Point(20, 60)
 $statusBox.ReadOnly = $true
 $form.Controls.Add($statusBox)
 
+# Progress bar
 $progress = New-Object System.Windows.Forms.ProgressBar
-$progress.Size = New-Object System.Drawing.Size(460,20)
-$progress.Location = New-Object System.Drawing.Point(20,210)
+$progress.Size = New-Object System.Drawing.Size(500, 20)
+$progress.Location = New-Object System.Drawing.Point(20, 295)
 $form.Controls.Add($progress)
 
+# Button
 $button = New-Object System.Windows.Forms.Button
 $button.Text = "Install Drivers"
-$button.Size = New-Object System.Drawing.Size(160,35)
-$button.Location = New-Object System.Drawing.Point(180,245)
+$button.Size = New-Object System.Drawing.Size(160, 35)
+$button.Location = New-Object System.Drawing.Point(195, 330)
 $form.Controls.Add($button)
 
-$cancel = New-Object System.Windows.Forms.Button
-$cancel.Text = "Cancel"
-$cancel.Size = New-Object System.Drawing.Size(160,35)
-$cancel.Location = New-Object System.Drawing.Point(20,245)
-$form.Controls.Add($cancel)
-
-$global:sync.StatusBox = $statusBox
-$global:sync.Progress = $progress
-$global:sync.Button = $button
-
 # =========================
-# LOG
+# LOG FUNCTION
 # =========================
 function Log($msg) {
-    $time = Get-Date -Format "HH:mm:ss"
-    $line = "[$time] $msg"
-
-    $statusBox.AppendText("$line`r`n")
+    $statusBox.AppendText("$msg`r`n")
     $statusBox.ScrollToCaret()
-
-    Add-Content $global:sync.LogFile $line
+    [System.Windows.Forms.Application]::DoEvents()
 }
 
 # =========================
-# CANCEL
+# SYSTEM INFO
 # =========================
-$cancel.Add_Click({
-    $global:sync.Cancel = $true
-    Log "Cancel requested..."
-})
+function Get-Model {
+    (Get-CimInstance Win32_ComputerSystem).Model.Trim()
+}
+
+function Copy-ModelToClipboard {
+    $model = Get-Model
+    try { [System.Windows.Forms.Clipboard]::SetText($model) } catch {}
+    return $model
+}
 
 # =========================
-# LENOVO ENGINE (FIXED V6.1)
+# OEM LINKS
 # =========================
-function Invoke-Lenovo($sync) {
+function Get-DriverLink($manufacturer) {
+    switch -Wildcard ($manufacturer) {
+        "*Dell*"   { return "https://www.dell.com/support/kbdoc/en-au/000124139/dell-command-deploy-driver-packs-for-enterprise-client-os-deployment" }
+        "*HP*"     { return "https://ftp.hp.com/pub/caps-softpaq/cmit/HP_Driverpack_Matrix_x64.html" }
+        "*Lenovo*" { return "https://download.lenovo.com/cdrt/ddrc/RecipeCardWeb.html" }
+        default     { return "" }
+    }
+}
 
+# =========================
+# DOWNLOADS EXE CHECK
+# =========================
+function Check-DownloadsForExe {
+    $downloads = [Environment]::GetFolderPath("UserProfile") + "\Downloads"
+    if (Test-Path $downloads) {
+        $exe = Get-ChildItem $downloads -Filter *.exe -ErrorAction SilentlyContinue |
+               Sort-Object LastWriteTime -Descending |
+               Select-Object -First 1
+        if ($exe) {
+            Log "Found EXE in Downloads: $($exe.Name)"
+            Log "Launching installer..."
+            Start-Process $exe.FullName
+            return $true
+        }
+    }
+    return $false
+}
+
+# =========================
+# LENOVO: GET MACHINE TYPE PREFIX VIA WMI
+# =========================
+function Get-LenovoMachineTypePrefix {
+    Log "Querying WMI for Lenovo machine type..."
     try {
+        $csProduct = Get-CimInstance -ClassName Win32_ComputerSystemProduct -ErrorAction Stop
+        $skuName = $csProduct.Name
+        if ($skuName -and $skuName.Trim().Length -ge 4) {
+            $prefix = $skuName.Trim().Substring(0, 4).ToUpper()
+            Log "Detected machine type: $skuName  ->  using prefix: $prefix"
+            return $prefix
+        } else {
+            Log "WMI returned an unexpected or short SKU name: '$skuName'"
+            return $null
+        }
+    } catch {
+        Log "WMI query failed: $($_.Exception.Message)"
+        return $null
+    }
+}
 
-        Log "Checking Lenovo device..."
+# =========================
+# LENOVO: FIND DIRECT DOWNLOAD LINK FROM SUPPORT PAGE
+# =========================
+function Get-LenovoDirectDownloadLink {
+    param(
+        [string]$SupportPageUrl,
+        [string]$ModelName,
+        [string]$TargetOSName,
+        [string]$LinkType = "SCCM"   # "SCCM" or "BIOS"
+    )
 
-        $cs = Get-CimInstance Win32_ComputerSystem
-        if ($cs.Manufacturer -notmatch "Lenovo") {
-            Log "Not a Lenovo device."
-            return $false
+    Log "Fetching $LinkType page: $SupportPageUrl"
+
+    $pageContent = $null
+    try {
+        $headers = @{
+            "User-Agent"      = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.81 Safari/537.36 Edg/94.0.992.50"
+            "Accept"          = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+            "Accept-Language" = "en-AU,en-US;q=0.9,en;q=0.8"
         }
 
-        $sku = (Get-CimInstance Win32_ComputerSystemProduct).IdentifyingNumber
+        $curlArgs = @(
+            "--silent", "--show-error", "--location",
+            "--max-time", "120", "--connect-timeout", "30"
+        )
+        foreach ($key in $headers.Keys) { $curlArgs += "--header", "$($key): $($headers[$key])" }
+        $curlArgs += $SupportPageUrl
 
-        if (-not $sku) {
-            Log "No SKU detected."
-            return $false
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = "curl.exe"
+        $psi.Arguments = ($curlArgs -join ' ')
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError  = $true
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow  = $true
+
+        $proc = New-Object System.Diagnostics.Process
+        $proc.StartInfo = $psi
+        $proc.Start() | Out-Null
+
+        $pageContent   = $proc.StandardOutput.ReadToEnd()
+        $stderrContent = $proc.StandardError.ReadToEnd()
+        $proc.WaitForExit(125000)
+
+        if (-not $proc.HasExited) {
+            try { $proc.Kill() } catch {}
+            Log "curl.exe timed out fetching $LinkType page."
+            return $null
         }
-
-        # =========================
-        # FIXED MACHINE TYPE (SAFE 4 CHAR)
-        # =========================
-        $cleanSku = ($sku -replace "[^0-9A-Z]", "").ToUpper()
-
-        if ($cleanSku.Length -lt 4) {
-            Log "SKU too short: $cleanSku"
-            return $false
+        if ($proc.ExitCode -ne 0) {
+            Log "curl.exe error (code $($proc.ExitCode)) for $LinkType page: $stderrContent"
+            return $null
         }
+    } catch {
+        Log "Error fetching $LinkType page: $($_.Exception.Message)"
+        return $null
+    }
 
-        $machineType = $cleanSku.Substring(0,4)
-        Log "Machine Type (first 4 chars): $machineType"
+    if (-not $pageContent) {
+        Log "Empty response from $LinkType page."
+        return $null
+    }
 
-        # =========================
-        # LENOVO JSON
-        # =========================
-        Log "Downloading Lenovo repository..."
-        $json = Invoke-WebRequest "https://download.lenovo.com/cdrt/ddrc/recipecard.json" -UseBasicParsing | ConvertFrom-Json
+    # Find candidate URLs
+    $urlRegex = '["'']https?://(?:download\.lenovo\.com|pcsupport\.lenovo\.com|download01\.lenovo\.com)[^"'' >]+\.(exe|zip|cab|bin|rom|img|fl[1-9])["'']'
+    $urlMatches = [regex]::Matches($pageContent, $urlRegex)
 
-        # =========================
-        # FIND MODEL (SAFE SEARCH)
-        # =========================
-        $modelMatch = $null
+    if ($urlMatches.Count -eq 0) {
+        Log "No direct $LinkType download links found on page."
+        return $null
+    }
 
-        foreach ($family in $json.PSObject.Properties.Name) {
-            foreach ($item in $json.$family) {
-                if ($item.types -contains $machineType) {
-                    $modelMatch = $item
+    $candidates = $urlMatches | ForEach-Object { $_.Value.Trim('"').Trim("'") } | Sort-Object -Unique
+    Log "Found $($candidates.Count) candidate $LinkType URL(s)."
+
+    $osPattern = ""
+    if ($TargetOSName -match "Windows 11") { $osPattern = "w11|win11" }
+    elseif ($TargetOSName -match "Windows 10") { $osPattern = "w10|win10" }
+
+    $modelKeywords = if ($ModelName) {
+        $ModelName -split '[\s\-]+' | Where-Object { $_.Length -gt 2 } | Select-Object -First 3
+    } else { @() }
+
+    $preferred = $null
+
+    if ($LinkType -eq "SCCM") {
+        if ($osPattern -and $modelKeywords.Count -gt 0) {
+            $preferred = $candidates | Where-Object {
+                $u = $_
+                ($u -match $osPattern) -and ($modelKeywords | Where-Object { $u -match [regex]::Escape($_) }) -and ($u -notmatch "readme")
+            } | Select-Object -First 1
+        }
+        if (-not $preferred -and $osPattern) {
+            $preferred = $candidates | Where-Object { ($_ -match $osPattern) -and ($_ -notmatch "readme") } | Select-Object -First 1
+        }
+        if (-not $preferred) {
+            $preferred = $candidates | Where-Object { ($_ -match "sccm") -and ($_ -notmatch "readme") } | Select-Object -First 1
+        }
+    } elseif ($LinkType -eq "BIOS") {
+        $preferred = $candidates | Where-Object {
+            $u = $_
+            ($u -match "\.exe$") -and (($modelKeywords | Where-Object { $u -match [regex]::Escape($_) }) -or ($u -match "bios|uefi")) -and ($u -notmatch "readme")
+        } | Select-Object -First 1
+
+        if (-not $preferred) {
+            $preferred = $candidates | Where-Object {
+                $u = $_
+                (($modelKeywords | Where-Object { $u -match [regex]::Escape($_) }) -or ($u -match "bios|uefi")) -and ($u -notmatch "readme")
+            } | Select-Object -First 1
+        }
+    }
+
+    if (-not $preferred) {
+        $preferred = $candidates | Where-Object { $_ -notmatch "readme" } | Select-Object -First 1
+    }
+
+    if ($preferred) {
+        # Unwrap any accidental ($true, url) array from PowerShell regex pipeline quirk
+        if ($preferred -is [array]) { $preferred = $preferred | Where-Object { $_ -is [string] -and $_ -match "^https?://" } | Select-Object -First 1 }
+        Log "Selected $LinkType URL: $preferred"
+        return $preferred
+    }
+
+    Log "Could not select a preferred $LinkType URL."
+    return $null
+}
+
+# =========================
+# LENOVO: FULL AUTO-DOWNLOAD FLOW
+# =========================
+function Start-LenovoDriverDownload {
+    param(
+        [string]$MachineTypePrefix,
+        [string]$TargetOS = "Windows 11",
+        [string]$ProductFamily = "ThinkPad",
+        [string]$DownloadPath = "C:\DriverPacks",
+        [string]$ExtractionPath = "C:\ExtractedDrivers"
+    )
+
+    Log "--- Lenovo Auto-Download: $ProductFamily ($MachineTypePrefix / $TargetOS) ---"
+
+    # ---- Fetch recipecard.json ----
+    $RecipeJsonUrl = "https://download.lenovo.com/cdrt/ddrc/recipecard.json"
+    Log "Fetching Lenovo recipecard.json..."
+    try {
+        $Global:ProgressPreference = 'SilentlyContinue'
+        $jsonResponse = Invoke-WebRequest -Uri $RecipeJsonUrl -UseBasicParsing -TimeoutSec 60
+        $Global:ProgressPreference = 'Continue'
+        $jsonData = $jsonResponse.Content | ConvertFrom-Json
+        Log "recipecard.json loaded OK."
+    } catch {
+        Log "Failed to fetch recipecard.json: $($_.Exception.Message)"
+        return $false
+    }
+
+    # ---- Find model ID ----
+    $modelFamilyData = $jsonData.$ProductFamily
+    if (-not $modelFamilyData) {
+        Log "Product family '$ProductFamily' not found in recipecard.json."
+        return $false
+    }
+
+    $modelId = $null; $modelName = $null
+    foreach ($entry in $modelFamilyData) {
+        if ($entry.types -is [array]) {
+            foreach ($t in $entry.types) {
+                if ($t -like "$($MachineTypePrefix)*") {
+                    $modelId   = $entry.id
+                    $modelName = $entry.name
                     break
                 }
             }
-            if ($modelMatch) { break }
         }
-
-        if (-not $modelMatch) {
-            Log "No Lenovo model match found."
-            return $false
-        }
-
-        Log "Model: $($modelMatch.name)"
-
-        # =========================
-        # AUTO OS DETECT
-        # =========================
-        $osName = if ([Environment]::OSVersion.Version.Build -ge 22000) {
-            "Windows 11"
-        } else {
-            "Windows 10"
-        }
-
-        Log "Detected OS: $osName"
-
-        $osId = ($json.OperatingSystems | Where-Object name -eq $osName).id
-
-        # =========================
-        # FIND RECIPE
-        # =========================
-        $recipe = $json.RecipeCards | Where-Object {
-            $_.modelId -eq $modelMatch.id -and $_.osId -eq $osId
-        }
-
-        if (-not $recipe) {
-            Log "No recipe found for OS."
-            return $false
-        }
-
-        # =========================
-        # SCCM PACK
-        # =========================
-        $pack = $json.SCCMPacks | Where-Object id -eq $recipe.sccmPack
-
-        if (-not $pack -or -not $pack.url) {
-            Log "No valid driver pack URL."
-            return $false
-        }
-
-        Log "Driver pack found:"
-        Log $pack.url
-
-        if ($pack.url -notmatch "^https?://") {
-            Log "Invalid URL format."
-            return $false
-        }
-
-        # =========================
-        # DOWNLOAD + RUN
-        # =========================
-        $file = "$env:TEMP\lenovo_driverpack.exe"
-
-        Log "Downloading driver pack..."
-        Invoke-WebRequest $pack.url -OutFile $file
-
-        Log "Running installer..."
-        Start-Process $file -Wait
-
-        Log "Lenovo installation complete."
-        return $true
+        if ($modelId) { break }
     }
-    catch {
-        Log "Lenovo error: $($_.Exception.Message)"
+
+    if (-not $modelId) {
+        Log "Machine type '$MachineTypePrefix' not found in '$ProductFamily'. Trying other families..."
+        foreach ($family in @("ThinkCentre","ThinkStation","IdeaPad","IdeaCentre")) {
+            $familyData = $jsonData.$family
+            if (-not $familyData) { continue }
+            foreach ($entry in $familyData) {
+                if ($entry.types -is [array]) {
+                    foreach ($t in $entry.types) {
+                        if ($t -like "$($MachineTypePrefix)*") {
+                            $modelId      = $entry.id
+                            $modelName    = $entry.name
+                            $ProductFamily = $family
+                            Log "Found in family '$family': $modelName"
+                            break
+                        }
+                    }
+                }
+                if ($modelId) { break }
+            }
+            if ($modelId) { break }
+        }
+    }
+
+    if (-not $modelId) {
+        Log "Machine type '$MachineTypePrefix' not found in any Lenovo product family."
         return $false
     }
+    Log "Model matched: $modelName (ID: $modelId)"
+
+    # ---- Find OS ID ----
+    $foundOS = $jsonData.OperatingSystems | Where-Object { $_.name -eq $TargetOS }
+    if (-not $foundOS) {
+        Log "OS '$TargetOS' not found in recipecard.json."
+        return $false
+    }
+    if ($foundOS -is [array]) { $foundOS = $foundOS[0] }
+    $osId = $foundOS.id
+    Log "OS matched: $TargetOS (ID: $osId)"
+
+    # ---- Find RecipeCard ----
+    $recipeCard = $jsonData.RecipeCards | Where-Object { $_.modelId -eq $modelId -and $_.osId -eq $osId }
+    if (-not $recipeCard) {
+        Log "No RecipeCard entry found for model '$modelName' + OS '$TargetOS'."
+        return $false
+    }
+    if ($recipeCard -is [array]) { $recipeCard = $recipeCard[0] }
+
+    $sccmPackIdRef = $recipeCard.sccmPack
+    $recipeNote    = $recipeCard.note
+    Log "SCCM Pack Ref: $sccmPackIdRef"
+
+    # ---- Extract BIOS support page from note ----
+    $biosPageUrl = $null
+    if ($recipeNote -match '\[\[.*?\|(https?://[^\]]+)\]\]') {
+        $biosPageUrl = $matches[1]
+        Log "BIOS support page found in note: $biosPageUrl"
+    }
+
+    # ---- Find SCCM pack support page ----
+    $foundSccmPack = $jsonData.SCCMPacks | Where-Object { $_.id -eq $sccmPackIdRef }
+    if (-not $foundSccmPack) {
+        Log "SCCM pack details not found for ref '$sccmPackIdRef'."
+        return $false
+    }
+    if ($foundSccmPack -is [array]) { $foundSccmPack = $foundSccmPack[0] }
+    $sccmSupportPageUrl = $foundSccmPack.url
+    Log "SCCM support page: $sccmSupportPageUrl"
+
+    # ---- Get direct download URLs ----
+    $driverPackUrl = Get-LenovoDirectDownloadLink -SupportPageUrl $sccmSupportPageUrl -ModelName $modelName -TargetOSName $TargetOS -LinkType "SCCM"
+    $biosFileUrl   = if ($biosPageUrl) {
+        Get-LenovoDirectDownloadLink -SupportPageUrl $biosPageUrl -ModelName $modelName -TargetOSName $TargetOS -LinkType "BIOS"
+    } else { $null }
+
+    # ---- Validate SCCM URL ----
+    if (-not $driverPackUrl -or $driverPackUrl -notmatch "^https?://") {
+        Log "Could not automatically find SCCM driver pack URL."
+        Log "Please visit manually: $sccmSupportPageUrl"
+        Start-Process $sccmSupportPageUrl
+        return $false
+    }
+
+    # ---- Create directories ----
+    foreach ($dir in @($DownloadPath, $ExtractionPath)) {
+        if (-not (Test-Path $dir)) { New-Item -Path $dir -ItemType Directory -Force | Out-Null }
+    }
+
+    # ---- Download SCCM driver pack ----
+    $packFileName = try { [System.IO.Path]::GetFileName(([System.Uri]$driverPackUrl).LocalPath) } catch { "sccm_driverpack.exe" }
+    $packFilePath = Join-Path $DownloadPath $packFileName
+    Log "Downloading SCCM pack: $packFileName"
+    $progress.Value = 10
+
+    try {
+        $Global:ProgressPreference = 'SilentlyContinue'
+        Invoke-WebRequest -Uri $driverPackUrl -OutFile $packFilePath `
+            -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" -ErrorAction Stop
+        $Global:ProgressPreference = 'Continue'
+        Log "Downloaded to: $packFilePath"
+    } catch {
+        $Global:ProgressPreference = 'Continue'
+        Log "SCCM download failed: $($_.Exception.Message)"
+        return $false
+    }
+
+    $progress.Value = 40
+
+    # ---- Extract SCCM driver pack ----
+    Log "Extracting drivers to: $ExtractionPath"
+    try {
+        if ($packFileName -match "\.zip$") {
+            Expand-Archive -Path $packFilePath -DestinationPath $ExtractionPath -Force -ErrorAction Stop
+            Log "ZIP extraction complete."
+        } elseif ($packFileName -match "\.exe$") {
+            $extractArgs = "/VERYSILENT /DIR=`"$($ExtractionPath.TrimEnd('\'))`" /EXTRACT=YES"
+            $proc = Start-Process -FilePath $packFilePath -ArgumentList $extractArgs -Wait -PassThru -ErrorAction Stop
+            if ($proc.ExitCode -ne 0) { Log "EXE extractor exited with code $($proc.ExitCode) (may still be OK)." }
+            else { Log "EXE extraction complete." }
+            Start-Sleep -Seconds 5
+        } elseif ($packFileName -match "\.cab$") {
+            $expandArgs = "`"$packFilePath`" -F:* `"$ExtractionPath`""
+            Start-Process -FilePath "expand.exe" -ArgumentList $expandArgs -Wait -NoNewWindow -ErrorAction Stop
+            Log "CAB extraction complete."
+        } else {
+            Log "Unsupported pack file type: $packFileName"
+        }
+    } catch {
+        Log "Extraction error: $($_.Exception.Message)"
+        return $false
+    }
+
+    $progress.Value = 60
+
+    # ---- Download BIOS (optional) ----
+    if ($biosFileUrl -and $biosFileUrl -match "^https?://") {
+        $biosFolder   = Join-Path $DownloadPath "BIOS"
+        if (-not (Test-Path $biosFolder)) { New-Item -Path $biosFolder -ItemType Directory -Force | Out-Null }
+        $biosFileName = try { [System.IO.Path]::GetFileName(([System.Uri]$biosFileUrl).LocalPath) } catch { "bios_update.exe" }
+        $biosFilePath = Join-Path $biosFolder $biosFileName
+        Log "Downloading BIOS update: $biosFileName"
+        try {
+            $Global:ProgressPreference = 'SilentlyContinue'
+            Invoke-WebRequest -Uri $biosFileUrl -OutFile $biosFilePath `
+                -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" -ErrorAction Stop
+            $Global:ProgressPreference = 'Continue'
+            Log "BIOS downloaded to: $biosFilePath"
+            Log "NOTE: BIOS flashing must be done manually."
+        } catch {
+            $Global:ProgressPreference = 'Continue'
+            Log "BIOS download failed: $($_.Exception.Message)"
+        }
+    } elseif ($biosPageUrl) {
+        Log "BIOS page found but no direct link resolved. Visit manually: $biosPageUrl"
+    }
+
+    # ---- Return extraction path so the INF installer loop can pick up from here ----
+    return $ExtractionPath
 }
 
 # =========================
-# MAIN RUNSPACE
+# LENOVO: DETECT PRODUCT FAMILY
 # =========================
-$button.Add_Click({
+function Get-LenovoProductFamily($model) {
+    if ($model -match "ThinkPad")    { return "ThinkPad" }
+    if ($model -match "ThinkCentre") { return "ThinkCentre" }
+    if ($model -match "ThinkStation") { return "ThinkStation" }
+    if ($model -match "IdeaPad")     { return "IdeaPad" }
+    if ($model -match "IdeaCentre")  { return "IdeaCentre" }
+    return "ThinkPad"   # safest default for business fleet
+}
+
+# =========================
+# MAIN INSTALL FUNCTION
+# =========================
+function Start-Install {
 
     $button.Enabled = $false
     $progress.Value = 0
-    $global:sync.Cancel = $false
 
-    $ps = [PowerShell]::Create()
+    # Admin check
+    $identity  = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        Start-Process powershell "-ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
+        exit
+    }
 
-    $ps.AddScript({
+    Log "Starting driver installation..."
 
-        param($sync)
+    $manufacturer = (Get-CimInstance Win32_ComputerSystem).Manufacturer
+    $model        = Copy-ModelToClipboard
 
-        function Log($m) {
-            $sync.StatusBox.Invoke([action]{
-                $sync.StatusBox.AppendText("$m`r`n")
-                $sync.StatusBox.ScrollToCaret()
-            })
-        }
+    Log "Manufacturer: $manufacturer"
+    Log "Model: $model (copied to clipboard)"
+    $title.Text = "Driver Installer - $model"
 
-        function Set($v) {
-            $sync.Progress.Invoke([action]{ $sync.Progress.Value = $v })
-        }
+    # =========================
+    # DRIVER PATHS
+    # =========================
+    $paths     = @()
+    $driverURL = Get-DriverLink $manufacturer
 
-        Log "Starting driver install..."
-        Set 10
+    if ($manufacturer -match "Dell") {
+        $paths += "C:\Users\Administrator\"
+    } elseif ($manufacturer -match "HP") {
+        $paths += "C:\SWSetup\"
+    } elseif ($manufacturer -match "Lenovo") {
+        $paths += "C:\DRIVERS\", "C:\ExtractedDrivers\"
+    } else {
+        $paths += "C:\Drivers\", "C:\SWSetup\", "C:\DRIVERS\", "C:\Users\Administrator\"
+    }
 
-        # LOCAL DRIVERS
-        $paths = @("C:\Drivers","C:\SWSetup","C:\DRIVERS")
+    # =========================
+    # FIND DRIVER FOLDERS (INF scan)
+    # =========================
+    $validPaths  = @()
+    $driverFound = $false
 
-        foreach ($p in $paths) {
-            if (Test-Path $p) {
-                Get-ChildItem $p -Recurse -Filter *.inf -ErrorAction SilentlyContinue | ForEach-Object {
-                    Log "Installing $($_.Name)"
-                    pnputil /add-driver $_.FullName /install | Out-Null
+    foreach ($base in $paths) {
+        if (Test-Path $base) {
+            $dirs = Get-ChildItem $base -Directory -ErrorAction SilentlyContinue
+            foreach ($dir in $dirs) {
+                if (Get-ChildItem $dir.FullName -Recurse -Filter *.inf -ErrorAction SilentlyContinue) {
+                    $validPaths += $dir.FullName
+                    $driverFound = $true
                 }
             }
         }
+    }
 
-        Set 60
+    # =========================
+    # LENOVO: AUTO-DOWNLOAD IF NO LOCAL DRIVERS
+    # =========================
+    if (-not $driverFound -and $manufacturer -match "Lenovo") {
 
-        # LENOVO
-        $ok = Invoke-Lenovo $sync
+        Log "No local Lenovo drivers found. Attempting auto-download from Lenovo recipecard..."
 
-        if ($ok) {
-            Set 100
-            Log "Done."
-            $sync.Button.Invoke([action]{ $sync.Button.Enabled = $true })
+        $machineTypePrefix = Get-LenovoMachineTypePrefix
+        if (-not $machineTypePrefix) {
+            Log "Could not detect machine type. Falling back to OEM page."
+        } else {
+            $productFamily  = Get-LenovoProductFamily $model
+            $extractionPath = Start-LenovoDriverDownload `
+                -MachineTypePrefix $machineTypePrefix `
+                -TargetOS "Windows 11" `
+                -ProductFamily $productFamily `
+                -DownloadPath "C:\DriverPacks" `
+                -ExtractionPath "C:\ExtractedDrivers"
+
+            if ($extractionPath -and (Test-Path $extractionPath)) {
+                # Re-scan extraction path for INFs
+                $dirs = Get-ChildItem $extractionPath -Directory -ErrorAction SilentlyContinue
+                foreach ($dir in $dirs) {
+                    if (Get-ChildItem $dir.FullName -Recurse -Filter *.inf -ErrorAction SilentlyContinue) {
+                        $validPaths += $dir.FullName
+                        $driverFound = $true
+                    }
+                }
+                # Also check extraction root itself
+                if (Get-ChildItem $extractionPath -Recurse -Filter *.inf -ErrorAction SilentlyContinue) {
+                    if ($validPaths -notcontains $extractionPath) {
+                        $validPaths += $extractionPath
+                        $driverFound = $true
+                    }
+                }
+            }
+        }
+    }
+
+    # =========================
+    # PRIORITY 1: DRIVERS FOUND — INSTALL INFs
+    # =========================
+    if ($driverFound) {
+
+        $allDrivers = @()
+        foreach ($path in $validPaths) {
+            $allDrivers += Get-ChildItem $path -Recurse -Filter *.inf -ErrorAction SilentlyContinue
+        }
+
+        $total   = $allDrivers.Count
+        $current = 0
+
+        if ($total -eq 0) {
+            Log "No driver files found after scan."
+            $button.Enabled = $true
             return
         }
 
-        # FALLBACK
-        Log "Opening OEM page..."
-        Start-Process "https://pcsupport.lenovo.com"
+        Log "Found $total driver file(s). Starting installation..."
 
-        Set 100
-        $sync.Button.Invoke([action]{ $sync.Button.Enabled = $true })
+        foreach ($driver in $allDrivers) {
+            $current++
+            $percent        = [math]::Round(($current / $total) * 100)
+            $progress.Value = [math]::Min($percent, 99)   # keep 100 for completion
 
-    }).AddArgument($global:sync)
+            Log "[$current/$total] Installing: $($driver.Name)"
+            $output = pnputil /add-driver "`"$($driver.FullName)`"" /install 2>&1
+            foreach ($line in $output) { Log $line }
+            [System.Windows.Forms.Application]::DoEvents()
+        }
 
-    $ps.BeginInvoke()
+        $progress.Value = 100
+        Log "Installation complete!"
+
+        $result = [System.Windows.Forms.MessageBox]::Show(
+            "Drivers installed for $model.`nReboot now?",
+            "Complete",
+            "YesNo"
+        )
+        if ($result -eq "Yes") { Restart-Computer -Force }
+        else { $button.Enabled = $true }
+        return
+    }
+
+    # =========================
+    # PRIORITY 2: DOWNLOADS EXE
+    # =========================
+    Log "No drivers found. Checking Downloads folder..."
+    $exeFound = Check-DownloadsForExe
+    if ($exeFound) {
+        Log "Installer launched from Downloads."
+        $button.Enabled = $true
+        return
+    }
+
+    # =========================
+    # PRIORITY 3: OEM PAGE
+    # =========================
+    Log "No drivers or installers found. Opening OEM support page..."
+    if ($driverURL) { Start-Process $driverURL }
+
+    [System.Windows.Forms.MessageBox]::Show(
+        "No drivers or installers found.`nModel: $model",
+        "Nothing Found"
+    )
+    $button.Enabled = $true
+}
+
+# =========================
+# BUTTON
+# =========================
+$button.Add_Click({ Start-Install })
+
+# =========================
+# AUTO START
+# =========================
+$form.Add_Shown({
+    $form.Activate()
+    Start-Sleep -Milliseconds 300
+    Log "Running startup checks..."
+    Start-Install
 })
 
 # =========================
-# SHOW
+# RUN
 # =========================
-$form.Add_Shown({ $form.Activate() })
 [void]$form.ShowDialog()
