@@ -5,9 +5,9 @@ Add-Type -AssemblyName System.Drawing
 # ADMIN CHECK
 # =========================
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-$principal = New-Object Security.Principal.WindowsPrincipal($identity)
+$principal = New-Object System.Security.Principal.WindowsPrincipal($identity)
 
-if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+if (-not $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)) {
     $scriptUrl = "https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers.ps1"
     Start-Process powershell "-ExecutionPolicy Bypass -Command `"irm $scriptUrl | iex`"" -Verb RunAs
     exit
@@ -18,13 +18,13 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 # =========================
 $global:sync = [hashtable]::Synchronized(@{})
 $global:sync.Cancel = $false
-$global:sync.LogFile = "$env:TEMP\driver_tool_log.txt"
+$global:sync.LogFile = "$env:TEMP\driver_tool_v5_log.txt"
 
 # =========================
 # UI
 # =========================
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "Driver Installer Tool"
+$form.Text = "Driver Installer Tool V5"
 $form.Size = New-Object System.Drawing.Size(520,340)
 $form.StartPosition = "CenterScreen"
 
@@ -40,7 +40,7 @@ $statusBox.Multiline = $true
 $statusBox.Size = New-Object System.Drawing.Size(460,140)
 $statusBox.Location = New-Object System.Drawing.Point(20,60)
 $statusBox.ReadOnly = $true
-$statusBox.Text = "Ready to install drivers..."
+$statusBox.Text = "Ready... Click Install to begin.`r`n"
 $form.Controls.Add($statusBox)
 
 $progress = New-Object System.Windows.Forms.ProgressBar
@@ -65,7 +65,7 @@ $global:sync.Progress = $progress
 $global:sync.Button = $button
 
 # =========================
-# LOGGING
+# LOG
 # =========================
 function Log($msg) {
     $time = Get-Date -Format "HH:mm:ss"
@@ -86,19 +86,17 @@ $cancel.Add_Click({
 })
 
 # =========================
-# LENOVO ENGINE (FIXED)
+# LENOVO ENGINE (FIXED V5)
 # =========================
 function Invoke-LenovoDriverPack($sync) {
 
-    Log "Checking Lenovo system..."
-    $sync.Progress.Invoke([action]{ $sync.Progress.Value = 20 })
-
     try {
 
-        $sku = (Get-CimInstance Win32_ComputerSystemProduct).IdentifyingNumber
+        Log "Checking Lenovo system..."
 
+        $sku = (Get-CimInstance Win32_ComputerSystemProduct).IdentifyingNumber
         if (-not $sku) {
-            Log "No Lenovo SKU found."
+            Log "No Lenovo SKU detected."
             return $false
         }
 
@@ -107,7 +105,6 @@ function Invoke-LenovoDriverPack($sync) {
 
         $json = Invoke-WebRequest "https://download.lenovo.com/cdrt/ddrc/recipecard.json" -UseBasicParsing | ConvertFrom-Json
 
-        # detect family dynamically
         $familyKey = $json.PSObject.Properties.Name | Where-Object { $_ -match "Think" } | Select-Object -First 1
         $family = $json.$familyKey
 
@@ -118,21 +115,33 @@ function Invoke-LenovoDriverPack($sync) {
             return $false
         }
 
-        $osId = ($json.OperatingSystems | Where-Object name -eq "Windows 11").id
+        # =========================
+        # AUTO OS DETECTION (FIX)
+        # =========================
+        $osName = if ([Environment]::OSVersion.Version.Build -ge 22000) {
+            "Windows 11"
+        } else {
+            "Windows 10"
+        }
 
+        Log "Detected OS: $osName"
+
+        $osId = ($json.OperatingSystems | Where-Object name -eq $osName).id
+
+        # find recipe
         $recipe = $json.RecipeCards | Where-Object {
             $_.modelId -eq $model.id -and $_.osId -eq $osId
         }
 
         if (-not $recipe) {
-            Log "No Lenovo recipe found."
+            Log "No Lenovo recipe found for $osName."
             return $false
         }
 
         $pack = $json.SCCMPacks | Where-Object id -eq $recipe.sccmPack
 
         if (-not $pack.url) {
-            Log "No driver pack URL found."
+            Log "No Lenovo driver pack URL found."
             return $false
         }
 
@@ -143,10 +152,10 @@ function Invoke-LenovoDriverPack($sync) {
 
         Invoke-WebRequest $pack.url -OutFile $file
 
-        Log "Running Lenovo installer..."
+        Log "Running Lenovo driver pack..."
         Start-Process $file -Wait
 
-        Log "Lenovo driver install complete."
+        Log "Lenovo driver installation complete."
         return $true
     }
     catch {
@@ -207,8 +216,8 @@ $button.Add_Click({
         if ($drivers.Count -gt 0) {
 
             Log "Found $($drivers.Count) local drivers."
-            $i = 0
 
+            $i = 0
             foreach ($d in $drivers) {
 
                 if (CheckCancel) { return }
@@ -225,7 +234,7 @@ $button.Add_Click({
         }
 
         # =========================
-        # LENOVO (FIXED CALL)
+        # LENOVO (FIXED)
         # =========================
         if (CheckCancel) { return }
 
@@ -235,16 +244,16 @@ $button.Add_Click({
 
             SetProgress 60
 
-            $result = Invoke-LenovoDriverPack $sync
+            $ok = Invoke-LenovoDriverPack $sync
 
-            if ($result) {
+            if ($ok) {
                 SetProgress 100
-                Log "Lenovo path complete."
+                Log "Lenovo completed."
                 $sync.Button.Invoke([action]{ $sync.Button.Enabled = $true })
                 return
             }
 
-            Log "Lenovo failed or not applicable."
+            Log "Lenovo not applicable or failed."
         }
 
         # =========================
