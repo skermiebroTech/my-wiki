@@ -243,7 +243,7 @@ $soundCheck.Text          = " Sound FX"
 $soundCheck.Font          = New-Object System.Drawing.Font("Segoe UI", 8)
 $soundCheck.ForeColor     = [System.Drawing.Color]::Gray
 $soundCheck.AutoSize      = $true
-$soundCheck.Checked       = $false
+$soundCheck.Checked       = $true
 $soundCheck.Location      = New-Object System.Drawing.Point(20, 497)
 $soundCheck.UseCompatibleTextRendering = $false
 $soundCheck.Add_CheckedChanged({
