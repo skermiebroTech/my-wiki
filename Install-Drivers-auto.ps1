@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.3.3
+# Version: 1.3.4
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -12,7 +12,7 @@
 # extracts to C:\DRIVERS, installs all INFs via pnputil.
 # =============================================================
 
-$ScriptVersion  = "1.3.3"
+$ScriptVersion  = "1.3.4"
 $SpinnerFrames  = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex        = 0
 $CancelRequested     = $false
@@ -450,7 +450,7 @@ function Get-PackFileCount {
 function Invoke-CurlDownload {
     param(
         [string]$Url,
-        [string]$OutFile,
+        [string]$OutFile
     )
 
     $fileName = [System.IO.Path]::GetFileName($OutFile)
