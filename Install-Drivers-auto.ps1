@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.3.1
+# Version: 1.3.2
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -12,7 +12,7 @@
 # extracts to C:\DRIVERS, installs all INFs via pnputil.
 # =============================================================
 
-$ScriptVersion  = "1.3.1"
+$ScriptVersion  = "1.3.2"
 $SpinnerFrames  = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex        = 0
 $CancelRequested     = $false
@@ -493,10 +493,10 @@ function Invoke-CurlDownload {
         if ($sz -gt $lastSize) { $stall = 0; $lastSize = $sz } else { $stall++ }
         $mbDone = [math]::Round($sz / 1MB, 1)
 
-        # Speed: bytes gained in last 700ms tick -> MB/s
-        $speedMBs = [math]::Round(($sz - $prevSize) / 1MB / 0.7, 1)
+        # Speed: bytes gained in last 700ms tick -> Mbps (megabits per second)
+        $speedMbps = [math]::Round(($sz - $prevSize) * 8 / 1MB / 0.7, 1)
         $prevSize = $sz
-        $speedStr = if ($speedMBs -gt 0) { "  $speedMBs MB/s" } else { "" }
+        $speedStr = if ($speedMbps -gt 0) { "  $speedMbps Mbps" } else { "" }
 
         if ($totalMB -gt 0) {
             $pct = [math]::Min([int](($sz / $totalBytes) * 100), 99)
