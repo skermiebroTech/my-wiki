@@ -995,13 +995,13 @@
 </div>
 <hr />
 <h3 id="3-download">3. Download<a class="headerlink" href="#3-download" title="Permanent link">&para;</a></h3>
-<p>The driver pack is downloaded using the inbox <code>curl.exe</code> (available on Windows 10 1803+). A silent <code>HEAD</code> request is made first to get the file size, enabling a true percentage progress bar.</p>
+<p>The driver pack is downloaded using the inbox <code>curl.exe</code> (available on Windows 10 1803+).</p>
 <p>The download bar shows live progress:</p>
-<div class="highlight"><pre><span></span><code>1 234.5 MB / 1 954.5 MB  (63%)  376 Mbps
+<div class="highlight"><pre><span></span><code>1 234.5 MB Received 376 Mbps
 </code></pre></div>
 <div class="admonition info">
 <p class="admonition-title">Large packs</p>
-<p>Lenovo SCCM packs are typically ~2 GB. At 100 Mbps this takes around 2–3 minutes. Downloads have no time limit and will automatically resume if the connection drops, retrying up to 10 times before giving up.</p>
+<p>SCCM packs are typically ~2 GB. At 100 Mbps this takes around 2–3 minutes. Downloads have no time limit and will automatically resume if the connection drops, retrying up to 10 times before giving up.</p>
 </div>
 <hr />
 <h3 id="4-extract">4. Extract<a class="headerlink" href="#4-extract" title="Permanent link">&para;</a></h3>
@@ -1174,10 +1174,14 @@
 <ul>
 <li>Windows 10 1803 or later (for inbox <code>curl.exe</code>)</li>
 <li>Administrator privileges (auto-elevated on launch)</li>
-<li>Audit Mode</li>
 <li>Internet access to OEM CDN/FTP servers</li>
 <li>~3–5 GB free disk space in <code>C:\DRIVERS\</code> for download + extraction</li>
 </ul>
+<div class="admonition warning">
+<p class="admonition-title">Use outside of audit mode is currently untested</p>
+</div>
+<hr />
+<p>Author: Joel Skerman | Date: 06 May 2026</p>
 
 
 
