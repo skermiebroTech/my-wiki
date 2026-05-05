@@ -322,39 +322,41 @@ function Start-LenovoDriverDownload {
     }
     Log "Model matched: $modelName (ID: $modelId)"
 
+    # All IDs in recipecard.json are strings — cast everything for safe comparison
+    $modelIdStr = [string]$modelId
+
     # ---- Find OS ID ----
     $foundOS = $jsonData.OperatingSystems | Where-Object { $_.name -eq $TargetOS }
     if ($foundOS -is [array]) { $foundOS = $foundOS[0] }
-    $osId = if ($foundOS) { $foundOS.id } else { $null }
+    $osIdStr = if ($foundOS) { [string]$foundOS.id } else { $null }
 
     # ---- Find RecipeCard (with fallback to most recent available OS) ----
     $recipeCard = $null
 
-    if ($osId) {
-        $recipeCard = $jsonData.RecipeCards | Where-Object { $_.modelId -eq $modelId -and $_.osId -eq $osId }
+    if ($osIdStr) {
+        $recipeCard = $jsonData.RecipeCards | Where-Object { [string]$_.modelId -eq $modelIdStr -and [string]$_.osId -eq $osIdStr }
         if ($recipeCard -is [array]) { $recipeCard = $recipeCard[0] }
     }
 
     if (-not $recipeCard) {
-        if ($osId) {
+        if ($osIdStr) {
             Log "No RecipeCard for '$modelName' + '$TargetOS'. Falling back to most recent available OS..."
         } else {
             Log "OS '$TargetOS' not found in recipecard.json. Finding most recent available OS for this model..."
         }
 
-        # Get all RecipeCards for this model, then join to OS names and pick the highest OS ID
-        $allModelCards = $jsonData.RecipeCards | Where-Object { $_.modelId -eq $modelId }
+        # Get all RecipeCards for this model, sort by osId descending — higher ID = newer OS
+        $allModelCards = $jsonData.RecipeCards | Where-Object { [string]$_.modelId -eq $modelIdStr }
         if ($allModelCards) {
-            # Sort by osId descending — higher IDs are newer OSes in Lenovo's JSON
-            $bestCard = $allModelCards | Sort-Object { [int]$_.osId } -Descending | Select-Object -First 1
-            $fallbackOS = $jsonData.OperatingSystems | Where-Object { $_.id -eq $bestCard.osId }
+            $bestCard   = $allModelCards | Sort-Object { [int][string]$_.osId } -Descending | Select-Object -First 1
+            $fallbackOS = $jsonData.OperatingSystems | Where-Object { [string]$_.id -eq [string]$bestCard.osId }
             if ($fallbackOS -is [array]) { $fallbackOS = $fallbackOS[0] }
             $recipeCard = $bestCard
-            $osId       = $bestCard.osId
-            Log "Falling back to: $($fallbackOS.name) (OS ID: $osId)"
+            $osIdStr    = [string]$bestCard.osId
+            Log "Falling back to: $($fallbackOS.name) (OS ID: $osIdStr)"
         }
     } else {
-        Log "OS matched: $TargetOS (ID: $osId)"
+        Log "OS matched: $TargetOS (ID: $osIdStr)"
     }
 
     if (-not $recipeCard) {
@@ -362,7 +364,7 @@ function Start-LenovoDriverDownload {
         return $false
     }
 
-    $sccmPackIdRef = $recipeCard.sccmPack
+    $sccmPackIdRef = [string]$recipeCard.sccmPack
     $recipeNote    = $recipeCard.note
     Log "SCCM Pack Ref: $sccmPackIdRef"
 
@@ -374,7 +376,7 @@ function Start-LenovoDriverDownload {
     }
 
     # ---- Find SCCM pack support page ----
-    $foundSccmPack = $jsonData.SCCMPacks | Where-Object { $_.id -eq $sccmPackIdRef }
+    $foundSccmPack = $jsonData.SCCMPacks | Where-Object { [string]$_.id -eq $sccmPackIdRef }
     if (-not $foundSccmPack) {
         Log "SCCM pack details not found for ref '$sccmPackIdRef'."
         return $false
