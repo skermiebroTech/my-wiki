@@ -168,15 +168,17 @@ function Get-LenovoDirectDownloadLink {
         return $null
     }
 
-    Log "Querying Lenovo driver API for ${docId}..."
-    SetStage "Querying Lenovo driver API (${docId})..."
+    Log "Querying Lenovo driver API for ${docIdLower}..."
+    SetStage "Querying Lenovo driver API (${docIdLower})..."
 
     # Try multiple API endpoint variants — Lenovo's API is region-sensitive
+    # Lenovo API requires lowercase docId - uppercase returns body:null
+    $docIdLower = $docId.ToLower()
     $apiUrls = @(
-        "https://pcsupport.lenovo.com/us/en/api/v4/downloads/drivers?docId=$docId",
-        "https://pcsupport.lenovo.com/au/en/api/v4/downloads/drivers?docId=$docId",
-        "https://pcsupport.lenovo.com/gb/en/api/v4/downloads/drivers?docId=$docId",
-        "https://supportapi.lenovo.com/v4/downloads/drivers?docId=$docId"
+        "https://pcsupport.lenovo.com/us/en/api/v4/downloads/drivers?docId=${docIdLower}",
+        "https://pcsupport.lenovo.com/au/en/api/v4/downloads/drivers?docId=${docIdLower}",
+        "https://pcsupport.lenovo.com/gb/en/api/v4/downloads/drivers?docId=${docIdLower}",
+        "https://pcsupport.lenovo.com/jp/en/api/v4/downloads/drivers?docId=${docIdLower}"
     )
 
     $jsonText = $null
@@ -216,7 +218,7 @@ function Get-LenovoDirectDownloadLink {
     }
 
     if (-not $jsonText -or $jsonText.Length -lt 10) {
-        Log "All API endpoints failed for ${docId} — trying direct URL regex from support page..."
+        Log "All API endpoints failed for ${docIdLower} — trying direct URL regex from support page..."
         # Emergency fallback: use known Lenovo download URL pattern from recipecard version
         return $null
     }
@@ -224,7 +226,7 @@ function Get-LenovoDirectDownloadLink {
     try {
         $apiData = $jsonText | ConvertFrom-Json
     } catch {
-        Log "Failed to parse API JSON for ${docId}: $($_.Exception.Message)"
+        Log "Failed to parse API JSON for ${docIdLower}: $($_.Exception.Message)"
         $urlPat = '"URL"\s*:\s*"(https?://download\.lenovo\.com/[^"]+\.(?:exe|zip|cab))"'
         $m = [regex]::Match($jsonText, $urlPat)
         if ($m.Success) { $url = $m.Groups[1].Value; Log "Regex fallback URL: ${url}"; return $url }
@@ -236,7 +238,7 @@ function Get-LenovoDirectDownloadLink {
     try { $files = $apiData.body.DriverDetails.Files } catch {}
     if (-not $files) { try { $files = $apiData.Files } catch {} }
     if (-not $files -or $files.Count -eq 0) {
-        Log "No files in API response for ${docId}. Raw: $($jsonText.Substring(0, [Math]::Min(300,$jsonText.Length)))"
+        Log "No files in API response for ${docIdLower}. Raw: $($jsonText.Substring(0, [Math]::Min(300,$jsonText.Length)))"
         return $null
     }
 
