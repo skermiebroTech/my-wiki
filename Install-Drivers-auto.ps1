@@ -739,19 +739,39 @@ function Start-DellDriverInstall {
         return $false
     }
 
-    # Build SKU candidate list
-    $skuCandidates = @()
-    if ($sysId) {
-        $skuCandidates += $sysId
-        $skuCandidates += $sysId.TrimStart('0')
-        $skuCandidates += $sysId.ToUpper()
-        $skuCandidates += ('0x' + $sysId)
-        $skuCandidates = $skuCandidates | Select-Object -Unique
-    }
+    # Detect OS to prefer Win11 vs Win10 driver pack when both exist
+    $osBuild = 0
+    $isWin11 = $false
+    try {
+        $osBuild = [int](Get-CimInstance Win32_OperatingSystem).BuildNumber
+        $isWin11 = $osBuild -ge 22000
+        Log "OS Build: $osBuild  ($(if ($isWin11) {'Win11'} else {'Win10'}))"
+    } catch {}
 
-    # Search catalog using local-name() to avoid namespace issues
-    $packNode = $null
+    # The catalog XML structure (confirmed from live catalog):
+    #   <SoftwareComponent path="FOLDER.../filename.EXE" ...>
+    #     <Name><Display lang="en">..Driver Pack..</Display></Name>
+    #     <SupportedSystems>
+    #       <Brand key="4" prefix="LAT">
+    #         <Model systemID="0B0B"><Display>Latitude-7430</Display></Model>
+    #         <Model systemID="0B0C"><Display>Latitude-7430</Display></Model>
+    #       </Brand>
+    #     </SupportedSystems>
+    #   </SoftwareComponent>
+    #
+    # The systemID attribute is on <Model> nodes — NOT a child element called <SystemID>.
+    # SystemSKUNumber from WMI ("0B0B") matches systemID directly (uppercase hex).
+    # Driver packs are identified by display name containing "Driver Pack" AND
+    # packageType of "LWXP" (32/64) or "LW64".
+
+    $sysIdUpper = if ($sysId) { $sysId.ToUpper().TrimStart() } else { "" }
+    Log "Searching catalog for systemID='$sysIdUpper'..."
+
+    # Collect all driver pack candidates that match this system ID
+    # then pick the best one for the detected OS
+    $candidates = @()
     foreach ($comp in $cat.SelectNodes("//*[local-name()='SoftwareComponent']")) {
+        # Must be a driver pack by name
         $dispName = ""
         try {
             $dispName = $comp.SelectSingleNode(
@@ -759,24 +779,59 @@ function Start-DellDriverInstall {
         } catch {}
         if ($dispName -notmatch "(?i)driver\s*pack") { continue }
 
-        if ($skuCandidates.Count -gt 0) {
+        # systemID is an attribute on <Model> nodes inside <SupportedSystems>
+        if ($sysIdUpper) {
             $matched = $false
-            foreach ($sNode in $comp.SelectNodes(".//*[local-name()='SystemID']")) {
-                $val = $sNode.InnerText.Trim()
-                foreach ($candidate in $skuCandidates) {
-                    if ($val -ieq $candidate) { $matched = $true; break }
+            foreach ($modelNode in $comp.SelectNodes(
+                ".//*[local-name()='SupportedSystems']//*[local-name()='Model']")) {
+                if ($modelNode.GetAttribute("systemID") -ieq $sysIdUpper) {
+                    $matched = $true; break
                 }
-                if ($matched) { break }
             }
             if (-not $matched) { continue }
         }
-        $packNode = $comp
-        break
+
+        # Check which OS this pack targets via <SupportedOperatingSystems>
+        $supportsWin11 = $false
+        $supportsWin10 = $false
+        foreach ($osNode in $comp.SelectNodes(
+            ".//*[local-name()='SupportedOperatingSystems']//*[local-name()='OperatingSystem']")) {
+            $osDisplay = ""
+            try { $osDisplay = $osNode.SelectSingleNode("*[local-name()='Display']").InnerText } catch {}
+            if ($osDisplay -match "(?i)windows 11") { $supportsWin11 = $true }
+            if ($osDisplay -match "(?i)windows 10") { $supportsWin10 = $true }
+        }
+
+        $candidates += [PSCustomObject]@{
+            Node         = $comp
+            DisplayName  = $dispName
+            SupportsW11  = $supportsWin11
+            SupportsW10  = $supportsWin10
+        }
+        Log "  Candidate: $dispName  [W11=$supportsWin11 W10=$supportsWin10]"
     }
 
-    # Fallback: model name substring match
+    # Pick best candidate: prefer OS match, fall back to any match
+    $packNode = $null
+    if ($candidates.Count -gt 0) {
+        if ($isWin11) {
+            $best = $candidates | Where-Object { $_.SupportsW11 } | Select-Object -First 1
+            if ($best) { $packNode = $best.Node } else {
+                Log "  No Win11-specific pack — falling back to first available."
+                $packNode = $candidates[0].Node
+            }
+        } else {
+            $best = $candidates | Where-Object { $_.SupportsW10 } | Select-Object -First 1
+            if ($best) { $packNode = $best.Node } else {
+                Log "  No Win10-specific pack — falling back to first available."
+                $packNode = $candidates[0].Node
+            }
+        }
+    }
+
+    # Fallback: if systemID didn't match (e.g. WMI returned empty), try display name
     if (-not $packNode -and $ModelName) {
-        Log "SKU match failed — trying model name fallback..."
+        Log "systemID match found nothing — trying model name fallback..."
         $modelShort = ($ModelName -replace '[^a-zA-Z0-9]', '').ToLower()
         foreach ($comp in $cat.SelectNodes("//*[local-name()='SoftwareComponent']")) {
             $dispName = ""
@@ -787,6 +842,7 @@ function Start-DellDriverInstall {
             if ($dispName -notmatch "(?i)driver\s*pack") { continue }
             $dispClean = ($dispName -replace '[^a-zA-Z0-9]', '').ToLower()
             if ($dispClean -like "*$modelShort*" -or $modelShort -like "*$dispClean*") {
+                Log "  Name fallback matched: $dispName"
                 $packNode = $comp
                 break
             }
@@ -794,13 +850,20 @@ function Start-DellDriverInstall {
     }
 
     if (-not $packNode) {
-        Log "No driver pack found for SKU '$sysId'."
+        Log "No driver pack found for systemID='$sysIdUpper' / model='$ModelName'."
         Log "Opening Dell support page..."
         Start-Process "https://www.dell.com/support/home/en-us/product-support/servicetag/$serviceTag/drivers"
         return $false
     }
 
-    # 'path' attribute holds the relative URL path on downloads.dell.com
+    $selectedName = ""
+    try {
+        $selectedName = $packNode.SelectSingleNode(
+            "*[local-name()='Name']/*[local-name()='Display']").InnerText
+    } catch {}
+    Log "Selected driver pack: $selectedName"
+
+    # 'path' attribute on <SoftwareComponent> is the relative download path
     $packPath = $packNode.GetAttribute("path")
     if (-not $packPath) {
         Log "Driver pack node missing 'path' attribute — unexpected catalog format."
