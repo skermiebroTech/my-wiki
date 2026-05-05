@@ -6,6 +6,12 @@ powercfg /change standby-timeout-ac 0
 powercfg /change monitor-timeout-ac 0
 
 # =========================
+# LOG FILE SETUP
+# =========================
+$LogFile = Join-Path ([Environment]::GetFolderPath("UserProfile")) ("Downloads\DriverInstaller_" + (Get-Date -Format 'yyyyMMdd_HHmmss') + ".log")
+New-Item -ItemType File -Path $LogFile -Force | Out-Null
+
+# =========================
 # FORM SETUP
 # =========================
 $form = New-Object System.Windows.Forms.Form
@@ -46,8 +52,11 @@ $form.Controls.Add($button)
 # LOG FUNCTION
 # =========================
 function Log($msg) {
-    $statusBox.AppendText("$msg`r`n")
+    $timestamp = Get-Date -Format 'HH:mm:ss'
+    $line = "[$timestamp] $msg"
+    $statusBox.AppendText("$line`r`n")
     $statusBox.ScrollToCaret()
+    Add-Content -Path $LogFile -Value $line -Encoding UTF8
     [System.Windows.Forms.Application]::DoEvents()
 }
 
@@ -392,6 +401,7 @@ function Start-LenovoDriverDownload {
     } else { $null }
 
     # ---- Validate SCCM URL ----
+    Log "DEBUG: SCCM URL resolved: $driverPackUrl"
     if (-not $driverPackUrl -or $driverPackUrl -notmatch "^https?://") {
         Log "Could not automatically find SCCM driver pack URL."
         Log "Please visit manually: $sccmSupportPageUrl"
@@ -411,14 +421,49 @@ function Start-LenovoDriverDownload {
     $progress.Value = 10
 
     try {
-        $Global:ProgressPreference = 'SilentlyContinue'
-        Invoke-WebRequest -Uri $driverPackUrl -OutFile $packFilePath `
-            -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" -ErrorAction Stop
-        $Global:ProgressPreference = 'Continue'
-        Log "Downloaded to: $packFilePath"
+        Log "Download starting — this may take several minutes for a large pack..."
+        $curlDlArgs = "--location --show-error --fail --max-time 600 --connect-timeout 30 " +
+                      "--user-agent `"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36`" " +
+                      "--output `"$packFilePath`" `"$driverPackUrl`""
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = "curl.exe"
+        $psi.Arguments = $curlDlArgs
+        $psi.RedirectStandardError = $true
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow = $true
+        $dlProc = New-Object System.Diagnostics.Process
+        $dlProc.StartInfo = $psi
+        $dlProc.Start() | Out-Null
+
+        # Poll file size to animate progress bar between 10-39%
+        $lastSize = 0; $stall = 0; $progress.Value = 10
+        while (-not $dlProc.HasExited) {
+            Start-Sleep -Milliseconds 800
+            $fileSize = if (Test-Path $packFilePath) { (Get-Item $packFilePath).Length } else { 0 }
+            if ($fileSize -gt $lastSize) { $lastSize = $fileSize; $stall = 0 } else { $stall++ }
+            $mbDone = [math]::Round($fileSize / 1MB, 1)
+            Log "Downloading... $mbDone MB received"
+            $cur = $progress.Value
+            $progress.Value = if ($cur -ge 39) { 10 } else { $cur + 1 }
+            [System.Windows.Forms.Application]::DoEvents()
+            if ($stall -gt 75) { Log "WARNING: Download stalled for 60s — killing and aborting."; $dlProc.Kill(); break }
+        }
+
+        $curlStderr = $dlProc.StandardError.ReadToEnd()
+        if ($dlProc.ExitCode -ne 0) {
+            Log "curl.exe download failed (exit code $($dlProc.ExitCode))"
+            Log "curl stderr: $curlStderr"
+            return $false
+        }
+        if (-not (Test-Path $packFilePath) -or (Get-Item $packFilePath).Length -eq 0) {
+            Log "Download finished but output file is missing or empty."
+            Log "curl stderr: $curlStderr"
+            return $false
+        }
+        $finalMB = [math]::Round((Get-Item $packFilePath).Length / 1MB, 1)
+        Log "Download complete: $packFilePath ($finalMB MB)"
     } catch {
-        $Global:ProgressPreference = 'Continue'
-        Log "SCCM download failed: $($_.Exception.Message)"
+        Log "SCCM download exception: $($_.Exception.Message)"
         return $false
     }
 
@@ -458,15 +503,20 @@ function Start-LenovoDriverDownload {
         $biosFilePath = Join-Path $biosFolder $biosFileName
         Log "Downloading BIOS update: $biosFileName"
         try {
-            $Global:ProgressPreference = 'SilentlyContinue'
-            Invoke-WebRequest -Uri $biosFileUrl -OutFile $biosFilePath `
-                -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" -ErrorAction Stop
-            $Global:ProgressPreference = 'Continue'
-            Log "BIOS downloaded to: $biosFilePath"
-            Log "NOTE: BIOS flashing must be done manually."
+            Log "Downloading BIOS update..."
+            $biosCurlArgs = "--location --show-error --fail --max-time 300 --connect-timeout 30 " +
+                            "--user-agent `"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36`" " +
+                            "--output `"$biosFilePath`" `"$biosFileUrl`""
+            $biosProc = Start-Process -FilePath "curl.exe" -ArgumentList $biosCurlArgs -Wait -PassThru -NoNewWindow -RedirectStandardError "$env:TEMP\bios_curl_err.txt"
+            if ($biosProc.ExitCode -ne 0) {
+                $biosErr = if (Test-Path "$env:TEMP\bios_curl_err.txt") { Get-Content "$env:TEMP\bios_curl_err.txt" -Raw } else { "no stderr" }
+                Log "BIOS download failed (exit $($biosProc.ExitCode)): $biosErr"
+            } else {
+                Log "BIOS downloaded to: $biosFilePath"
+                Log "NOTE: BIOS flashing must be done manually — do NOT run automatically."
+            }
         } catch {
-            $Global:ProgressPreference = 'Continue'
-            Log "BIOS download failed: $($_.Exception.Message)"
+            Log "BIOS download exception: $($_.Exception.Message)"
         }
     } elseif ($biosPageUrl) {
         Log "BIOS page found but no direct link resolved. Visit manually: $biosPageUrl"
@@ -505,6 +555,7 @@ function Start-Install {
     }
 
     Log "Starting driver installation..."
+    Log "Log file: $LogFile"
 
     $manufacturer = (Get-CimInstance Win32_ComputerSystem).Manufacturer
     $model        = Copy-ModelToClipboard
