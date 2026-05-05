@@ -684,7 +684,6 @@ function Start-DellDriverInstall {
     SetExtract  -Pct 0 -Label "Waiting..."
 
     $serviceTag = $null
-    $sysId      = $null
     try {
         $serviceTag = (Get-CimInstance Win32_BIOS).SerialNumber.Trim()
         Log "Service Tag: $serviceTag"
@@ -696,182 +695,157 @@ function Start-DellDriverInstall {
         Log "Invalid Service Tag."
         return $false
     }
-    try {
-        $sysId = (Get-CimInstance Win32_ComputerSystem).SystemSKUNumber.Trim()
-        Log "System SKU: $sysId"
-    } catch {
-        Log "Could not read SystemSKUNumber: $($_.Exception.Message)"
-    }
 
-    # Download Dell catalog CAB
-    Log "Downloading Dell CatalogPC.cab..."
-    $catalogCab = Join-Path $env:TEMP "DellCatalogPC.cab"
-    $catalogXml = Join-Path $env:TEMP "CatalogPC.xml"
+    # Detect OS build for Win10/Win11 pack preference
+    $isWin11 = $false
+    try {
+        $isWin11 = [int](Get-CimInstance Win32_OperatingSystem).BuildNumber -ge 22000
+        Log "OS: $(if ($isWin11) {'Windows 11'} else {'Windows 10'})"
+    } catch {}
+
+    # ---------------------------------------------------------------
+    # Dell publishes TWO catalogs:
+    #   CatalogPC.cab       - all individual drivers/firmware (NOT driver packs)
+    #   DriverPackCatalog.cab - driver packs only (what we need)
+    #
+    # DriverPackCatalog.xml structure (confirmed by Dell docs):
+    #   <DriverPackManifest>
+    #     <DriverPackage path="FOLDER.../Model-Platform_Win11_x.x_Axx.exe" ...>
+    #       <Name><Display lang="en">Latitude 7430 Windows 11 Driver Pack</Display></Name>
+    #       <SupportedSystems>
+    #         <Brand key="4" prefix="LAT">
+    #           <Model systemID="0B0B" name="Latitude 7430">
+    #             <Display>Latitude-7430</Display>
+    #           </Model>
+    #         </Brand>
+    #       </SupportedSystems>
+    #       <SupportedOperatingSystems>
+    #         <OperatingSystem osCode="W21P4" ...>
+    #           <Display>Windows 11</Display>
+    #         </OperatingSystem>
+    #       </SupportedOperatingSystems>
+    #     </DriverPackage>
+    #   </DriverPackManifest>
+    #
+    # Match strategy (per Dell docs): use the 'name' attribute on <Model> nodes
+    # since systemID is not readily accessible via WMI. The 'name' value matches
+    # the WMI Win32_ComputerSystem.Model string (e.g. "Latitude 7430").
+    # ---------------------------------------------------------------
+
+    Log "Downloading Dell DriverPackCatalog.cab..."
+    $catalogCab = Join-Path $env:TEMP "DellDriverPackCatalog.cab"
+    $catalogXml = Join-Path $env:TEMP "DriverPackCatalog.xml"
     Remove-Item $catalogCab -EA SilentlyContinue
     Remove-Item $catalogXml -EA SilentlyContinue
 
-    if (-not (Invoke-CurlDownload -Url "https://downloads.dell.com/catalog/CatalogPC.cab" -OutFile $catalogCab)) {
-        Log "Failed to download Dell catalog."
+    if (-not (Invoke-CurlDownload -Url "https://downloads.dell.com/catalog/DriverPackCatalog.cab" -OutFile $catalogCab)) {
+        Log "Failed to download Dell DriverPackCatalog."
         return $false
     }
     if (Test-Cancelled) { return $false }
     SetProgress 15
 
-    # Extract catalog — check explicitly
-    Log "Extracting Dell catalog CAB..."
-    SetExtract -Pct 10 -Label "Extracting Dell catalog..."
+    Log "Extracting Dell DriverPackCatalog CAB..."
+    SetExtract -Pct 10 -Label "Extracting catalog..."
     $expandOut = & expand.exe "`"$catalogCab`"" "`"$catalogXml`"" 2>&1
     Log "  expand.exe: $expandOut"
     if (-not (Test-Path $catalogXml) -or (Get-Item $catalogXml).Length -eq 0) {
-        Log "Dell catalog CAB extraction failed."
+        Log "DriverPackCatalog CAB extraction failed."
         return $false
     }
     SetExtract -Pct 30 -Label "Catalog extracted OK"
     SetProgress 20
 
-    # Parse catalog
-    Log "Parsing Dell catalog..."
+    Log "Parsing DriverPackCatalog..."
     try {
         $rawXml   = [System.IO.File]::ReadAllText($catalogXml).TrimStart([char]0xFEFF)
         [xml]$cat = $rawXml
     } catch {
-        Log "Failed to parse Dell catalog XML: $($_.Exception.Message)"
+        Log "Failed to parse DriverPackCatalog XML: $($_.Exception.Message)"
         return $false
     }
 
-    # Detect OS to prefer Win11 vs Win10 driver pack when both exist
-    $osBuild = 0
-    $isWin11 = $false
-    try {
-        $osBuild = [int](Get-CimInstance Win32_OperatingSystem).BuildNumber
-        $isWin11 = $osBuild -ge 22000
-        Log "OS Build: $osBuild  ($(if ($isWin11) {'Win11'} else {'Win10'}))"
-    } catch {}
+    # Build model name search tokens from WMI model string
+    # WMI: "Latitude 7430" — the catalog 'name' attribute uses the same value
+    # Also try stripping the family prefix in case of slight differences
+    $searchNames = @()
+    if ($ModelName) {
+        $searchNames += $ModelName                                      # "Latitude 7430"
+        $searchNames += ($ModelName -replace '\s+Notebook.*$','')       # strip "Notebook PC" suffix
+        $searchNames += ($ModelName -replace '^Dell\s+','')             # strip leading "Dell "
+        $searchNames = $searchNames | Select-Object -Unique | Where-Object { $_.Length -gt 3 }
+    }
+    Log "Searching catalog — model tokens: $($searchNames -join ' | ')"
 
-    # The catalog XML structure (confirmed from live catalog):
-    #   <SoftwareComponent path="FOLDER.../filename.EXE" ...>
-    #     <Name><Display lang="en">..Driver Pack..</Display></Name>
-    #     <SupportedSystems>
-    #       <Brand key="4" prefix="LAT">
-    #         <Model systemID="0B0B"><Display>Latitude-7430</Display></Model>
-    #         <Model systemID="0B0C"><Display>Latitude-7430</Display></Model>
-    #       </Brand>
-    #     </SupportedSystems>
-    #   </SoftwareComponent>
-    #
-    # The systemID attribute is on <Model> nodes — NOT a child element called <SystemID>.
-    # SystemSKUNumber from WMI ("0B0B") matches systemID directly (uppercase hex).
-    # Driver packs are identified by display name containing "Driver Pack" AND
-    # packageType of "LWXP" (32/64) or "LW64".
-
-    $sysIdUpper = if ($sysId) { $sysId.ToUpper().TrimStart() } else { "" }
-    Log "Searching catalog for systemID='$sysIdUpper'..."
-
-    # Collect all driver pack candidates that match this system ID
-    # then pick the best one for the detected OS
+    # Collect all matching driver pack entries
+    # Root element is <DriverPackManifest>, packages are <DriverPackage> nodes
     $candidates = @()
-    foreach ($comp in $cat.SelectNodes("//*[local-name()='SoftwareComponent']")) {
-        # Must be a driver pack by name
-        $dispName = ""
-        try {
-            $dispName = $comp.SelectSingleNode(
-                "*[local-name()='Name']/*[local-name()='Display']").InnerText
-        } catch {}
-        if ($dispName -notmatch "(?i)driver\s*pack") { continue }
+    foreach ($pkg in $cat.SelectNodes("//*[local-name()='DriverPackage']")) {
 
-        # systemID is an attribute on <Model> nodes inside <SupportedSystems>
-        if ($sysIdUpper) {
-            $matched = $false
-            foreach ($modelNode in $comp.SelectNodes(
-                ".//*[local-name()='SupportedSystems']//*[local-name()='Model']")) {
-                if ($modelNode.GetAttribute("systemID") -ieq $sysIdUpper) {
-                    $matched = $true; break
+        # Match on 'name' attribute of <Model> nodes (Dell-recommended method)
+        $modelMatched = $false
+        foreach ($modelNode in $pkg.SelectNodes(".//*[local-name()='Model']")) {
+            $nameAttr = $modelNode.GetAttribute("name")
+            foreach ($tok in $searchNames) {
+                if ($nameAttr -ieq $tok -or $nameAttr -like "*$tok*" -or $tok -like "*$nameAttr*") {
+                    $modelMatched = $true; break
                 }
             }
-            if (-not $matched) { continue }
+            if ($modelMatched) { break }
         }
+        if (-not $modelMatched) { continue }
 
-        # Check which OS this pack targets via <SupportedOperatingSystems>
+        # Determine OS support from <SupportedOperatingSystems>
         $supportsWin11 = $false
         $supportsWin10 = $false
-        foreach ($osNode in $comp.SelectNodes(
-            ".//*[local-name()='SupportedOperatingSystems']//*[local-name()='OperatingSystem']")) {
-            $osDisplay = ""
-            try { $osDisplay = $osNode.SelectSingleNode("*[local-name()='Display']").InnerText } catch {}
-            if ($osDisplay -match "(?i)windows 11") { $supportsWin11 = $true }
-            if ($osDisplay -match "(?i)windows 10") { $supportsWin10 = $true }
+        foreach ($osNode in $pkg.SelectNodes(".//*[local-name()='OperatingSystem']")) {
+            $osDisp = ""
+            try { $osDisp = $osNode.SelectSingleNode("*[local-name()='Display']").InnerText } catch {}
+            if ($osDisp -match "(?i)windows 11") { $supportsWin11 = $true }
+            if ($osDisp -match "(?i)windows 10") { $supportsWin10 = $true }
         }
+
+        $pkgName = ""
+        try { $pkgName = $pkg.SelectSingleNode("*[local-name()='Name']/*[local-name()='Display']").InnerText } catch {}
+        $pkgPath = $pkg.GetAttribute("path")
 
         $candidates += [PSCustomObject]@{
-            Node         = $comp
-            DisplayName  = $dispName
-            SupportsW11  = $supportsWin11
-            SupportsW10  = $supportsWin10
+            Path        = $pkgPath
+            DisplayName = $pkgName
+            Win11       = $supportsWin11
+            Win10       = $supportsWin10
         }
-        Log "  Candidate: $dispName  [W11=$supportsWin11 W10=$supportsWin10]"
+        Log "  Candidate: $pkgName  [W11=$supportsWin11 W10=$supportsWin10]"
     }
 
-    # Pick best candidate: prefer OS match, fall back to any match
-    $packNode = $null
-    if ($candidates.Count -gt 0) {
-        if ($isWin11) {
-            $best = $candidates | Where-Object { $_.SupportsW11 } | Select-Object -First 1
-            if ($best) { $packNode = $best.Node } else {
-                Log "  No Win11-specific pack — falling back to first available."
-                $packNode = $candidates[0].Node
-            }
-        } else {
-            $best = $candidates | Where-Object { $_.SupportsW10 } | Select-Object -First 1
-            if ($best) { $packNode = $best.Node } else {
-                Log "  No Win10-specific pack — falling back to first available."
-                $packNode = $candidates[0].Node
-            }
-        }
-    }
-
-    # Fallback: if systemID didn't match (e.g. WMI returned empty), try display name
-    if (-not $packNode -and $ModelName) {
-        Log "systemID match found nothing — trying model name fallback..."
-        $modelShort = ($ModelName -replace '[^a-zA-Z0-9]', '').ToLower()
-        foreach ($comp in $cat.SelectNodes("//*[local-name()='SoftwareComponent']")) {
-            $dispName = ""
-            try {
-                $dispName = $comp.SelectSingleNode(
-                    "*[local-name()='Name']/*[local-name()='Display']").InnerText
-            } catch {}
-            if ($dispName -notmatch "(?i)driver\s*pack") { continue }
-            $dispClean = ($dispName -replace '[^a-zA-Z0-9]', '').ToLower()
-            if ($dispClean -like "*$modelShort*" -or $modelShort -like "*$dispClean*") {
-                Log "  Name fallback matched: $dispName"
-                $packNode = $comp
-                break
-            }
-        }
-    }
-
-    if (-not $packNode) {
-        Log "No driver pack found for systemID='$sysIdUpper' / model='$ModelName'."
+    if ($candidates.Count -eq 0) {
+        Log "No driver pack found in DriverPackCatalog for '$ModelName'."
         Log "Opening Dell support page..."
         Start-Process "https://www.dell.com/support/home/en-us/product-support/servicetag/$serviceTag/drivers"
         return $false
     }
 
-    $selectedName = ""
-    try {
-        $selectedName = $packNode.SelectSingleNode(
-            "*[local-name()='Name']/*[local-name()='Display']").InnerText
-    } catch {}
-    Log "Selected driver pack: $selectedName"
+    # Pick best match for detected OS
+    $chosen = $null
+    if ($isWin11) {
+        $chosen = $candidates | Where-Object { $_.Win11 } | Select-Object -First 1
+        if (-not $chosen) { $chosen = $candidates[0] }
+    } else {
+        $chosen = $candidates | Where-Object { $_.Win10 } | Select-Object -First 1
+        if (-not $chosen) { $chosen = $candidates[0] }
+    }
 
-    # 'path' attribute on <SoftwareComponent> is the relative download path
-    $packPath = $packNode.GetAttribute("path")
+    Log "Selected: $($chosen.DisplayName)"
+    $packPath = $chosen.Path
     if (-not $packPath) {
-        Log "Driver pack node missing 'path' attribute — unexpected catalog format."
+        Log "Driver pack entry has no path — unexpected catalog format."
         return $false
     }
+
     $packUrl  = "https://downloads.dell.com/$packPath"
     $packFile = Join-Path $DriverRoot ([System.IO.Path]::GetFileName($packPath))
-    Log "Driver pack: $([System.IO.Path]::GetFileName($packPath))"
+    Log "Pack file: $([System.IO.Path]::GetFileName($packPath))"
+    Log "Pack URL:  $packUrl"
     SetProgress 25
 
     if (-not (Test-Path $DriverRoot)) {
