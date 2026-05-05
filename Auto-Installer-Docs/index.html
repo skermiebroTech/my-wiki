@@ -950,8 +950,8 @@
 </code></pre></div>
 <div class="admonition tip">
 <p class="admonition-title">Audit Mode</p>
-</div>
 <p>This command works without any prior software installation. <code>irm</code> (Invoke-RestMethod) fetches the script directly from GitHub and <code>iex</code> runs it in memory — no file is saved to disk first.</p>
+</div>
 <hr />
 <h2 id="how-it-works">How It Works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h2>
 <p>The script follows the same four-stage pipeline regardless of manufacturer:</p>
@@ -981,7 +981,9 @@
 <p>Downloads <code>CatalogPC.cab</code> from Dell's CDN and extracts it:</p>
 <div class="highlight"><pre><span></span><code>https://downloads.dell.com/catalog/CatalogPC.cab
 </code></pre></div>
-<div class="admonition info"></div>
+<div class="admonition info">
+<p class="admonition-title">Service Tags</p>
+</div>
 <p>The Service Tag is read from <code>Win32_BIOS.SerialNumber</code> and the System SKU from <code>Win32_ComputerSystem.SystemSKUNumber</code>. The catalog is searched for a <code>SoftwareComponent</code> with "Driver Pack" in its display name matching the detected SKU.</p>
 <h4 id="hp">HP<a class="headerlink" href="#hp" title="Permanent link">&para;</a></h4>
 <p>Downloads a platform-specific catalog cab using the BaseBoard product ID:</p>
