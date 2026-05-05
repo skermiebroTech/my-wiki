@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "docs/index.md",
+                "file": "docs/todo.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "index"
+              "title": "todo"
             }
           }
         ]
@@ -185,6 +185,9 @@
   },
   "active": "c699af67c7046aa9",
   "lastOpenFiles": [
+    "Install-Drivers-debug.ps1",
+    "Install-Drivers-auto copy 2.ps1",
+    "docs/index.md",
     "Install-Drivers-auto copy.ps1",
     "site/search/search_index.json",
     "site/search",
@@ -194,11 +197,8 @@
     "site/todo/index.html",
     "site/todo",
     "site/driver-installation/index.html",
-    "site/driver-installation",
-    "site/cab-file-driver-installation/index.html",
     "docs/todo.md",
     "docs/auto-driver-installer.md.old.md",
-    "docs/index.md",
     "docs/Auto-Installer-Docs.md",
     "docs/cab-file-driver-installation.md",
     "docs/driver-installation.md",
