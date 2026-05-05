@@ -674,20 +674,6 @@ function Start-PackExtraction {
 }
 
 # =========================
-# HP SoftPaq URL builder
-# HP stores EXEs at: https://ftp.hp.com/pub/softpaq/sp{low}-{high}/{spNum}.exe
-# Bucket size = 500, e.g. sp171622 -> sp171501-172000
-# =========================
-function Get-HpSoftpaqUrl {
-    param([string]$SpNum)
-    # Strip any leading "sp" prefix and extract digits
-    $digits = $SpNum -replace '[^0-9]', ''
-    $low    = ([math]::Floor([int]$digits / 500) * 500) + 1
-    $high   = $low + 499
-    return "https://ftp.hp.com/pub/softpaq/sp${low}-${high}/sp${digits}.exe"
-}
-
-# =========================
 # DELL
 # =========================
 function Start-DellDriverInstall {
@@ -846,127 +832,152 @@ function Start-DellDriverInstall {
 
 # =========================
 # HP
-# Strategy:
-#   1. Try imagepal/ref/{id}/{id}.cab  (newer models)
-#   2. Try imagepal/{id}/{id}.cab      (older models)
-#   3. Parse XML for a SoftPaq entry whose Category contains "Driver Pack"
-#   4. Extract SoftPaq number and build EXE URL via Get-HpSoftpaqUrl
+# Strategy: download the HP Driver Pack Matrix HTML page (the authoritative
+# source HP actually maintains), locate the row matching this machine's model
+# name, and pick the best SoftPaq EXE URL for the detected OS version.
+#
+# The matrix table structure (from ftp.hp.com/pub/caps-softpaq/cmit/HP_Driverpack_Matrix_x64.html):
+#   - Each <tr> starts with a cell listing one or more model names
+#   - Subsequent cells contain either "-" or an <a href="...spNNNNN.exe"> link
+#   - Column order (left to right) is newest OS to oldest OS
+#
+# We download the raw HTML, find the table row(s) whose model cell contains
+# our model string, then walk across the columns preferring the best OS match.
 # =========================
 function Start-HpDriverInstall {
-    param([string]$DriverRoot)
+    param([string]$DriverRoot, [string]$ModelName)
 
     Log "=== HP: Starting automated driver install ==="
     SetDownload -Pct 0 -Label "Waiting..."
     SetExtract  -Pct 0 -Label "Waiting..."
 
-    $platformId = $null
+    # Detect OS build to prefer the right column
+    $osBuild   = $null
+    $isWin11   = $false
     try {
-        $platformId = (Get-CimInstance Win32_BaseBoard).Product.Trim()
-        Log "HP Platform ID: $platformId"
+        $osBuild = [int](Get-CimInstance Win32_OperatingSystem).BuildNumber
+        $isWin11 = $osBuild -ge 22000
+        Log "OS Build: $osBuild  ($(if ($isWin11) {'Win11'} else {'Win10'}))"
     } catch {
-        Log "Could not read HP platform ID: $($_.Exception.Message)"
-        return $false
-    }
-    if (-not $platformId) {
-        Log "Empty HP platform ID."
-        return $false
+        Log "Could not read OS build: $($_.Exception.Message)"
     }
 
-    $catalogUrls = @(
-        "https://ftp.hp.com/pub/caps-softpaq/cmit/imagepal/ref/$platformId/$platformId.cab",
-        "https://ftp.hp.com/pub/caps-softpaq/cmit/imagepal/$platformId/$platformId.cab"
-    )
+    # Download the Driver Pack Matrix HTML — this is the page HP maintains with
+    # every supported model and direct .exe links, so it's always up to date.
+    $matrixUrl  = "https://ftp.hp.com/pub/caps-softpaq/cmit/HP_Driverpack_Matrix_x64.html"
+    $matrixFile = Join-Path $env:TEMP "HP_DPMatrix.html"
+    Remove-Item $matrixFile -EA SilentlyContinue
 
+    Log "Downloading HP Driver Pack Matrix..."
+    SetExtract -Pct 5 -Label "Downloading matrix page..."
+    if (-not (Invoke-CurlDownload -Url $matrixUrl -OutFile $matrixFile)) {
+        Log "Failed to download HP Driver Pack Matrix."
+        Start-Process $matrixUrl
+        return $false
+    }
+    if (Test-Cancelled) { return $false }
+
+    $matrixHtml = [System.IO.File]::ReadAllText($matrixFile)
+    Log "  Matrix HTML: $([math]::Round($matrixHtml.Length/1KB)) KB"
+    SetExtract -Pct 20 -Label "Parsing matrix..."
+    SetProgress 20
+
+    # Build search tokens from the model name.
+    # e.g. "HP ProBook 430 G8 Notebook PC" -> try progressively shorter substrings
+    # so we can still match if HP abbreviates the name in the table.
+    $searchTokens = @()
+    if ($ModelName) {
+        # Remove "HP " prefix since it appears on every row and would match everything
+        $stripped = $ModelName -replace '(?i)^HP\s+', ''
+        $searchTokens += $stripped                                    # "ProBook 430 G8 Notebook PC"
+        $searchTokens += ($stripped -replace '\s+Notebook.*$', '')   # "ProBook 430 G8"
+        $searchTokens += ($stripped -replace '\s+PC.*$',       '')   # may trim further
+        $searchTokens = $searchTokens | Select-Object -Unique | Where-Object { $_.Length -gt 4 }
+    }
+    Log "Search tokens: $($searchTokens -join ' | ')"
+
+    # Parse table rows with a regex — we need the raw HTML cells, not markdown.
+    # Pattern: find <tr>...</tr> blocks, split into <td>/<th> cells, check first
+    # cell for a model name match, then scan remaining cells for .exe hrefs.
     $packUrl   = $null
     $packSpNum = $null
 
-    foreach ($catUrl in $catalogUrls) {
-        Log "Trying HP catalog: $catUrl"
-        $hpCab = Join-Path $env:TEMP "HP_${platformId}.cab"
-        $hpXml = Join-Path $env:TEMP "HP_${platformId}.xml"
-        Remove-Item $hpCab -EA SilentlyContinue
-        Remove-Item $hpXml -EA SilentlyContinue
+    # Normalise line endings and collapse whitespace inside tags for easier regex
+    $flat = $matrixHtml -replace "`r`n|`r|`n", " " -replace "\s{2,}", " "
 
-        if (-not (Invoke-CurlDownload -Url $catUrl -OutFile $hpCab)) {
-            Log "  Catalog download failed — trying next."
+    # Extract all <tr>...</tr> blocks
+    $rows = [regex]::Matches($flat, '(?i)<tr[^>]*>(.*?)</tr>')
+
+    foreach ($row in $rows) {
+        $rowHtml = $row.Groups[1].Value
+
+        # Split into cells
+        $cells = [regex]::Matches($rowHtml, '(?i)<t[dh][^>]*>(.*?)</t[dh]>')
+        if ($cells.Count -lt 2) { continue }
+
+        # First cell = model name(s) — strip all tags to get plain text
+        $modelCell = [regex]::Replace($cells[0].Groups[1].Value, '<[^>]+>', ' ')
+        $modelCell = [System.Net.WebUtility]::HtmlDecode($modelCell) -replace '\s+', ' '
+
+        # Check if any of our search tokens appear in this cell
+        $matched = $false
+        foreach ($tok in $searchTokens) {
+            if ($modelCell -match [regex]::Escape($tok)) { $matched = $true; break }
+        }
+        if (-not $matched) { continue }
+
+        Log "  Matched matrix row: $($modelCell.Trim() -replace '\s+',' ')"
+
+        # Collect all spNNNNN.exe hrefs from this row in column order (left = newest OS)
+        $allLinks = [regex]::Matches($rowHtml, '(?i)href="([^"]*sp\d+\.exe)"')
+        if ($allLinks.Count -eq 0) {
+            Log "  Row matched but contains no .exe links — skipping."
             continue
         }
 
-        Log "  Extracting HP catalog CAB..."
-        $expandOut = & expand.exe "`"$hpCab`"" "`"$hpXml`"" 2>&1
-        Log "  expand.exe: $expandOut"
-        if (-not (Test-Path $hpXml) -or (Get-Item $hpXml).Length -eq 0) {
-            Log "  CAB extraction failed — trying next."
-            continue
+        # All links are valid candidates. We want the newest (leftmost = index 0).
+        # But we do a light preference: if Win11 pick first link, if Win10 skip
+        # pure Win11-only links by checking the tooltip text for "Windows 10".
+        # In practice for most models the same pack covers both, so just take first.
+        $bestUrl = $allLinks[0].Groups[1].Value
+        if (-not $bestUrl.StartsWith("http")) {
+            $bestUrl = "https://ftp.hp.com$bestUrl"
         }
 
-        try {
-            $rawXml     = [System.IO.File]::ReadAllText($hpXml).TrimStart([char]0xFEFF)
-            [xml]$hpCat = $rawXml
-        } catch {
-            Log "  XML parse failed: $($_.Exception.Message)"
-            continue
-        }
-
-        # HP platform XML nodes can be <SoftPaq> or <UpdateInfo> depending on schema version.
-        # Category text examples: "Driver Pack", "Manageability - Driver Pack"
-        $foundNode = $null
-        foreach ($node in $hpCat.SelectNodes(
-            "//*[local-name()='SoftPaq' or local-name()='UpdateInfo']")) {
-            $catText = ""
-            try {
-                $catText = $node.SelectSingleNode("*[local-name()='Category']").InnerText
-            } catch {}
-            if ($catText -notmatch "(?i)driver\s*pack") { continue }
-            $foundNode = $node
-            break
-        }
-
-        if (-not $foundNode) {
-            Log "  No driver pack entry in this catalog — trying next."
-            continue
-        }
-
-        # Extract the SoftPaq number from child elements or attributes
-        $spNum = $null
-        foreach ($field in @("SoftPaqNum","Id","Number","SPNumber")) {
-            try {
-                $val = $foundNode.SelectSingleNode("*[local-name()='$field']").InnerText.Trim()
-                if ($val -match '(?i)^sp(\d+)$') { $spNum = "sp$($Matches[1])"; break }
-                if ($val -match '^\d+$')          { $spNum = "sp$val";            break }
-            } catch {}
-        }
-        if (-not $spNum) {
-            # Try the node's own 'id' or 'number' attribute
-            foreach ($attr in @("id","number","softpaqnum")) {
-                $val = $foundNode.GetAttribute($attr)
-                if ($val -match '(?i)^sp(\d+)$') { $spNum = "sp$($Matches[1])"; break }
-                if ($val -match '^\d+$')          { $spNum = "sp$val";            break }
+        # If the machine is Win10 and the first link's tooltip only mentions Win11,
+        # walk forward to find a Win10-labelled link.
+        if (-not $isWin11) {
+            foreach ($lm in $allLinks) {
+                $href = $lm.Groups[1].Value
+                if (-not $href.StartsWith("http")) { $href = "https://ftp.hp.com$href" }
+                # The title attribute of the surrounding <a> tag has the version tooltip
+                $aTag = [regex]::Match($rowHtml, "(?i)<a[^>]+href=""[^""]*$([regex]::Escape([System.IO.Path]::GetFileName($href)))[^""]*""[^>]*>")
+                $title = if ($aTag.Success) { $aTag.Value } else { "" }
+                # Accept if title is blank (we can't tell) or explicitly mentions Win10
+                if ($title -eq "" -or $title -match "(?i)windows 10") {
+                    $bestUrl = $href
+                    break
+                }
             }
         }
 
-        if (-not $spNum) {
-            Log "  Could not determine SoftPaq number."
-            continue
-        }
-
-        $packSpNum = $spNum
-        $packUrl   = Get-HpSoftpaqUrl -SpNum $packSpNum
-        Log "  Found driver pack: $packSpNum"
-        Log "  Download URL: $packUrl"
+        $packUrl   = $bestUrl
+        $packSpNum = [regex]::Match($packUrl, '(?i)(sp\d+)\.exe').Groups[1].Value
+        Log "  Selected SoftPaq: $packSpNum"
+        Log "  URL: $packUrl"
         break
     }
 
     if (Test-Cancelled) { return $false }
 
     if (-not $packUrl) {
-        Log "All HP catalog sources exhausted for platform '$platformId'."
-        Log "Opening HP Driver Pack Matrix..."
-        Start-Process "https://ftp.hp.com/pub/caps-softpaq/cmit/HP_Driverpack_Matrix_x64.html"
+        Log "Model '$ModelName' not found in HP Driver Pack Matrix."
+        Log "Opening HP Driver Pack Matrix for manual selection..."
+        Start-Process $matrixUrl
         return $false
     }
 
-    SetExtract  -Pct 40 -Label "Catalog OK — $packSpNum"
+    SetExtract  -Pct 40 -Label "Matrix OK — $packSpNum"
     SetProgress 25
 
     if (-not (Test-Path $DriverRoot)) {
@@ -1358,7 +1369,7 @@ function Start-Install {
         $success = Start-DellDriverInstall -DriverRoot $driverRoot -ModelName $model
     } elseif ($manufacturer -match "HP|Hewlett") {
         if (-not (Assert-Curl)) { Set-ButtonIdle; return }
-        $success = Start-HpDriverInstall -DriverRoot $driverRoot
+        $success = Start-HpDriverInstall -DriverRoot $driverRoot -ModelName $model
     } elseif ($manufacturer -match "Lenovo") {
         if (-not (Assert-Curl)) { Set-ButtonIdle; return }
         $success = Start-LenovoDriverInstall -DriverRoot $driverRoot
