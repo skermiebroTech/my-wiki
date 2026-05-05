@@ -324,21 +324,43 @@ function Start-LenovoDriverDownload {
 
     # ---- Find OS ID ----
     $foundOS = $jsonData.OperatingSystems | Where-Object { $_.name -eq $TargetOS }
-    if (-not $foundOS) {
-        Log "OS '$TargetOS' not found in recipecard.json."
-        return $false
-    }
     if ($foundOS -is [array]) { $foundOS = $foundOS[0] }
-    $osId = $foundOS.id
-    Log "OS matched: $TargetOS (ID: $osId)"
+    $osId = if ($foundOS) { $foundOS.id } else { $null }
 
-    # ---- Find RecipeCard ----
-    $recipeCard = $jsonData.RecipeCards | Where-Object { $_.modelId -eq $modelId -and $_.osId -eq $osId }
+    # ---- Find RecipeCard (with fallback to most recent available OS) ----
+    $recipeCard = $null
+
+    if ($osId) {
+        $recipeCard = $jsonData.RecipeCards | Where-Object { $_.modelId -eq $modelId -and $_.osId -eq $osId }
+        if ($recipeCard -is [array]) { $recipeCard = $recipeCard[0] }
+    }
+
     if (-not $recipeCard) {
-        Log "No RecipeCard entry found for model '$modelName' + OS '$TargetOS'."
+        if ($osId) {
+            Log "No RecipeCard for '$modelName' + '$TargetOS'. Falling back to most recent available OS..."
+        } else {
+            Log "OS '$TargetOS' not found in recipecard.json. Finding most recent available OS for this model..."
+        }
+
+        # Get all RecipeCards for this model, then join to OS names and pick the highest OS ID
+        $allModelCards = $jsonData.RecipeCards | Where-Object { $_.modelId -eq $modelId }
+        if ($allModelCards) {
+            # Sort by osId descending — higher IDs are newer OSes in Lenovo's JSON
+            $bestCard = $allModelCards | Sort-Object { [int]$_.osId } -Descending | Select-Object -First 1
+            $fallbackOS = $jsonData.OperatingSystems | Where-Object { $_.id -eq $bestCard.osId }
+            if ($fallbackOS -is [array]) { $fallbackOS = $fallbackOS[0] }
+            $recipeCard = $bestCard
+            $osId       = $bestCard.osId
+            Log "Falling back to: $($fallbackOS.name) (OS ID: $osId)"
+        }
+    } else {
+        Log "OS matched: $TargetOS (ID: $osId)"
+    }
+
+    if (-not $recipeCard) {
+        Log "No RecipeCard found for model '$modelName' under any OS."
         return $false
     }
-    if ($recipeCard -is [array]) { $recipeCard = $recipeCard[0] }
 
     $sccmPackIdRef = $recipeCard.sccmPack
     $recipeNote    = $recipeCard.note
