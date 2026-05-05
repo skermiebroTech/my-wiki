@@ -5,10 +5,10 @@ Add-Type -AssemblyName System.Drawing
 # ADMIN CHECK
 # =========================
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-$principal = New-Object Security.Principal.WindowsPrincipal($identity)
+$principal = New-Object System.Security.Principal.WindowsPrincipal($identity)
 
-if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    $scriptUrl = "https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto.ps1"
+if (-not $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    $scriptUrl = "https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers.ps1"
     Start-Process powershell "-ExecutionPolicy Bypass -Command `"irm $scriptUrl | iex`"" -Verb RunAs
     exit
 }
@@ -18,13 +18,13 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 # =========================
 $global:sync = [hashtable]::Synchronized(@{})
 $global:sync.Cancel = $false
-$global:sync.LogFile = "$env:TEMP\driver_tool_v6_log.txt"
+$global:sync.LogFile = "$env:TEMP\driver_tool_v6_1_log.txt"
 
 # =========================
 # UI
 # =========================
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "Driver Installer Tool V6"
+$form.Text = "Driver Installer Tool V6.1"
 $form.Size = New-Object System.Drawing.Size(520,340)
 $form.StartPosition = "CenterScreen"
 
@@ -85,7 +85,7 @@ $cancel.Add_Click({
 })
 
 # =========================
-# LENOVO SAFE ENGINE (V6 FIXED)
+# LENOVO ENGINE (FIXED V6.1)
 # =========================
 function Invoke-Lenovo($sync) {
 
@@ -95,28 +95,43 @@ function Invoke-Lenovo($sync) {
 
         $cs = Get-CimInstance Win32_ComputerSystem
         if ($cs.Manufacturer -notmatch "Lenovo") {
-            Log "Not Lenovo device."
+            Log "Not a Lenovo device."
             return $false
         }
 
         $sku = (Get-CimInstance Win32_ComputerSystemProduct).IdentifyingNumber
+
         if (-not $sku) {
-            Log "No SKU found."
+            Log "No SKU detected."
             return $false
         }
 
-        $machineType = ($sku -replace "[^0-9A-Z]", "").Substring(0,4)
-        Log "Machine Type: $machineType"
+        # =========================
+        # FIXED MACHINE TYPE (SAFE 4 CHAR)
+        # =========================
+        $cleanSku = ($sku -replace "[^0-9A-Z]", "").ToUpper()
 
-        Log "Downloading Lenovo recipe JSON..."
+        if ($cleanSku.Length -lt 4) {
+            Log "SKU too short: $cleanSku"
+            return $false
+        }
+
+        $machineType = $cleanSku.Substring(0,4)
+        Log "Machine Type (first 4 chars): $machineType"
+
+        # =========================
+        # LENOVO JSON
+        # =========================
+        Log "Downloading Lenovo repository..."
         $json = Invoke-WebRequest "https://download.lenovo.com/cdrt/ddrc/recipecard.json" -UseBasicParsing | ConvertFrom-Json
 
-        # SAFE lookup (no guessing families)
+        # =========================
+        # FIND MODEL (SAFE SEARCH)
+        # =========================
         $modelMatch = $null
 
         foreach ($family in $json.PSObject.Properties.Name) {
-            $items = $json.$family
-            foreach ($item in $items) {
+            foreach ($item in $json.$family) {
                 if ($item.types -contains $machineType) {
                     $modelMatch = $item
                     break
@@ -126,52 +141,67 @@ function Invoke-Lenovo($sync) {
         }
 
         if (-not $modelMatch) {
-            Log "No matching Lenovo model found."
+            Log "No Lenovo model match found."
             return $false
         }
 
-        Log "Model found: $($modelMatch.name)"
+        Log "Model: $($modelMatch.name)"
 
-        # OS auto detect
-        $osName = if ([Environment]::OSVersion.Version.Build -ge 22000) { "Windows 11" } else { "Windows 10" }
+        # =========================
+        # AUTO OS DETECT
+        # =========================
+        $osName = if ([Environment]::OSVersion.Version.Build -ge 22000) {
+            "Windows 11"
+        } else {
+            "Windows 10"
+        }
+
         Log "Detected OS: $osName"
 
         $osId = ($json.OperatingSystems | Where-Object name -eq $osName).id
 
+        # =========================
+        # FIND RECIPE
+        # =========================
         $recipe = $json.RecipeCards | Where-Object {
             $_.modelId -eq $modelMatch.id -and $_.osId -eq $osId
         }
 
         if (-not $recipe) {
-            Log "No recipe for OS."
+            Log "No recipe found for OS."
             return $false
         }
 
+        # =========================
+        # SCCM PACK
+        # =========================
         $pack = $json.SCCMPacks | Where-Object id -eq $recipe.sccmPack
 
         if (-not $pack -or -not $pack.url) {
-            Log "No valid SCCM pack URL."
+            Log "No valid driver pack URL."
             return $false
         }
 
         Log "Driver pack found:"
         Log $pack.url
 
-        # validate URL
         if ($pack.url -notmatch "^https?://") {
             Log "Invalid URL format."
             return $false
         }
 
+        # =========================
+        # DOWNLOAD + RUN
+        # =========================
         $file = "$env:TEMP\lenovo_driverpack.exe"
 
-        Log "Downloading..."
+        Log "Downloading driver pack..."
         Invoke-WebRequest $pack.url -OutFile $file
 
         Log "Running installer..."
         Start-Process $file -Wait
 
-        Log "Lenovo complete."
+        Log "Lenovo installation complete."
         return $true
     }
     catch {
@@ -181,7 +211,7 @@ function Invoke-Lenovo($sync) {
 }
 
 # =========================
-# MAIN RUN
+# MAIN RUNSPACE
 # =========================
 $button.Add_Click({
 
@@ -198,6 +228,7 @@ $button.Add_Click({
         function Log($m) {
             $sync.StatusBox.Invoke([action]{
                 $sync.StatusBox.AppendText("$m`r`n")
+                $sync.StatusBox.ScrollToCaret()
             })
         }
 
@@ -205,11 +236,12 @@ $button.Add_Click({
             $sync.Progress.Invoke([action]{ $sync.Progress.Value = $v })
         }
 
-        Log "Starting..."
+        Log "Starting driver install..."
         Set 10
 
         # LOCAL DRIVERS
         $paths = @("C:\Drivers","C:\SWSetup","C:\DRIVERS")
+
         foreach ($p in $paths) {
             if (Test-Path $p) {
                 Get-ChildItem $p -Recurse -Filter *.inf -ErrorAction SilentlyContinue | ForEach-Object {
@@ -233,7 +265,7 @@ $button.Add_Click({
 
         # FALLBACK
         Log "Opening OEM page..."
-        Start-Process "https://download.lenovo.com/cdrt/ddrc/RecipeCardWeb.html"
+        Start-Process "https://pcsupport.lenovo.com"
 
         Set 100
         $sync.Button.Invoke([action]{ $sync.Button.Enabled = $true })
