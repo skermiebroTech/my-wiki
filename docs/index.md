@@ -37,4 +37,4 @@ pnputil /add-driver "C:\SWSetup\*.inf" /subdirs /install
 ```
 
 ---
-Author: Joel Skerman | Date: 23 Apr 2026
+Author: Joel Skerman | Date: 23 Apr 2026 | updated: 06 May 2026

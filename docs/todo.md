@@ -1,1 +1,5 @@
 - ~~rewrite CAB File driver installation~~
+- auto installer
+	- test HP with auto installer 
+	- test Dell with auto installer 
+	- test other Lenovo models 
