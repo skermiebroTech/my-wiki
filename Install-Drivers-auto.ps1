@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.2.4
+# Version: 1.2.5
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -12,7 +12,7 @@
 # extracts to C:\DRIVERS, installs all INFs via pnputil.
 # =============================================================
 
-$ScriptVersion = "1.2.4"
+$ScriptVersion = "1.2.5"
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -93,12 +93,13 @@ $dlGroupBox.Size      = New-Object System.Drawing.Size(536, 68)
 $dlGroupBox.Location  = New-Object System.Drawing.Point(20, 265)
 $form.Controls.Add($dlGroupBox)
 
-$dlBar          = New-Object System.Windows.Forms.ProgressBar
-$dlBar.Size     = New-Object System.Drawing.Size(508, 18)
-$dlBar.Location = New-Object System.Drawing.Point(12, 20)
-$dlBar.Style    = "Continuous"
-$dlBar.Minimum  = 0
-$dlBar.Maximum  = 100
+$dlBar                       = New-Object System.Windows.Forms.ProgressBar
+$dlBar.Size                  = New-Object System.Drawing.Size(508, 18)
+$dlBar.Location              = New-Object System.Drawing.Point(12, 20)
+$dlBar.Style                 = "Marquee"
+$dlBar.MarqueeAnimationSpeed = 25
+$dlBar.Minimum               = 0
+$dlBar.Maximum               = 100
 $dlGroupBox.Controls.Add($dlBar)
 
 $dlLabel           = New-Object System.Windows.Forms.Label
@@ -198,21 +199,34 @@ function SetProgress($val) {
 
 function SetDownload {
     param([int]$Pct, [string]$Label)
-    $dlBar.Value  = [math]::Min([math]::Max($Pct, 0), 100)
+    # Bar is Marquee — scrolls automatically. Snap to full Continuous on 100%.
+    if ($Pct -ge 100) {
+        $dlBar.Style = "Continuous"
+        $dlBar.Value = 100
+    } elseif ($dlBar.Style -ne "Marquee") {
+        $dlBar.Style                 = "Marquee"
+        $dlBar.MarqueeAnimationSpeed = 25
+    }
     $dlLabel.Text = $Label
     [System.Windows.Forms.Application]::DoEvents()
 }
 
 function SetExtract {
     param([int]$Pct, [string]$Label)
+    # Pct -ge 100  -> snap to filled Continuous bar (done)
+    # Pct -eq -1   -> Marquee mode (active extraction, count in label)
+    # Pct 0..99    -> Continuous proportional (INF install loop)
     if ($Pct -ge 100) {
-        # Snap to full solid bar on completion
         $exBar.Style = "Continuous"
         $exBar.Value = 100
-    } elseif ($exBar.Style -ne "Marquee") {
-        # Re-enable scrolling if it was switched off
-        $exBar.Style                 = "Marquee"
-        $exBar.MarqueeAnimationSpeed = 30
+    } elseif ($Pct -lt 0) {
+        if ($exBar.Style -ne "Marquee") {
+            $exBar.Style                 = "Marquee"
+            $exBar.MarqueeAnimationSpeed = 30
+        }
+    } else {
+        if ($exBar.Style -ne "Continuous") { $exBar.Style = "Continuous" }
+        $exBar.Value = [math]::Min($Pct, 99)
     }
     $exLabel.Text = $Label
     [System.Windows.Forms.Application]::DoEvents()
@@ -227,9 +241,8 @@ function Assert-Curl {
 }
 
 # =========================
-# PRE-SCAN: count files inside pack before extraction
-# ZIP  — exact count via ZipFile API
-# EXE/CAB — estimate from pack size (avg ~4 KB/file for driver packs)
+# PRE-SCAN: exact file count for ZIP via ZipFile API.
+# EXE/CAB return 0 — extraction uses Marquee + live count label instead.
 # =========================
 function Get-PackFileCount {
     param([string]$PackFile)
@@ -247,15 +260,10 @@ function Get-PackFileCount {
             return 0
         }
     } else {
-        # Heuristic for EXE/CAB: driver packs average ~4 KB per file
-        try {
-            $sizeBytes = (Get-Item $PackFile).Length
-            $estimated = [math]::Max([int]($sizeBytes / 512000), 10)
-            Log "  Pre-scan: estimated ~$estimated files (size-based heuristic)"
-            return $estimated
-        } catch {
-            return 0
-        }
+        # EXE/CAB: no reliable pre-scan without extracting.
+        # Return 0 so Marquee + live file count label is used.
+        Log "  Pre-scan: EXE/CAB — live count mode"
+        return 0
     }
 }
 
@@ -313,8 +321,7 @@ function Invoke-CurlDownload {
             SetDownload -Pct $pct -Label "$mbDone MB / $totalMB MB  ($pct%)"
             Log "  $mbDone MB / $totalMB MB ($pct%)"
         } else {
-            $pct = ($dlBar.Value + 5) % 95
-            SetDownload -Pct $pct -Label "$mbDone MB received..."
+            SetDownload -Pct 0 -Label "$mbDone MB received..."
             Log "  $mbDone MB received"
         }
 
@@ -352,34 +359,30 @@ function Watch-Extraction {
     param(
         [System.Diagnostics.Process]$ExtractProc,
         [string]$DestPath,
-        [int]$TotalFiles   = 0,      # from Get-PackFileCount — 0 = pulse fallback
+        [int]$TotalFiles    = 0,   # exact for ZIP, 0 for EXE/CAB
         [int]$StallLimitSec = 300
     )
 
     $stall     = 0
     $lastCount = 0
 
-    SetExtract -Pct 0 -Label "Extracting — scanning destination..."
+    # -1 = Marquee mode (scrolling bar, count shown in label)
+    SetExtract -Pct -1 -Label "Extracting..."
 
     while (-not $ExtractProc.HasExited) {
         Start-Sleep -Milliseconds 700
 
-        $count = 0
-        if (Test-Path $DestPath) {
-            $count = (Get-ChildItem $DestPath -Recurse -ErrorAction SilentlyContinue).Count
-        }
+        $count = if (Test-Path $DestPath) {
+            (Get-ChildItem $DestPath -Recurse -ErrorAction SilentlyContinue).Count
+        } else { 0 }
 
         if ($count -gt $lastCount) { $stall = 0; $lastCount = $count } else { $stall++ }
 
         if ($TotalFiles -gt 0) {
-            # True proportional bar — cap at 99 while process is still running
-            $pct = [math]::Min([int](($count / $TotalFiles) * 100), 99)
             $remaining = [math]::Max($TotalFiles - $count, 0)
-            SetExtract -Pct $pct -Label "$count / $TotalFiles files  ($remaining remaining)"
+            SetExtract -Pct -1 -Label "$count / $TotalFiles files  ($remaining remaining)"
         } else {
-            # Unknown total — simple "X files extracted" with pulsing bar
-            $pct = ($exBar.Value + 3) % 96
-            SetExtract -Pct $pct -Label "$count files extracted..."
+            SetExtract -Pct -1 -Label "$count files extracted..."
         }
 
         [System.Windows.Forms.Application]::DoEvents()
@@ -391,10 +394,9 @@ function Watch-Extraction {
         }
     }
 
-    # Wait a moment for any last file writes to flush
     Start-Sleep -Seconds 2
     $finalCount = if (Test-Path $DestPath) {
-        (Get-ChildItem $DestPath -Recurse -ErrorAction SilentlyContinue).Count
+        (Get-ChildItem $DestPath -Recurse -EA SilentlyContinue).Count
     } else { 0 }
 
     SetExtract -Pct 100 -Label "Done — $finalCount files extracted"
@@ -472,6 +474,7 @@ function Start-PackExtraction {
             } -ArgumentList $PackFile, $DestPath
 
             $stall = 0; $lastCount = 0
+            SetExtract -Pct -1 -Label "Starting ZIP extraction..."
             while ($zipJob.State -eq "Running") {
                 Start-Sleep -Milliseconds 700
                 $count = if (Test-Path $DestPath) {
@@ -480,12 +483,10 @@ function Start-PackExtraction {
                 if ($count -gt $lastCount) { $stall = 0; $lastCount = $count } else { $stall++ }
 
                 if ($totalFiles -gt 0) {
-                    $pct       = [math]::Min([int](($count / $totalFiles) * 100), 99)
                     $remaining = [math]::Max($totalFiles - $count, 0)
-                    SetExtract -Pct $pct -Label "$count / $totalFiles files  ($remaining remaining)"
+                    SetExtract -Pct -1 -Label "$count / $totalFiles files  ($remaining remaining)"
                 } else {
-                    $pct = ($exBar.Value + 3) % 96
-                    SetExtract -Pct $pct -Label "$count files extracted..."
+                    SetExtract -Pct -1 -Label "$count files extracted..."
                 }
                 [System.Windows.Forms.Application]::DoEvents()
                 if ($stall -gt 375) { Log "  ZIP stalled — stopping job."; Stop-Job $zipJob; break }
