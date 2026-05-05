@@ -1092,6 +1092,220 @@ function Start-LenovoDriverInstall {
 }
 
 # =========================
+# DEVICE INFO DUMP
+# Collects every WMI/CIM field that could be useful for debugging
+# driver pack lookup failures. All errors are caught individually so
+# one bad query never stops the rest from printing.
+# =========================
+function Write-DeviceInfo {
+    Log "============================================"
+    Log "  DEVICE INFORMATION DUMP"
+    Log "============================================"
+
+    # ---- System / Chassis ----
+    Log "-- System --"
+    try {
+        $cs = Get-CimInstance Win32_ComputerSystem
+        Log "  Manufacturer       : $($cs.Manufacturer)"
+        Log "  Model              : $($cs.Model)"
+        Log "  SystemSKUNumber    : $($cs.SystemSKUNumber)"
+        Log "  SystemFamily       : $($cs.SystemFamily)"
+        Log "  PCSystemType       : $($cs.PCSystemType)"
+        Log "  TotalPhysRAM (GB)  : $([math]::Round($cs.TotalPhysicalMemory/1GB,2))"
+        Log "  Domain             : $($cs.Domain)"
+        Log "  UserName           : $($cs.UserName)"
+    } catch { Log "  [Win32_ComputerSystem ERROR] $($_.Exception.Message)" }
+
+    try {
+        $csp = Get-CimInstance Win32_ComputerSystemProduct
+        Log "  CSProduct.Name     : $($csp.Name)"
+        Log "  CSProduct.Version  : $($csp.Version)"
+        Log "  CSProduct.UUID     : $($csp.UUID)"
+        Log "  CSProduct.Vendor   : $($csp.Vendor)"
+    } catch { Log "  [Win32_ComputerSystemProduct ERROR] $($_.Exception.Message)" }
+
+    # ---- BIOS ----
+    Log "-- BIOS --"
+    try {
+        $bios = Get-CimInstance Win32_BIOS
+        Log "  SerialNumber       : $($bios.SerialNumber)"
+        Log "  SMBIOSBIOSVersion  : $($bios.SMBIOSBIOSVersion)"
+        Log "  ReleaseDate        : $($bios.ReleaseDate)"
+        Log "  Manufacturer       : $($bios.Manufacturer)"
+        Log "  Name               : $($bios.Name)"
+        Log "  Version            : $($bios.Version)"
+    } catch { Log "  [Win32_BIOS ERROR] $($_.Exception.Message)" }
+
+    # ---- Baseboard (HP Platform ID lives here) ----
+    Log "-- Baseboard --"
+    try {
+        $bb = Get-CimInstance Win32_BaseBoard
+        Log "  Product            : $($bb.Product)"
+        Log "  Manufacturer       : $($bb.Manufacturer)"
+        Log "  SerialNumber       : $($bb.SerialNumber)"
+        Log "  Version            : $($bb.Version)"
+    } catch { Log "  [Win32_BaseBoard ERROR] $($_.Exception.Message)" }
+
+    # ---- Enclosure / Chassis type ----
+    Log "-- Enclosure --"
+    try {
+        $enc = Get-CimInstance Win32_SystemEnclosure
+        Log "  ChassisTypes       : $($enc.ChassisTypes -join ',')"
+        Log "  SMBIOSAssetTag     : $($enc.SMBIOSAssetTag)"
+        Log "  SerialNumber       : $($enc.SerialNumber)"
+        Log "  Manufacturer       : $($enc.Manufacturer)"
+    } catch { Log "  [Win32_SystemEnclosure ERROR] $($_.Exception.Message)" }
+
+    # ---- Operating System ----
+    Log "-- Operating System --"
+    try {
+        $os = Get-CimInstance Win32_OperatingSystem
+        Log "  Caption            : $($os.Caption)"
+        Log "  Version            : $($os.Version)"
+        Log "  BuildNumber        : $($os.BuildNumber)"
+        Log "  OSArchitecture     : $($os.OSArchitecture)"
+        Log "  SystemDrive        : $($os.SystemDrive)"
+        Log "  WindowsDirectory   : $($os.WindowsDirectory)"
+        Log "  InstallDate        : $($os.InstallDate)"
+        Log "  LastBootUpTime     : $($os.LastBootUpTime)"
+    } catch { Log "  [Win32_OperatingSystem ERROR] $($_.Exception.Message)" }
+
+    # ---- CPU ----
+    Log "-- Processor --"
+    try {
+        $cpus = Get-CimInstance Win32_Processor
+        foreach ($cpu in $cpus) {
+            Log "  Name               : $($cpu.Name)"
+            Log "  DeviceID           : $($cpu.DeviceID)"
+            Log "  Manufacturer       : $($cpu.Manufacturer)"
+            Log "  MaxClockSpeed      : $($cpu.MaxClockSpeed) MHz"
+            Log "  NumberOfCores      : $($cpu.NumberOfCores)"
+            Log "  NumberOfLogical    : $($cpu.NumberOfLogicalProcessors)"
+            Log "  ProcessorId        : $($cpu.ProcessorId)"
+        }
+    } catch { Log "  [Win32_Processor ERROR] $($_.Exception.Message)" }
+
+    # ---- GPU ----
+    Log "-- Video Controller --"
+    try {
+        $gpus = Get-CimInstance Win32_VideoController
+        foreach ($gpu in $gpus) {
+            Log "  Name               : $($gpu.Name)"
+            Log "  DeviceID           : $($gpu.DeviceID)"
+            Log "  AdapterRAM         : $([math]::Round($gpu.AdapterRAM/1MB))MB"
+            Log "  DriverVersion      : $($gpu.DriverVersion)"
+            Log "  DriverDate         : $($gpu.DriverDate)"
+            Log "  VideoModeDesc      : $($gpu.VideoModeDescription)"
+            Log "  ---"
+        }
+    } catch { Log "  [Win32_VideoController ERROR] $($_.Exception.Message)" }
+
+    # ---- Network adapters ----
+    Log "-- Network Adapters --"
+    try {
+        $nics = Get-CimInstance Win32_NetworkAdapter | Where-Object { $_.PhysicalAdapter -eq $true }
+        foreach ($nic in $nics) {
+            Log "  Name               : $($nic.Name)"
+            Log "  MACAddress         : $($nic.MACAddress)"
+            Log "  AdapterType        : $($nic.AdapterType)"
+            Log "  ---"
+        }
+    } catch { Log "  [Win32_NetworkAdapter ERROR] $($_.Exception.Message)" }
+
+    # ---- Storage ----
+    Log "-- Disk Drives --"
+    try {
+        $disks = Get-CimInstance Win32_DiskDrive
+        foreach ($d in $disks) {
+            $sizeGB = if ($d.Size) { [math]::Round($d.Size/1GB,1) } else { "?" }
+            Log "  Model              : $($d.Model)"
+            Log "  SerialNumber       : $($d.SerialNumber)"
+            Log "  InterfaceType      : $($d.InterfaceType)"
+            Log "  Size               : $sizeGB GB"
+            Log "  MediaType          : $($d.MediaType)"
+            Log "  ---"
+        }
+    } catch { Log "  [Win32_DiskDrive ERROR] $($_.Exception.Message)" }
+
+    # ---- RAM sticks ----
+    Log "-- Physical Memory --"
+    try {
+        $dimms = Get-CimInstance Win32_PhysicalMemory
+        foreach ($d in $dimms) {
+            $sz = if ($d.Capacity) { [math]::Round($d.Capacity/1GB,1) } else { "?" }
+            Log "  BankLabel          : $($d.BankLabel)"
+            Log "  DeviceLocator      : $($d.DeviceLocator)"
+            Log "  Capacity           : $sz GB"
+            Log "  Speed              : $($d.Speed) MHz"
+            Log "  Manufacturer       : $($d.Manufacturer)"
+            Log "  PartNumber         : $($d.PartNumber)"
+            Log "  ---"
+        }
+    } catch { Log "  [Win32_PhysicalMemory ERROR] $($_.Exception.Message)" }
+
+    # ---- Battery (laptops) ----
+    Log "-- Battery --"
+    try {
+        $batts = Get-CimInstance Win32_Battery
+        if ($batts) {
+            foreach ($b in $batts) {
+                Log "  Name               : $($b.Name)"
+                Log "  EstimatedRuntime   : $($b.EstimatedRunTime) min"
+                Log "  BatteryStatus      : $($b.BatteryStatus)"
+                Log "  DesignCapacity     : $($b.DesignCapacity) mWh"
+                Log "  FullChargeCapacity : $($b.FullChargeCapacity) mWh"
+            }
+        } else {
+            Log "  (no battery detected — desktop?)"
+        }
+    } catch { Log "  [Win32_Battery ERROR] $($_.Exception.Message)" }
+
+    # ---- PnP devices with missing drivers ----
+    Log "-- PnP Devices (problem state / no driver) --"
+    try {
+        $problem = Get-CimInstance Win32_PnPEntity |
+            Where-Object { $_.ConfigManagerErrorCode -ne 0 } |
+            Select-Object -Property Name, DeviceID, ConfigManagerErrorCode
+        if ($problem) {
+            foreach ($p in $problem) {
+                Log "  [ERR $($p.ConfigManagerErrorCode)] $($p.Name)"
+                Log "    DeviceID: $($p.DeviceID)"
+            }
+        } else {
+            Log "  (none — all PnP devices have drivers)"
+        }
+    } catch { Log "  [Win32_PnPEntity ERROR] $($_.Exception.Message)" }
+
+    # ---- Installed drivers via pnputil ----
+    Log "-- pnputil driver store (first 20 OEM INFs) --"
+    try {
+        $pnpOut = & pnputil /enum-drivers 2>&1 | Select-Object -First 60
+        foreach ($line in $pnpOut) { Log "  $line" }
+    } catch { Log "  [pnputil ERROR] $($_.Exception.Message)" }
+
+    # ---- Environment snapshot ----
+    Log "-- Environment --"
+    Log "  TEMP               : $env:TEMP"
+    Log "  COMPUTERNAME       : $env:COMPUTERNAME"
+    Log "  USERNAME           : $env:USERNAME"
+    Log "  PROCESSOR_ARCH     : $env:PROCESSOR_ARCHITECTURE"
+    Log "  PS Version         : $($PSVersionTable.PSVersion)"
+    Log "  curl.exe path      : $($(Get-Command curl.exe -EA SilentlyContinue).Source)"
+
+    # ---- Free disk space on C: ----
+    Log "-- Disk Space --"
+    try {
+        $c = Get-PSDrive C -EA Stop
+        Log "  C: Used (GB)       : $([math]::Round($c.Used/1GB,2))"
+        Log "  C: Free (GB)       : $([math]::Round($c.Free/1GB,2))"
+    } catch { Log "  [PSDrive C: ERROR] $($_.Exception.Message)" }
+
+    Log "============================================"
+    Log "  END DEVICE INFORMATION DUMP"
+    Log "============================================"
+}
+
+# =========================
 # MAIN
 # =========================
 function Start-Install {
@@ -1130,6 +1344,10 @@ function Start-Install {
     Log "Manufacturer : $manufacturer"
     Log "Model        : $model  (copied to clipboard)"
     $title.Text = "Driver Installer - $model"
+
+    # Full device dump — logged before any OEM work so the log is useful even on early failure
+    Write-DeviceInfo
+
     SetProgress 5
 
     $driverRoot = "C:\DRIVERS"
