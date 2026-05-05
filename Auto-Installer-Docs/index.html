@@ -13,10 +13,10 @@
       
       
       
-        <link rel="prev" href="../driver-installation/">
+        <link rel="prev" href="..">
       
       
-        <link rel="next" href="../Useful-Links/">
+        <link rel="next" href="../driver-installation/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Installing CAB file drivers - JJs Wiki</title>
+        <title>Auto Installer Docs - JJs Wiki</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#installing-drivers-from-a-cab-file-using-powershell-audit-mode" class="md-skip">
+        <a href="#auto-driver-installer" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Installing CAB file drivers
+              Auto Installer Docs
             
           </span>
         </div>
@@ -262,10 +262,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../Auto-Installer-Docs/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Auto Installer Docs
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -281,6 +308,175 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#quick-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick Start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How It Works
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="How It Works">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-detect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Detect
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-catalog-lookup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Catalog Lookup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-download" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Download
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-extract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Extract
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-install-infs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Install INFs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#user-interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        User Interface
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cancellation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cancellation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#log-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Log File
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sound-events" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sound Events
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#supported-manufacturers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported Manufacturers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Requirements
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -316,37 +512,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Installing CAB file drivers
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../cab-file-driver-installation/" class="md-nav__link">
         
   
   
@@ -362,54 +531,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#one-liner-extract-install" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        One-Liner (Extract + Install)
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="One-Liner (Extract + Install)">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#explanation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Explanation:
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -577,22 +698,77 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#one-liner-extract-install" class="md-nav__link">
+  <a href="#quick-start" class="md-nav__link">
     <span class="md-ellipsis">
       
-        One-Liner (Extract + Install)
+        Quick Start
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="One-Liner (Extract + Install)">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How It Works
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="How It Works">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#explanation" class="md-nav__link">
+  <a href="#1-detect" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Explanation:
+        1. Detect
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-catalog-lookup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Catalog Lookup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-download" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Download
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-extract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Extract
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-install-infs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Install INFs
       
     </span>
   </a>
@@ -601,6 +777,72 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#user-interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        User Interface
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cancellation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cancellation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#log-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Log File
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sound-events" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sound Events
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#supported-manufacturers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported Manufacturers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Requirements
+      
+    </span>
+  </a>
   
 </li>
       
@@ -621,32 +863,236 @@
 
 
 
-<h1 id="installing-drivers-from-a-cab-file-using-powershell-audit-mode">Installing Drivers from a <code>.cab</code> File Using PowerShell (Audit Mode)<a class="headerlink" href="#installing-drivers-from-a-cab-file-using-powershell-audit-mode" title="Permanent link">&para;</a></h1>
-<p>This guide explains how to extract and install drivers from a <code>.cab</code> file located in the Downloads folder while in Audit Mode.
-- ⚠️ these pre-made commands are specifically for the Panasonic FZ-G1</p>
+<h1 id="auto-driver-installer">Auto Driver Installer<a class="headerlink" href="#auto-driver-installer" title="Permanent link">&para;</a></h1>
+<p>A fully automated PowerShell driver installer for <strong>Dell</strong>, <strong>HP</strong>, and <strong>Lenovo</strong> machines. Designed to run in Windows audit mode with a single command — no manual downloads, no clicking through wizards.</p>
 <hr />
-<h2 id="one-liner-extract-install">One-Liner (Extract + Install)<a class="headerlink" href="#one-liner-extract-install" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="nv">$cab</span><span class="p">=</span><span class="s2">&quot;C:\Users\Administrator\Downloads\G1F_Mk2_Win10x64_1803_V1.00.cab&quot;</span>
-<span class="nv">$out</span><span class="p">=</span><span class="s2">&quot;C:\Drivers\Extracted&quot;</span>
-<span class="n">mkdir</span> <span class="nv">$out</span> <span class="n">-Force</span> <span class="p">|</span> <span class="nb">Out-Null</span>
-<span class="n">expand</span> <span class="o">-F</span><span class="p">:*</span> <span class="nv">$cab</span> <span class="nv">$out</span>
-<span class="n">pnputil</span> <span class="p">/</span><span class="nb">add-driver</span> <span class="s2">&quot;$out\*.inf&quot;</span> <span class="p">/</span><span class="n">subdirs</span> <span class="p">/</span><span class="n">install</span>
+<h2 id="quick-start">Quick Start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
+<p>Run this from the <strong>Win+R</strong> box on any supported machine:</p>
+<div class="highlight"><pre><span></span><code><span class="n">powershell</span> <span class="n">-ExecutionPolicy</span> <span class="n">Bypass</span> <span class="n">-Command</span> <span class="s2">&quot;irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto.ps1 | iex&quot;</span>
 </code></pre></div>
-<ul>
-<li>⚠️ Replace <code>G1F_Mk2_Win10x64_1803_V1.00.cab</code> with the filename of the CAB file you downloaded <ul>
-<li>⚠️ you can do this more easily by pasting into <code>notepad.exe</code> and editing there</li>
-</ul>
-</li>
-</ul>
+<p>!!! tip "Audit Mode" This command works without any prior software installation. <code>irm</code> (Invoke-RestMethod) fetches the script directly from GitHub and <code>iex</code> runs it in memory — no file is saved to disk first.</p>
 <hr />
-<h3 id="explanation">Explanation:<a class="headerlink" href="#explanation" title="Permanent link">&para;</a></h3>
+<h2 id="how-it-works">How It Works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h2>
+<p>The script follows the same four-stage pipeline regardless of manufacturer:</p>
+<div class="highlight"><pre><span></span><code>Detect → Catalog → Download → Extract → Install
+</code></pre></div>
+<h3 id="1-detect">1. Detect<a class="headerlink" href="#1-detect" title="Permanent link">&para;</a></h3>
+<p>On launch the script reads the machine's manufacturer and model from WMI:</p>
 <ul>
-<li><code>/add-driver</code> → Adds drivers to the Windows driver store</li>
-<li><code>/subdirs</code> → Searches all subfolders for <code>.inf</code> files</li>
-<li><code>/install</code> → Installs drivers if matching hardware is found</li>
+<li><strong>Manufacturer</strong> — from <code>Win32_ComputerSystem</code></li>
+<li><strong>Model / Machine Type</strong> — from <code>Win32_ComputerSystemProduct</code> (Lenovo) or <code>Win32_ComputerSystem</code> (Dell/HP)</li>
+<li>The model name is automatically <strong>copied to clipboard</strong> for convenience</li>
 </ul>
+<p>If the script is not running as Administrator it re-launches itself elevated automatically.</p>
 <hr />
-<p>Author: Joel Skerman | Date: 27 Apr 2026 | Updated 28 Apr 2026</p>
+<h3 id="2-catalog-lookup">2. Catalog Lookup<a class="headerlink" href="#2-catalog-lookup" title="Permanent link">&para;</a></h3>
+<p>Each OEM uses a different catalog source:</p>
+<p>=== "Lenovo"</p>
+<div class="highlight"><pre><span></span><code>Downloads `catalogv2.xml` directly from Lenovo&#39;s CDN:
+
+```
+https://download.lenovo.com/cdrt/td/catalogv2.xml
+```
+
+The first 4 characters of the machine type (e.g. `20W0` for a ThinkPad T14 Gen 2i) are used to match the correct model entry. The script prefers a **Win11** SCCM pack and falls back to **Win10** automatically if one isn&#39;t available.
+
+!!! note &quot;BOM handling&quot;
+    Lenovo&#39;s catalog XML contains a UTF-8 BOM that breaks PowerShell&#39;s XML parser. The script strips it at the byte level before parsing to prevent this.
+</code></pre></div>
+<p>=== "Dell"</p>
+<div class="highlight"><pre><span></span><code>Downloads `CatalogPC.cab` from Dell&#39;s CDN and extracts it:
+
+```
+https://downloads.dell.com/catalog/CatalogPC.cab
+```
+
+The Service Tag is read from `Win32_BIOS.SerialNumber` and the System SKU from `Win32_ComputerSystem.SystemSKUNumber`. The catalog is searched for a `SoftwareComponent` with &quot;Driver Pack&quot; in its display name matching the detected SKU.
+</code></pre></div>
+<p>=== "HP"</p>
+<div class="highlight"><pre><span></span><code>Downloads a platform-specific catalog cab using the BaseBoard product ID:
+
+```
+https://ftp.hp.com/pub/caps-softpaq/cmit/imagepal/ref/{platformId}/{platformId}.cab
+```
+
+The catalog is parsed for a SoftPaq with a &quot;Driver Pack&quot; category, and the direct download URL is extracted.
+</code></pre></div>
+<hr />
+<h3 id="3-download">3. Download<a class="headerlink" href="#3-download" title="Permanent link">&para;</a></h3>
+<p>The driver pack is downloaded using the inbox <code>curl.exe</code> (available on Windows 10 1803+). A silent <code>HEAD</code> request is made first to get the file size, enabling a true percentage progress bar.</p>
+<p>The download bar shows live progress:</p>
+<div class="highlight"><pre><span></span><code>1 234.5 MB / 1 954.5 MB  (63%)  376 Mbps
+</code></pre></div>
+<p>!!! info "Large packs" Lenovo SCCM packs are typically ~2 GB. At 100 Mbps this takes around 2–3 minutes. The script has a 10-minute timeout per download with a stall detection threshold of ~63 seconds.</p>
+<hr />
+<h3 id="4-extract">4. Extract<a class="headerlink" href="#4-extract" title="Permanent link">&para;</a></h3>
+<p>The pack is silently extracted to <code>C:\DRIVERS\{OEM}_Extracted</code> using the appropriate flags per format:</p>
+<table>
+<thead>
+<tr>
+<th>Format</th>
+<th>Extractor</th>
+<th>Flags</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>.exe</code> (Inno Setup)</td>
+<td>Pack itself</td>
+<td><code>/VERYSILENT /DIR="..." /EXTRACT=YES</code></td>
+</tr>
+<tr>
+<td><code>.exe</code> (Dell/HP)</td>
+<td>Pack itself</td>
+<td><code>/s /e="..."</code> or <code>/s /e /f "..."</code></td>
+</tr>
+<tr>
+<td><code>.zip</code></td>
+<td><code>System.IO.Compression.ZipFile</code></td>
+<td>Background job</td>
+</tr>
+<tr>
+<td><code>.cab</code></td>
+<td><code>expand.exe</code></td>
+<td><code>-F:* "..."</code></td>
+</tr>
+</tbody>
+</table>
+<p>The extract bar shows a live file count as files land in the destination folder. For ZIP files the total is known exactly (pre-scanned via the ZipFile API). For EXE/CAB the bar scrolls as a Marquee with a running count.</p>
+<hr />
+<h3 id="5-install-infs">5. Install INFs<a class="headerlink" href="#5-install-infs" title="Permanent link">&para;</a></h3>
+<p>All <code>.inf</code> files found recursively under the extraction path are installed using:</p>
+<div class="highlight"><pre><span></span><code><span class="n">pnputil</span> <span class="p">/</span><span class="nb">add-driver</span> <span class="s2">&quot;path\to\driver.inf&quot;</span> <span class="p">/</span><span class="n">install</span>
+</code></pre></div>
+<p>The install bar tracks progress as <code>X / Y INFs (Z remaining)</code>. Each INF is processed whether it results in a new install, an update, or is already up to date — pnputil handles all cases gracefully.</p>
+<hr />
+<h2 id="user-interface">User Interface<a class="headerlink" href="#user-interface" title="Permanent link">&para;</a></h2>
+<p>The tool has a simple GUI built with Windows Forms:</p>
+<table>
+<thead>
+<tr>
+<th>Section</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Status box</strong></td>
+<td>Dark terminal-style log with timestamped entries (also saved to <code>Downloads\</code>)</td>
+</tr>
+<tr>
+<td><strong>Download bar</strong></td>
+<td>Marquee while connecting, fills with % + Mbps once underway</td>
+</tr>
+<tr>
+<td><strong>Extract bar</strong></td>
+<td>Marquee with live file count during extraction; switches to proportional bar during INF install</td>
+</tr>
+<tr>
+<td><strong>Overall bar</strong></td>
+<td>End-to-end progress across all stages</td>
+</tr>
+<tr>
+<td><strong>Spinners</strong></td>
+<td>Braille dot spinners on each group box title animate during active work, show ✓ or ✗ on completion</td>
+</tr>
+<tr>
+<td><strong>Sound FX</strong></td>
+<td>Space-age sound effects tied to key events (on by default, toggle via checkbox)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="cancellation">Cancellation<a class="headerlink" href="#cancellation" title="Permanent link">&para;</a></h2>
+<p>Clicking <strong>Cancel</strong> during any stage will:</p>
+<ol>
+<li>Set a cancellation flag</li>
+<li>Kill the active curl download process immediately</li>
+<li>Kill any running extractor process</li>
+<li>Reset all bars and spinners</li>
+<li>Re-enable the Install button</li>
+</ol>
+<p>!!! warning Cancellation during extraction may leave a partial <code>C:\DRIVERS\{OEM}_Extracted</code> folder. This is safe to delete manually and will be overwritten on the next run.</p>
+<hr />
+<h2 id="log-file">Log File<a class="headerlink" href="#log-file" title="Permanent link">&para;</a></h2>
+<p>Every run appends a timestamped log to:</p>
+<div class="highlight"><pre><span></span><code>C:\Users\{user}\Downloads\DriverInstaller_YYYYMMDD_HHmmss.log
+</code></pre></div>
+<p>The path is shown at the bottom of the window and is useful for debugging failures.</p>
+<hr />
+<h2 id="sound-events">Sound Events<a class="headerlink" href="#sound-events" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Sound</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>App launches</td>
+<td>Ascending sci-fi arpeggio</td>
+</tr>
+<tr>
+<td>Download starts</td>
+<td>Fast upward frequency sweep</td>
+</tr>
+<tr>
+<td>Extraction complete</td>
+<td>Harmonic shimmer chord</td>
+</tr>
+<tr>
+<td>Each INF installed</td>
+<td>Tight keyclick</td>
+</tr>
+<tr>
+<td>Installation complete</td>
+<td>Triumphant 4-note fanfare</td>
+</tr>
+<tr>
+<td>Failure / cancelled</td>
+<td>Descending dissonant buzz</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="supported-manufacturers">Supported Manufacturers<a class="headerlink" href="#supported-manufacturers" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Manufacturer</th>
+<th>Catalog Source</th>
+<th>Pack Format</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Lenovo</td>
+<td><code>catalogv2.xml</code> (CDN)</td>
+<td>Inno Setup <code>.exe</code></td>
+</tr>
+<tr>
+<td>Dell</td>
+<td><code>CatalogPC.cab</code> (CDN)</td>
+<td>Self-extracting <code>.exe</code></td>
+</tr>
+<tr>
+<td>HP</td>
+<td>Platform catalog <code>.cab</code> (FTP)</td>
+<td>SoftPaq <code>.exe</code></td>
+</tr>
+</tbody>
+</table>
+<p>!!! warning "Unsupported machines" If the manufacturer is not Dell, HP, or Lenovo the script will display an error and exit gracefully without making any changes to the system.</p>
+<hr />
+<h2 id="requirements">Requirements<a class="headerlink" href="#requirements" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Windows 10 1803 or later (for inbox <code>curl.exe</code>)</li>
+<li>Administrator privileges (auto-elevated on launch)</li>
+<li>Audit Mode</li>
+<li>Internet access to OEM CDN/FTP servers</li>
+<li>~3–5 GB free disk space in <code>C:\DRIVERS\</code> for download + extraction</li>
+</ul>
 
 
 
