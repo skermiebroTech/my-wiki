@@ -1,11 +1,20 @@
-# Download catalog (already cached from last run, or re-downloads)
-$cab = "$env:TEMP\DellCatalogPC.cab"
 $xml = "$env:TEMP\CatalogPC.xml"
-curl.exe --silent --location "https://downloads.dell.com/catalog/CatalogPC.cab" --output $cab
-expand.exe $cab $xml
+[xml]$cat = [System.IO.File]::ReadAllText($xml).TrimStart([char]0xFEFF)
 
-# Find all SoftwareComponent nodes that mention Latitude 7430 and print them
-[xml]$cat = [System.IO.File]::ReadAllText($xml)
-$cat.SelectNodes("//*[local-name()='SoftwareComponent']") | Where-Object {
-    $_.OuterXml -match "(?i)Latitude.7430|F8X0F|0B0B"
-} | Select-Object -First 3 | ForEach-Object { $_.OuterXml }
+# How many SoftwareComponent nodes does XPath actually find?
+$all = $cat.SelectNodes("//*[local-name()='SoftwareComponent']")
+Write-Host "Total SoftwareComponent nodes: $($all.Count)"
+
+# How many have 'driver pack' in the name?
+$packs = $all | Where-Object {
+    try { $_.SelectSingleNode("*[local-name()='Name']/*[local-name()='Display']").InnerText -match "(?i)driver\s*pack" } catch { $false }
+}
+Write-Host "Driver pack nodes: $($packs.Count)"
+
+# Of those, which ones have a Model with systemID 0B0B?
+$packs | ForEach-Object {
+    $name = try { $_.SelectSingleNode("*[local-name()='Name']/*[local-name()='Display']").InnerText } catch { "?" }
+    $ids = $_.SelectNodes(".//*[local-name()='Model']") | ForEach-Object { $_.GetAttribute("systemID") }
+    Write-Host "PACK: $name"
+    Write-Host "  systemIDs: $($ids -join ', ')"
+}
