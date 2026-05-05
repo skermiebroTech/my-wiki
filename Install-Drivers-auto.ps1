@@ -637,37 +637,95 @@ function Start-PackExtraction {
         }
 
         default {
-            # Try HP SoftPaq silent-extract flags first
-            Log "Extracting EXE (trying HP SoftPaq flags)..."
-            $psi                 = New-Object System.Diagnostics.ProcessStartInfo
-            $psi.FileName        = $PackFile
-            $psi.Arguments       = "/s /e /f `"$DestPath`""
+            # Dell driver packs use:  /s /e="<dest>"   (note = sign, no space)
+            # HP SoftPaq packs use:   /s /e /f "<dest>"
+            # Inno Setup (Lenovo):    /VERYSILENT /DIR="<dest>" /EXTRACT=YES
+            #
+            # Strategy: try Dell format first (most common for our use case),
+            # then HP format, then Inno. Check for files after each attempt.
+
+            Log "Extracting EXE pack..."
+
+            # Attempt 1: Dell /s /e="<dest>"
+            Log "  Attempt 1: Dell format (/s /e=dest)..."
+            $psi              = New-Object System.Diagnostics.ProcessStartInfo
+            $psi.FileName     = $PackFile
+            $psi.Arguments    = "/s /e=`"$DestPath`""
             $psi.UseShellExecute = $false
             $psi.CreateNoWindow  = $true
-            $exProc              = New-Object System.Diagnostics.Process
-            $exProc.StartInfo    = $psi
+            $exProc           = New-Object System.Diagnostics.Process
+            $exProc.StartInfo = $psi
             $exProc.Start() | Out-Null
+            $exProc.WaitForExit()
+            Start-Sleep -Seconds 2
 
-            # Wait 5 s then check whether any files appeared
-            Start-Sleep -Seconds 5
-            $earlyCount = if (Test-Path $DestPath) {
+            $fileCount = if (Test-Path $DestPath) {
                 (Get-ChildItem $DestPath -Recurse -EA SilentlyContinue).Count
             } else { 0 }
+            Log "  After Dell format: $fileCount files in $DestPath"
 
-            if ($earlyCount -eq 0 -and -not $exProc.HasExited) {
-                Log "  HP flags produced no output — retrying with Inno Setup flags..."
-                try { $exProc.Kill() } catch {}
-                Start-Sleep -Seconds 1
-                $psi2                 = New-Object System.Diagnostics.ProcessStartInfo
-                $psi2.FileName        = $PackFile
-                $psi2.Arguments       = "/VERYSILENT /DIR=`"$DestPath`" /EXTRACT=YES"
-                $psi2.UseShellExecute = $false
-                $psi2.CreateNoWindow  = $true
-                $exProc               = New-Object System.Diagnostics.Process
-                $exProc.StartInfo     = $psi2
-                $exProc.Start() | Out-Null
+            if ($fileCount -gt 0) {
+                # Dell extraction succeeded — just report and move on
+                $finalCount = $fileCount
+                SetExtract -Pct 100 -Label "Done — $finalCount files extracted"
+                Stop-ExSpinner      -Success $true
+                Stop-OverallSpinner -Success $true
+                Log "  Extraction finished: $finalCount files in $DestPath"
+                return
             }
 
+            # Attempt 2: HP SoftPaq /s /e /f "<dest>"
+            Log "  Attempt 2: HP SoftPaq format (/s /e /f dest)..."
+            $psi2              = New-Object System.Diagnostics.ProcessStartInfo
+            $psi2.FileName     = $PackFile
+            $psi2.Arguments    = "/s /e /f `"$DestPath`""
+            $psi2.UseShellExecute = $false
+            $psi2.CreateNoWindow  = $true
+            $exProc            = New-Object System.Diagnostics.Process
+            $exProc.StartInfo  = $psi2
+            $exProc.Start() | Out-Null
+
+            # HP extracts asynchronously — watch with watcher
+            $fileCount2 = 0
+            $watchStart = Get-Date
+            while (-not $exProc.HasExited) {
+                Start-Sleep -Milliseconds 700
+                $fileCount2 = if (Test-Path $DestPath) {
+                    (Get-ChildItem $DestPath -Recurse -EA SilentlyContinue).Count
+                } else { 0 }
+                SetExtract -Pct -1 -Label "$fileCount2 files extracted..."
+                Step-ExSpinner
+                [System.Windows.Forms.Application]::DoEvents()
+                if (((Get-Date) - $watchStart).TotalSeconds -gt 30 -and $fileCount2 -eq 0) {
+                    Log "  HP format produced no output after 30s — killing."
+                    try { $exProc.Kill() } catch {}
+                    break
+                }
+            }
+            Start-Sleep -Seconds 2
+            $fileCount2 = if (Test-Path $DestPath) {
+                (Get-ChildItem $DestPath -Recurse -EA SilentlyContinue).Count
+            } else { 0 }
+            Log "  After HP format: $fileCount2 files in $DestPath"
+
+            if ($fileCount2 -gt 0) {
+                SetExtract -Pct 100 -Label "Done — $fileCount2 files extracted"
+                Stop-ExSpinner      -Success $true
+                Stop-OverallSpinner -Success $true
+                Log "  Extraction finished: $fileCount2 files in $DestPath"
+                return
+            }
+
+            # Attempt 3: Inno Setup /VERYSILENT /DIR="<dest>" /EXTRACT=YES (Lenovo)
+            Log "  Attempt 3: Inno Setup format..."
+            $psi3              = New-Object System.Diagnostics.ProcessStartInfo
+            $psi3.FileName     = $PackFile
+            $psi3.Arguments    = "/VERYSILENT /DIR=`"$DestPath`" /EXTRACT=YES"
+            $psi3.UseShellExecute = $false
+            $psi3.CreateNoWindow  = $true
+            $exProc            = New-Object System.Diagnostics.Process
+            $exProc.StartInfo  = $psi3
+            $exProc.Start() | Out-Null
             Watch-Extraction -ExtractProc $exProc -DestPath $DestPath -StallLimitSec $StallLimitSec
         }
     }
