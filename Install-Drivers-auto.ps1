@@ -156,56 +156,54 @@ function Get-LenovoDirectDownloadLink {
     # Extract the docId from the support page URL (e.g. ds549249 from .../downloads/ds549249)
     $docId = $null
     if ($SupportPageUrl -match '/downloads/(ds\d+)') {
-        $docId = $Matches[1].ToUpper()
+        $docId = $Matches[1].ToLower()   # API requires lowercase
     }
     if (-not $docId) {
-        # Try last path segment as fallback
         $seg = ($SupportPageUrl.TrimEnd('/') -split '/')[-1]
-        if ($seg -match '^ds\d+') { $docId = $seg.ToUpper() }
+        if ($seg -match '^ds\d+') { $docId = $seg.ToLower() }
     }
     if (-not $docId) {
-        Log "Could not extract docId from URL: $SupportPageUrl"
+        Log "Could not extract docId from URL: ${SupportPageUrl}"
         return $null
     }
 
-    Log "Querying Lenovo driver API for ${docIdLower}..."
-    SetStage "Querying Lenovo driver API (${docIdLower})..."
-
-    # Try multiple API endpoint variants — Lenovo's API is region-sensitive
-    # Lenovo API requires lowercase docId - uppercase returns body:null
-    $docIdLower = $docId.ToLower()
+    # Use the official Lenovo eSupport Content API (documented at supportapi.lenovo.com)
+    # This is the same backend used by LenovoDriverManager and pcsupport.lenovo.com
+    # Returns Files[] with URL + OperatingSystems directly - no ClientID needed for anonymous content
     $apiUrls = @(
-        "https://pcsupport.lenovo.com/us/en/api/v4/downloads/drivers?docId=${docIdLower}",
-        "https://pcsupport.lenovo.com/au/en/api/v4/downloads/drivers?docId=${docIdLower}",
-        "https://pcsupport.lenovo.com/gb/en/api/v4/downloads/drivers?docId=${docIdLower}",
-        "https://pcsupport.lenovo.com/jp/en/api/v4/downloads/drivers?docId=${docIdLower}"
+        "https://supportapi.lenovo.com/v2.5/content?id=${docId}",
+        "https://supportapi.lenovo.com/v2.5/content/${docId}",
+        "https://pcsupport.lenovo.com/us/en/api/v4/downloads/drivers?docId=${docId}"
     )
 
-    $jsonText = $null
-    $headers = @{
-        "Accept"          = "application/json, text/plain, */*"
+    Log "Querying Lenovo Content API for ${docId} ($LinkType)..."
+    SetStage "Querying Lenovo driver API (${docId})..."
+
+    $jsonText  = $null
+    $headers   = @{
+        "Accept"          = "application/json"
         "Accept-Language" = "en-US,en;q=0.9"
         "Referer"         = "https://pcsupport.lenovo.com/"
-        "User-Agent"      = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent"      = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
 
     foreach ($apiUrl in $apiUrls) {
-        Log "Trying: $apiUrl"
+        Log "Trying: ${apiUrl}"
         try {
             $Global:ProgressPreference = 'SilentlyContinue'
             $resp = Invoke-WebRequest -Uri $apiUrl -Headers $headers -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop
             $Global:ProgressPreference = 'Continue'
             [System.Windows.Forms.Application]::DoEvents()
 
-            if ($resp.StatusCode -eq 200 -and $resp.Content.Length -gt 20) {
-                $candidate = $resp.Content
-                # Check the response actually has file data (not just a null body error)
-                if ($candidate -notmatch '"body"\s*:\s*null') {
-                    $jsonText = $candidate
-                    Log "Got valid response from: ${apiUrl}"
+            if ($resp.StatusCode -eq 200 -and $resp.Content.Length -gt 50) {
+                $body = $resp.Content
+                # Reject empty/null body responses
+                if ($body -notmatch '"body"\s*:\s*null' -and $body -match '"URL"') {
+                    $jsonText = $body
+                    Log "Got valid response (${($body.Length)} bytes) from: ${apiUrl}"
                     break
                 } else {
-                    Log "API returned null body from: ${apiUrl}"
+                    Log "Response had no file data from: ${apiUrl}"
                 }
             }
         } catch {
@@ -217,68 +215,79 @@ function Get-LenovoDirectDownloadLink {
         [System.Windows.Forms.Application]::DoEvents()
     }
 
-    if (-not $jsonText -or $jsonText.Length -lt 10) {
-        Log "All API endpoints failed for ${docIdLower} — trying direct URL regex from support page..."
-        # Emergency fallback: use known Lenovo download URL pattern from recipecard version
+    if (-not $jsonText) {
+        Log "All API endpoints failed for ${docId}."
         return $null
     }
 
+    # Parse the response
+    $apiData = $null
     try {
         $apiData = $jsonText | ConvertFrom-Json
     } catch {
-        Log "Failed to parse API JSON for ${docIdLower}: $($_.Exception.Message)"
-        $urlPat = '"URL"\s*:\s*"(https?://download\.lenovo\.com/[^"]+\.(?:exe|zip|cab))"'
-        $m = [regex]::Match($jsonText, $urlPat)
+        Log "JSON parse failed for ${docId}: $($_.Exception.Message)"
+        # Regex fallback: grab any download.lenovo.com EXE/ZIP/CAB URL
+        $m = [regex]::Match($jsonText, '"URL"\s*:\s*"(https?://download\.lenovo\.com/[^"]+\.(?:exe|zip|cab))"')
         if ($m.Success) { $url = $m.Groups[1].Value; Log "Regex fallback URL: ${url}"; return $url }
         return $null
     }
 
-    # Navigate the response — Lenovo API returns body.DriverDetails.Files[]
+    # The v2.5 API returns Files[] at root level; v4 API wraps in body.DriverDetails.Files
     $files = $null
-    try { $files = $apiData.body.DriverDetails.Files } catch {}
-    if (-not $files) { try { $files = $apiData.Files } catch {} }
+    try { $files = $apiData.Files }           catch {}
+    if (-not $files) { try { $files = $apiData.body.DriverDetails.Files } catch {} }
+    if (-not $files) { try { $files = $apiData.DriverDetails.Files }      catch {} }
+
     if (-not $files -or $files.Count -eq 0) {
-        Log "No files in API response for ${docIdLower}. Raw: $($jsonText.Substring(0, [Math]::Min(300,$jsonText.Length)))"
+        Log "No files in API response for ${docId}. Raw: $($jsonText.Substring(0,[Math]::Min(400,$jsonText.Length)))"
         return $null
     }
 
-    Log "API returned $($files.Count) file(s) for $docId."
+    Log "API returned $($files.Count) file(s) for ${docId}."
 
     if ($LinkType -eq "SCCM") {
-        # Filter to EXE files only, excluding READMEs
+        # Filter to EXE/ZIP/CAB, exclude READMEs
         $exeFiles = $files | Where-Object {
-            $_.TypeString -match "EXE" -and
+            ($_.Type -match "EXE|ZIP|CAB" -or $_.TypeString -match "EXE|ZIP|CAB") -and
             $_.URL -notmatch "readme|\.txt$|\.html$" -and
             $_.URL -match "^https?://"
         }
 
         Log "EXE candidates:"
         $exeFiles | ForEach-Object {
-            $osLabel = if ($_.OperatingSystemKeys) { $_.OperatingSystemKeys -join ", " } else { "unknown" }
-            Log "  [$osLabel] $($_.URL)"
+            $osLabel = if ($_.OperatingSystems) { ($_.OperatingSystems | ForEach-Object { $_.Name }) -join ", " }
+                       elseif ($_.OperatingSystemKeys) { $_.OperatingSystemKeys -join ", " }
+                       else { "unknown" }
+            Log "  [${osLabel}] $($_.URL)"
         }
 
-        # Priority: Win11 newest version first
-        $win11 = $exeFiles | Where-Object { $_.OperatingSystemKeys -match "Windows 11" }
+        # Priority: Win11 newest first, then Win10 newest, then any EXE
+        $win11 = $exeFiles | Where-Object {
+            ($_.OperatingSystems | Where-Object { $_.Name -match "Windows 11" }) -or
+            ($_.OperatingSystemKeys -match "Windows 11")
+        }
         $preferred = $win11 | Where-Object { $_.URL -match "w11_24|win11_24" } | Select-Object -Last 1
         if (-not $preferred) { $preferred = $win11 | Where-Object { $_.URL -match "w11_22|win11_22" } | Select-Object -Last 1 }
         if (-not $preferred) { $preferred = $win11 | Where-Object { $_.URL -match "w11_21|win11_21" } | Select-Object -Last 1 }
         if (-not $preferred) { $preferred = $win11 | Select-Object -Last 1 }
 
-        # Fallback: newest Win10 version
         if (-not $preferred) {
             Log "No Windows 11 SCCM pack found — falling back to Windows 10..."
-            $win10 = $exeFiles | Where-Object { $_.OperatingSystemKeys -match "Windows 10" }
+            $win10 = $exeFiles | Where-Object {
+                ($_.OperatingSystems | Where-Object { $_.Name -match "Windows 10" }) -or
+                ($_.OperatingSystemKeys -match "Windows 10")
+            }
             $preferred = $win10 | Where-Object { $_.URL -match "22h2|21h2|21h1|20h2" } | Select-Object -Last 1
             if (-not $preferred) { $preferred = $win10 | Select-Object -Last 1 }
         }
 
-        # Last resort: any EXE
         if (-not $preferred) { $preferred = $exeFiles | Select-Object -Last 1 }
 
         if ($preferred) {
-            $osLabel = if ($preferred.OperatingSystemKeys) { $preferred.OperatingSystemKeys -join ", " } else { "" }
-            Log "Selected SCCM URL [$osLabel]: $($preferred.URL)"
+            $osLabel = if ($preferred.OperatingSystems) { ($preferred.OperatingSystems | ForEach-Object { $_.Name }) -join ", " }
+                       elseif ($preferred.OperatingSystemKeys) { $preferred.OperatingSystemKeys -join ", " }
+                       else { "" }
+            Log "Selected SCCM URL [${osLabel}]: $($preferred.URL)"
             return $preferred.URL
         }
 
@@ -286,21 +295,20 @@ function Get-LenovoDirectDownloadLink {
         return $null
     }
 
-    # BIOS: pick the first EXE that looks like a BIOS update
+    # BIOS: first EXE that looks like a BIOS/firmware update
     $biosFile = $files | Where-Object {
-        $_.TypeString -match "EXE" -and
-        ($_.Name -match "bios|uefi|firmware" -or $_.URL -match "bios|uefi") -and
+        ($_.Type -match "EXE" -or $_.TypeString -match "EXE") -and
+        ($_.Title -match "bios|uefi|firmware" -or $_.URL -match "bios|uefi") -and
         $_.URL -notmatch "readme"
     } | Select-Object -First 1
 
     if (-not $biosFile) {
-        $biosFile = $files | Where-Object { $_.TypeString -match "EXE" -and $_.URL -notmatch "readme" } | Select-Object -First 1
+        $biosFile = $files | Where-Object {
+            ($_.Type -match "EXE" -or $_.TypeString -match "EXE") -and $_.URL -notmatch "readme"
+        } | Select-Object -First 1
     }
 
-    if ($biosFile) {
-        Log "Selected BIOS URL: $($biosFile.URL)"
-        return $biosFile.URL
-    }
+    if ($biosFile) { Log "Selected BIOS URL: $($biosFile.URL)"; return $biosFile.URL }
 
     Log "Could not find a BIOS download URL."
     return $null
