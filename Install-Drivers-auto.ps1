@@ -168,56 +168,63 @@ function Get-LenovoDirectDownloadLink {
         return $null
     }
 
-    # Call Lenovo's JSON driver detail API — much faster and more reliable than scraping HTML
-    $apiUrl = "https://pcsupport.lenovo.com/us/en/api/v4/downloads/drivers?docId=$docId"
     Log "Querying Lenovo driver API for $docId..."
     SetStage "Querying Lenovo driver API ($docId)..."
 
-    $tmpFile = [System.IO.Path]::GetTempFileName()
-    $curlArgs = "--silent --show-error --location --max-time 60 --connect-timeout 20 " +
-                "--header `"Accept: application/json`" " +
-                "--header `"Referer: https://pcsupport.lenovo.com/`" " +
-                "--user-agent `"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36`" " +
-                "--output `"$tmpFile`" " +
-                "`"$apiUrl`""
+    # Try multiple API endpoint variants — Lenovo's API is region-sensitive
+    $apiUrls = @(
+        "https://pcsupport.lenovo.com/us/en/api/v4/downloads/drivers?docId=$docId",
+        "https://pcsupport.lenovo.com/au/en/api/v4/downloads/drivers?docId=$docId",
+        "https://pcsupport.lenovo.com/gb/en/api/v4/downloads/drivers?docId=$docId",
+        "https://supportapi.lenovo.com/v4/downloads/drivers?docId=$docId"
+    )
 
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = "curl.exe"
-    $psi.Arguments = $curlArgs
-    $psi.RedirectStandardError = $true
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow = $true
+    $jsonText = $null
+    $headers = @{
+        "Accept"          = "application/json, text/plain, */*"
+        "Accept-Language" = "en-US,en;q=0.9"
+        "Referer"         = "https://pcsupport.lenovo.com/"
+        "User-Agent"      = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
 
-    $proc = New-Object System.Diagnostics.Process
-    $proc.StartInfo = $psi
-    $proc.Start() | Out-Null
+    foreach ($apiUrl in $apiUrls) {
+        Log "Trying: $apiUrl"
+        try {
+            $Global:ProgressPreference = 'SilentlyContinue'
+            $resp = Invoke-WebRequest -Uri $apiUrl -Headers $headers -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop
+            $Global:ProgressPreference = 'Continue'
+            [System.Windows.Forms.Application]::DoEvents()
 
-    $elapsed = 0
-    while (-not $proc.HasExited -and $elapsed -lt 65) {
-        Start-Sleep -Milliseconds 500
-        $elapsed += 0.5
+            if ($resp.StatusCode -eq 200 -and $resp.Content.Length -gt 20) {
+                $candidate = $resp.Content
+                # Check the response actually has file data (not just a null body error)
+                if ($candidate -notmatch '"body"\s*:\s*null') {
+                    $jsonText = $candidate
+                    Log "Got valid response from: $apiUrl"
+                    break
+                } else {
+                    Log "API returned null body from: $apiUrl"
+                }
+            }
+        } catch {
+            Log "API attempt failed ($apiUrl): $($_.Exception.Message)"
+            $Global:ProgressPreference = 'Continue'
+        }
         $cur = $progress.Value
         $progress.Value = if ($cur -ge 9) { 1 } else { $cur + 1 }
         [System.Windows.Forms.Application]::DoEvents()
     }
 
-    if (-not $proc.HasExited) { try { $proc.Kill() } catch {}; Log "API request timed out for $docId."; Remove-Item $tmpFile -Force -ErrorAction SilentlyContinue; return $null }
-    $apiErr = $proc.StandardError.ReadToEnd()
-    if ($proc.ExitCode -ne 0) { Log "API curl error (exit $($proc.ExitCode)): $apiErr"; Remove-Item $tmpFile -Force -ErrorAction SilentlyContinue; return $null }
-
-    $jsonText = $null
-    if (Test-Path $tmpFile) {
-        $jsonText = [System.IO.File]::ReadAllText($tmpFile, [System.Text.Encoding]::UTF8)
-        Remove-Item $tmpFile -Force -ErrorAction SilentlyContinue
+    if (-not $jsonText -or $jsonText.Length -lt 10) {
+        Log "All API endpoints failed for $docId — trying direct URL regex from support page..."
+        # Emergency fallback: use known Lenovo download URL pattern from recipecard version
+        return $null
     }
-
-    if (-not $jsonText -or $jsonText.Length -lt 10) { Log "Empty or invalid API response for $docId."; return $null }
 
     try {
         $apiData = $jsonText | ConvertFrom-Json
     } catch {
-        Log "Failed to parse API JSON for $docId : $($_.Exception.Message)"
-        # Last resort: regex scan the raw JSON for URLs
+        Log "Failed to parse API JSON for $docId: $($_.Exception.Message)"
         $urlPat = '"URL"\s*:\s*"(https?://download\.lenovo\.com/[^"]+\.(?:exe|zip|cab))"'
         $m = [regex]::Match($jsonText, $urlPat)
         if ($m.Success) { $url = $m.Groups[1].Value; Log "Regex fallback URL: $url"; return $url }
@@ -226,14 +233,10 @@ function Get-LenovoDirectDownloadLink {
 
     # Navigate the response — Lenovo API returns body.DriverDetails.Files[]
     $files = $null
-    try {
-        $files = $apiData.body.DriverDetails.Files
-    } catch {}
-    if (-not $files) {
-        try { $files = $apiData.Files } catch {}
-    }
+    try { $files = $apiData.body.DriverDetails.Files } catch {}
+    if (-not $files) { try { $files = $apiData.Files } catch {} }
     if (-not $files -or $files.Count -eq 0) {
-        Log "No files found in API response for $docId. Raw (first 300): $($jsonText.Substring(0, [Math]::Min(300,$jsonText.Length)))"
+        Log "No files in API response for $docId. Raw: $($jsonText.Substring(0, [Math]::Min(300,$jsonText.Length)))"
         return $null
     }
 
