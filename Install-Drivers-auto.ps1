@@ -1,21 +1,22 @@
 # =============================================================
-# DriverInstaller.ps1
-# Version: 1.1.0
+# Install-Drivers-auto.ps1
+# Version: 1.2.0
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
 # Run from Win+R in audit mode:
-#   powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/DriverInstaller.ps1 | iex"
+#   powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto.ps1 | iex"
 #
 # Supports: Dell, HP, Lenovo
 # Detects manufacturer, downloads correct driver pack silently,
 # extracts to C:\DRIVERS, installs all INFs via pnputil.
 # =============================================================
 
-$ScriptVersion = "1.1.0"
+$ScriptVersion = "1.2.0"
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 # Prevent sleep / display timeout during install
 powercfg /change standby-timeout-ac 0
@@ -29,6 +30,17 @@ $LogFile = Join-Path ([Environment]::GetFolderPath("UserProfile")) `
 New-Item -ItemType File -Path $LogFile -Force | Out-Null
 
 # =========================
+# FONT CONSTANTS
+# =========================
+$FontMono      = New-Object System.Drawing.Font("Courier New", 9,   [System.Drawing.FontStyle]::Regular)
+$FontMonoSm    = New-Object System.Drawing.Font("Courier New", 8,   [System.Drawing.FontStyle]::Regular)
+$FontUI        = New-Object System.Drawing.Font("Segoe UI",    9,   [System.Drawing.FontStyle]::Regular)
+$FontUIBold    = New-Object System.Drawing.Font("Segoe UI",    9,   [System.Drawing.FontStyle]::Bold)
+$FontUIBoldSm  = New-Object System.Drawing.Font("Segoe UI",    8,   [System.Drawing.FontStyle]::Bold)
+$FontUISmall   = New-Object System.Drawing.Font("Segoe UI",    7.5, [System.Drawing.FontStyle]::Regular)
+$FontTitleBold = New-Object System.Drawing.Font("Segoe UI",    13,  [System.Drawing.FontStyle]::Bold)
+
+# =========================
 # FORM SETUP
 # =========================
 $form                 = New-Object System.Windows.Forms.Form
@@ -39,41 +51,46 @@ $form.FormBorderStyle = "FixedSingle"
 $form.MaximizeBox     = $false
 $form.BackColor       = [System.Drawing.Color]::FromArgb(245, 245, 245)
 
+# Enable pixel-sharp ClearType rendering on this form
+[System.Windows.Forms.Application]::SetCompatibleTextRenderingDefault($false)
+
 # ---- Title label ----
 $title           = New-Object System.Windows.Forms.Label
 $title.AutoSize  = $true
-$title.Font      = New-Object System.Drawing.Font("Segoe UI", 13, [System.Drawing.FontStyle]::Bold)
+$title.Font      = $FontTitleBold
 $title.ForeColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
 $title.Location  = New-Object System.Drawing.Point(20, 15)
 $title.Text      = "Driver Installer"
+$title.UseCompatibleTextRendering = $false
 $form.Controls.Add($title)
 
 # ---- Version label (top-right) ----
 $versionLabel           = New-Object System.Windows.Forms.Label
 $versionLabel.AutoSize  = $true
-$versionLabel.Font      = New-Object System.Drawing.Font("Segoe UI", 8)
+$versionLabel.Font      = $FontUISmall
 $versionLabel.ForeColor = [System.Drawing.Color]::Gray
 $versionLabel.Text      = "v$ScriptVersion"
 $versionLabel.Location  = New-Object System.Drawing.Point(510, 20)
+$versionLabel.UseCompatibleTextRendering = $false
 $form.Controls.Add($versionLabel)
 
-# ---- Status box (dark terminal style) ----
+# ---- Status box (dark terminal — Courier New for crispness) ----
 $statusBox             = New-Object System.Windows.Forms.TextBox
 $statusBox.Multiline   = $true
 $statusBox.ScrollBars  = "Vertical"
 $statusBox.Size        = New-Object System.Drawing.Size(536, 200)
 $statusBox.Location    = New-Object System.Drawing.Point(20, 55)
 $statusBox.ReadOnly    = $true
-$statusBox.BackColor   = [System.Drawing.Color]::FromArgb(30, 30, 30)
-$statusBox.ForeColor   = [System.Drawing.Color]::FromArgb(180, 255, 180)
-$statusBox.Font        = New-Object System.Drawing.Font("Consolas", 8.5)
+$statusBox.BackColor   = [System.Drawing.Color]::FromArgb(22, 22, 22)
+$statusBox.ForeColor   = [System.Drawing.Color]::FromArgb(190, 255, 190)
+$statusBox.Font        = $FontMono
 $statusBox.BorderStyle = "FixedSingle"
 $form.Controls.Add($statusBox)
 
-# ---- DOWNLOAD section ----
+# ---- DOWNLOAD group ----
 $dlGroupBox           = New-Object System.Windows.Forms.GroupBox
 $dlGroupBox.Text      = "Download"
-$dlGroupBox.Font      = New-Object System.Drawing.Font("Segoe UI", 8, [System.Drawing.FontStyle]::Bold)
+$dlGroupBox.Font      = $FontUIBoldSm
 $dlGroupBox.ForeColor = [System.Drawing.Color]::FromArgb(0, 100, 180)
 $dlGroupBox.Size      = New-Object System.Drawing.Size(536, 68)
 $dlGroupBox.Location  = New-Object System.Drawing.Point(20, 265)
@@ -89,17 +106,18 @@ $dlGroupBox.Controls.Add($dlBar)
 
 $dlLabel           = New-Object System.Windows.Forms.Label
 $dlLabel.AutoSize  = $false
-$dlLabel.Size      = New-Object System.Drawing.Size(508, 16)
+$dlLabel.Size      = New-Object System.Drawing.Size(508, 17)
 $dlLabel.Location  = New-Object System.Drawing.Point(12, 42)
-$dlLabel.Font      = New-Object System.Drawing.Font("Consolas", 7.5)
-$dlLabel.ForeColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
+$dlLabel.Font      = $FontMonoSm
+$dlLabel.ForeColor = [System.Drawing.Color]::FromArgb(50, 50, 50)
 $dlLabel.Text      = "Waiting..."
+$dlLabel.UseCompatibleTextRendering = $false
 $dlGroupBox.Controls.Add($dlLabel)
 
-# ---- EXTRACT section ----
+# ---- EXTRACT group ----
 $exGroupBox           = New-Object System.Windows.Forms.GroupBox
 $exGroupBox.Text      = "Extract"
-$exGroupBox.Font      = New-Object System.Drawing.Font("Segoe UI", 8, [System.Drawing.FontStyle]::Bold)
+$exGroupBox.Font      = $FontUIBoldSm
 $exGroupBox.ForeColor = [System.Drawing.Color]::FromArgb(0, 140, 80)
 $exGroupBox.Size      = New-Object System.Drawing.Size(536, 68)
 $exGroupBox.Location  = New-Object System.Drawing.Point(20, 340)
@@ -115,17 +133,18 @@ $exGroupBox.Controls.Add($exBar)
 
 $exLabel           = New-Object System.Windows.Forms.Label
 $exLabel.AutoSize  = $false
-$exLabel.Size      = New-Object System.Drawing.Size(508, 16)
+$exLabel.Size      = New-Object System.Drawing.Size(508, 17)
 $exLabel.Location  = New-Object System.Drawing.Point(12, 42)
-$exLabel.Font      = New-Object System.Drawing.Font("Consolas", 7.5)
-$exLabel.ForeColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
+$exLabel.Font      = $FontMonoSm
+$exLabel.ForeColor = [System.Drawing.Color]::FromArgb(50, 50, 50)
 $exLabel.Text      = "Waiting..."
+$exLabel.UseCompatibleTextRendering = $false
 $exGroupBox.Controls.Add($exLabel)
 
-# ---- Overall progress bar ----
+# ---- OVERALL group ----
 $overallGroupBox           = New-Object System.Windows.Forms.GroupBox
 $overallGroupBox.Text      = "Overall"
-$overallGroupBox.Font      = New-Object System.Drawing.Font("Segoe UI", 8, [System.Drawing.FontStyle]::Bold)
+$overallGroupBox.Font      = $FontUIBoldSm
 $overallGroupBox.ForeColor = [System.Drawing.Color]::FromArgb(80, 80, 80)
 $overallGroupBox.Size      = New-Object System.Drawing.Size(536, 48)
 $overallGroupBox.Location  = New-Object System.Drawing.Point(20, 415)
@@ -145,8 +164,9 @@ $logLabel.AutoSize  = $false
 $logLabel.Size      = New-Object System.Drawing.Size(536, 16)
 $logLabel.Location  = New-Object System.Drawing.Point(20, 468)
 $logLabel.ForeColor = [System.Drawing.Color]::Gray
-$logLabel.Font      = New-Object System.Drawing.Font("Segoe UI", 7.5)
+$logLabel.Font      = $FontUISmall
 $logLabel.Text      = "Log: $LogFile"
+$logLabel.UseCompatibleTextRendering = $false
 $form.Controls.Add($logLabel)
 
 # ---- Button ----
@@ -154,7 +174,7 @@ $button            = New-Object System.Windows.Forms.Button
 $button.Text       = "Install Drivers"
 $button.Size       = New-Object System.Drawing.Size(160, 36)
 $button.Location   = New-Object System.Drawing.Point(200, 490)
-$button.Font       = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+$button.Font       = $FontUIBold
 $button.BackColor  = [System.Drawing.Color]::FromArgb(0, 120, 215)
 $button.ForeColor  = [System.Drawing.Color]::White
 $button.FlatStyle  = "Flat"
@@ -178,7 +198,6 @@ function SetProgress($val) {
     [System.Windows.Forms.Application]::DoEvents()
 }
 
-# Update the Download bar + label
 function SetDownload {
     param([int]$Pct, [string]$Label)
     $dlBar.Value  = [math]::Min([math]::Max($Pct, 0), 100)
@@ -186,7 +205,6 @@ function SetDownload {
     [System.Windows.Forms.Application]::DoEvents()
 }
 
-# Update the Extract bar + label
 function SetExtract {
     param([int]$Pct, [string]$Label)
     $exBar.Value  = [math]::Min([math]::Max($Pct, 0), 100)
@@ -203,8 +221,41 @@ function Assert-Curl {
 }
 
 # =========================
+# PRE-SCAN: count files inside pack before extraction
+# ZIP  — exact count via ZipFile API
+# EXE/CAB — estimate from pack size (avg ~4 KB/file for driver packs)
+# =========================
+function Get-PackFileCount {
+    param([string]$PackFile)
+
+    $ext = [System.IO.Path]::GetExtension($PackFile).ToLower()
+    if ($ext -eq ".zip") {
+        try {
+            $zip   = [System.IO.Compression.ZipFile]::OpenRead($PackFile)
+            $count = $zip.Entries.Count
+            $zip.Dispose()
+            Log "  Pre-scan: $count files in ZIP"
+            return $count
+        } catch {
+            Log "  Pre-scan ZIP failed: $($_.Exception.Message)"
+            return 0
+        }
+    } else {
+        # Heuristic for EXE/CAB: driver packs average ~4 KB per file
+        try {
+            $sizeBytes = (Get-Item $PackFile).Length
+            $estimated = [math]::Max([int]($sizeBytes / 4096), 50)
+            Log "  Pre-scan: estimated ~$estimated files (size-based heuristic)"
+            return $estimated
+        } catch {
+            return 0
+        }
+    }
+}
+
+# =========================
 # CURL DOWNLOAD
-# with live Download bar showing MB received / total MB / %
+# HEAD request first to get total size, then live MB/total/% bar
 # =========================
 function Invoke-CurlDownload {
     param(
@@ -218,37 +269,30 @@ function Invoke-CurlDownload {
     Log "  URL: $Url"
     SetDownload -Pct 0 -Label "Connecting..."
 
-    # Use curl --write-out to get total content-length into a sidecar file
-    $infoFile = [System.IO.Path]::GetTempFileName()
-    $curlArgs = "--location --fail --max-time $TimeoutSec --connect-timeout 30 " +
-                "--user-agent `"Mozilla/5.0 (Windows NT 10.0; Win64; x64)`" " +
-                "--write-out `"%{size_download}\n%{http_code}\n%{content_type}`" " +
-                "--output `"$OutFile`" `"$Url`" > `"$infoFile`""
-
-    # We also do a silent HEAD first to get Content-Length for the progress bar
+    # Silent HEAD to get Content-Length
     $totalBytes = 0
     try {
-        $headArgs = "--silent --head --max-time 15 --connect-timeout 10 " +
-                    "--user-agent `"Mozilla/5.0 (Windows NT 10.0; Win64; x64)`" " +
-                    "--write-out `"%{content_length_download}`" --output NUL `"$Url`""
         $headResult = & curl.exe --silent --head --max-time 15 --connect-timeout 10 `
-            --user-agent "Mozilla/5.0" --write-out "%{content_length_download}" `
-            --output NUL "$Url" 2>$null
-        if ($headResult -match '^\d+$') { $totalBytes = [long]$headResult }
+            --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" `
+            --write-out "%{content_length_download}" --output NUL "$Url" 2>$null
+        if ($headResult -match '^\d+$' -and [long]$headResult -gt 0) {
+            $totalBytes = [long]$headResult
+        }
     } catch {}
 
     $totalMB = if ($totalBytes -gt 0) { [math]::Round($totalBytes / 1MB, 1) } else { 0 }
+    if ($totalMB -gt 0) { Log "  Expected size: $totalMB MB" }
 
-    # Start the actual download
-    $psi                     = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName            = "curl.exe"
-    $psi.Arguments           = "--location --fail --max-time $TimeoutSec --connect-timeout 30 " +
-                               "--user-agent `"Mozilla/5.0 (Windows NT 10.0; Win64; x64)`" " +
-                               "--output `"$OutFile`" `"$Url`""
-    $psi.UseShellExecute     = $false
-    $psi.CreateNoWindow      = $true
-    $proc                    = New-Object System.Diagnostics.Process
-    $proc.StartInfo          = $psi
+    # Start download
+    $psi                 = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName        = "curl.exe"
+    $psi.Arguments       = "--location --fail --max-time $TimeoutSec --connect-timeout 30 " +
+                           "--user-agent `"Mozilla/5.0 (Windows NT 10.0; Win64; x64)`" " +
+                           "--output `"$OutFile`" `"$Url`""
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow  = $true
+    $proc                = New-Object System.Diagnostics.Process
+    $proc.StartInfo      = $psi
     $proc.Start() | Out-Null
 
     $lastSize = 0; $stall = 0
@@ -256,20 +300,17 @@ function Invoke-CurlDownload {
         Start-Sleep -Milliseconds 700
         $sz = if (Test-Path $OutFile) { (Get-Item $OutFile -EA SilentlyContinue).Length } else { 0 }
         if ($sz -gt $lastSize) { $stall = 0; $lastSize = $sz } else { $stall++ }
-
         $mbDone = [math]::Round($sz / 1MB, 1)
 
         if ($totalMB -gt 0) {
-            $pct     = [math]::Min([int](($sz / ($totalBytes)) * 100), 99)
-            $lbl     = "$mbDone MB / $totalMB MB  ($pct%)"
+            $pct = [math]::Min([int](($sz / $totalBytes) * 100), 99)
+            SetDownload -Pct $pct -Label "$mbDone MB / $totalMB MB  ($pct%)"
+            Log "  $mbDone MB / $totalMB MB ($pct%)"
         } else {
-            # Unknown total — pulse bar back and forth
             $pct = ($dlBar.Value + 5) % 95
-            $lbl = "$mbDone MB received"
+            SetDownload -Pct $pct -Label "$mbDone MB received..."
+            Log "  $mbDone MB received"
         }
-
-        SetDownload -Pct $pct -Label $lbl
-        Log "  $lbl"
 
         if ($stall -gt 90) {
             Log "  WARNING: download stalled 63s — aborting."
@@ -298,25 +339,24 @@ function Invoke-CurlDownload {
 
 # =========================
 # EXTRACTION WATCHER
-# Polls file count in destination folder to animate the Extract bar
-# while the silent extractor runs in background
+# Polls destination folder file count against a known/estimated total.
+# Shows "X / Y files  (Z%)" so the bar is truly proportional.
 # =========================
 function Watch-Extraction {
     param(
         [System.Diagnostics.Process]$ExtractProc,
         [string]$DestPath,
-        [int]$ExpectedFiles = 0,       # 0 = unknown, use pulse
+        [int]$TotalFiles   = 0,      # from Get-PackFileCount — 0 = pulse fallback
         [int]$StallLimitSec = 300
     )
 
-    $stall      = 0
-    $lastCount  = 0
-    $pulse      = 0
+    $stall     = 0
+    $lastCount = 0
 
-    SetExtract -Pct 0 -Label "Extracting..."
+    SetExtract -Pct 0 -Label "Extracting — scanning destination..."
 
     while (-not $ExtractProc.HasExited) {
-        Start-Sleep -Milliseconds 800
+        Start-Sleep -Milliseconds 700
 
         $count = 0
         if (Test-Path $DestPath) {
@@ -325,36 +365,39 @@ function Watch-Extraction {
 
         if ($count -gt $lastCount) { $stall = 0; $lastCount = $count } else { $stall++ }
 
-        if ($ExpectedFiles -gt 0) {
-            $pct = [math]::Min([int](($count / $ExpectedFiles) * 100), 99)
-            SetExtract -Pct $pct -Label "$count / ~$ExpectedFiles files extracted"
+        if ($TotalFiles -gt 0) {
+            # True proportional bar — cap at 99 while process is still running
+            $pct = [math]::Min([int](($count / $TotalFiles) * 100), 99)
+            $remaining = [math]::Max($TotalFiles - $count, 0)
+            SetExtract -Pct $pct -Label "$count / $TotalFiles files  ($remaining remaining)"
         } else {
-            # Pulse animation
-            $pulse = ($pulse + 4) % 96
-            SetExtract -Pct $pulse -Label "$count files extracted so far..."
+            # Unknown total — simple "X files extracted" with pulsing bar
+            $pct = ($exBar.Value + 3) % 96
+            SetExtract -Pct $pct -Label "$count files extracted..."
         }
 
         [System.Windows.Forms.Application]::DoEvents()
 
-        if ($stall -gt ($StallLimitSec * 1.25)) {
+        if ($stall -gt [int]($StallLimitSec * 1.25)) {
             Log "  WARNING: extraction stalled — killing process."
             try { $ExtractProc.Kill() } catch {}
             break
         }
     }
 
-    # Final count after process exits
+    # Wait a moment for any last file writes to flush
     Start-Sleep -Seconds 2
-    $finalCount = 0
-    if (Test-Path $DestPath) {
-        $finalCount = (Get-ChildItem $DestPath -Recurse -ErrorAction SilentlyContinue).Count
-    }
+    $finalCount = if (Test-Path $DestPath) {
+        (Get-ChildItem $DestPath -Recurse -ErrorAction SilentlyContinue).Count
+    } else { 0 }
+
     SetExtract -Pct 100 -Label "Done — $finalCount files extracted"
-    Log "  Extraction finished. $finalCount files in $DestPath"
+    Log "  Extraction finished: $finalCount files in $DestPath"
 }
 
 # =========================
 # INF INSTALLER
+# Reuses Extract bar (relabelled) to show INF install progress
 # =========================
 function Install-DriversFromPath {
     param([string]$BasePath)
@@ -367,14 +410,15 @@ function Install-DriversFromPath {
 
     $total = $infs.Count; $i = 0
     Log "Found $total INF file(s) — installing via pnputil..."
+    $exGroupBox.Text = "Install INFs"
 
     foreach ($inf in $infs) {
         $i++
-        $pct = 60 + [int](($i / $total) * 38)   # 60–98% of overall bar
-        SetProgress $pct
-        # Reuse Extract bar to show INF install progress
+        $overallPct = 60 + [int](($i / $total) * 38)   # 60–98% of overall bar
+        SetProgress $overallPct
         $infPct = [int](($i / $total) * 100)
-        SetExtract -Pct $infPct -Label "Installing INF $i / $total : $($inf.Name)"
+        $remaining = $total - $i
+        SetExtract -Pct $infPct -Label "$i / $total INFs  ($remaining remaining)  —  $($inf.Name)"
         Log "[$i/$total] $($inf.Name)"
         $out = pnputil /add-driver "`"$($inf.FullName)`"" /install 2>&1
         foreach ($l in $out) { Log "  $l" }
@@ -383,8 +427,96 @@ function Install-DriversFromPath {
 
     SetProgress 100
     SetExtract -Pct 100 -Label "All $total INFs installed."
+    $exGroupBox.Text = "Extract / Install"
     Log "All INFs processed."
     return $true
+}
+
+# =========================
+# SHARED EXTRACT RUNNER
+# Handles ZIP (background job), CAB (expand.exe), EXE (Inno Setup)
+# Pre-scans for file count before starting so bar is proportional
+# =========================
+function Start-PackExtraction {
+    param(
+        [string]$PackFile,
+        [string]$DestPath,
+        [int]$StallLimitSec = 300
+    )
+
+    if (-not (Test-Path $DestPath)) { New-Item -Path $DestPath -ItemType Directory -Force | Out-Null }
+
+    Log "Pre-scanning pack for file count..."
+    SetExtract -Pct 0 -Label "Pre-scanning pack..."
+    $totalFiles = Get-PackFileCount -PackFile $PackFile
+
+    $ext = [System.IO.Path]::GetExtension($PackFile).ToLower()
+
+    switch ($ext) {
+        ".zip" {
+            Log "Extracting ZIP in background..."
+            SetExtract -Pct 0 -Label "Starting ZIP extraction..."
+            $zipJob = Start-Job {
+                param($src, $dst)
+                Add-Type -AssemblyName System.IO.Compression.FileSystem
+                [System.IO.Compression.ZipFile]::ExtractToDirectory($src, $dst)
+            } -ArgumentList $PackFile, $DestPath
+
+            $stall = 0; $lastCount = 0
+            while ($zipJob.State -eq "Running") {
+                Start-Sleep -Milliseconds 700
+                $count = if (Test-Path $DestPath) {
+                    (Get-ChildItem $DestPath -Recurse -EA SilentlyContinue).Count
+                } else { 0 }
+                if ($count -gt $lastCount) { $stall = 0; $lastCount = $count } else { $stall++ }
+
+                if ($totalFiles -gt 0) {
+                    $pct       = [math]::Min([int](($count / $totalFiles) * 100), 99)
+                    $remaining = [math]::Max($totalFiles - $count, 0)
+                    SetExtract -Pct $pct -Label "$count / $totalFiles files  ($remaining remaining)"
+                } else {
+                    $pct = ($exBar.Value + 3) % 96
+                    SetExtract -Pct $pct -Label "$count files extracted..."
+                }
+                [System.Windows.Forms.Application]::DoEvents()
+                if ($stall -gt 375) { Log "  ZIP stalled — stopping job."; Stop-Job $zipJob; break }
+            }
+            Receive-Job $zipJob -ErrorAction SilentlyContinue | Out-Null
+            Remove-Job  $zipJob
+            $finalCount = if (Test-Path $DestPath) {
+                (Get-ChildItem $DestPath -Recurse -EA SilentlyContinue).Count
+            } else { 0 }
+            SetExtract -Pct 100 -Label "Done — $finalCount files extracted"
+            Log "  ZIP extraction complete. $finalCount files."
+        }
+
+        ".cab" {
+            $psi                 = New-Object System.Diagnostics.ProcessStartInfo
+            $psi.FileName        = "expand.exe"
+            $psi.Arguments       = "`"$PackFile`" -F:* `"$DestPath`""
+            $psi.UseShellExecute = $false
+            $psi.CreateNoWindow  = $true
+            $exProc              = New-Object System.Diagnostics.Process
+            $exProc.StartInfo    = $psi
+            $exProc.Start() | Out-Null
+            Watch-Extraction -ExtractProc $exProc -DestPath $DestPath `
+                             -TotalFiles $totalFiles -StallLimitSec $StallLimitSec
+        }
+
+        default {
+            # Inno Setup EXE (Dell, HP, Lenovo SCCM packs)
+            $psi                 = New-Object System.Diagnostics.ProcessStartInfo
+            $psi.FileName        = $PackFile
+            $psi.Arguments       = "/VERYSILENT /DIR=`"$DestPath`" /EXTRACT=YES"
+            $psi.UseShellExecute = $false
+            $psi.CreateNoWindow  = $true
+            $exProc              = New-Object System.Diagnostics.Process
+            $exProc.StartInfo    = $psi
+            $exProc.Start() | Out-Null
+            Watch-Extraction -ExtractProc $exProc -DestPath $DestPath `
+                             -TotalFiles $totalFiles -StallLimitSec $StallLimitSec
+        }
+    }
 }
 
 # =========================
@@ -397,34 +529,27 @@ function Start-DellDriverInstall {
     SetDownload -Pct 0 -Label "Waiting..."
     SetExtract  -Pct 0 -Label "Waiting..."
 
-    # Service Tag
     $serviceTag = $null
     try {
         $serviceTag = (Get-CimInstance Win32_BIOS).SerialNumber.Trim()
         Log "Service Tag: $serviceTag"
     } catch {
-        Log "Could not read Service Tag: $($_.Exception.Message)"
-        return $false
+        Log "Could not read Service Tag: $($_.Exception.Message)"; return $false
     }
     if (-not $serviceTag -or $serviceTag.Length -lt 4) { Log "Invalid Service Tag."; return $false }
 
-    # System SKU
     $sysId = $null
     try {
         $sysId = (Get-CimInstance Win32_ComputerSystem).SystemSKUNumber.Trim()
         Log "System SKU: $sysId"
-    } catch {
-        Log "Could not read SystemSKUNumber: $($_.Exception.Message)"
-    }
+    } catch { Log "Could not read SystemSKUNumber: $($_.Exception.Message)" }
 
     # Download catalog
     Log "Downloading Dell CatalogPC.cab..."
     $catalogCab = Join-Path $env:TEMP "DellCatalogPC.cab"
     $catalogXml = Join-Path $env:TEMP "CatalogPC.xml"
-
     if (-not (Invoke-CurlDownload -Url "https://downloads.dell.com/catalog/CatalogPC.cab" -OutFile $catalogCab -TimeoutSec 180)) {
-        Log "Failed to download Dell catalog."
-        return $false
+        Log "Failed to download Dell catalog."; return $false
     }
     SetProgress 15
 
@@ -433,20 +558,19 @@ function Start-DellDriverInstall {
     Log "Extracting Dell catalog..."
     expand.exe "`"$catalogCab`"" "`"$catalogXml`"" 2>&1 | Out-Null
     if (-not (Test-Path $catalogXml)) { Log "Dell catalog extraction failed."; return $false }
-    SetExtract -Pct 30 -Label "Catalog extracted OK"
+    SetExtract -Pct 40 -Label "Catalog extracted OK"
     SetProgress 20
 
     # Parse catalog
     Log "Parsing Dell catalog..."
     try {
-        $rawXml  = [System.IO.File]::ReadAllText($catalogXml).TrimStart([char]0xFEFF)
+        $rawXml   = [System.IO.File]::ReadAllText($catalogXml).TrimStart([char]0xFEFF)
         [xml]$cat = $rawXml
     } catch {
-        Log "Failed to parse Dell catalog XML: $($_.Exception.Message)"
-        return $false
+        Log "Failed to parse Dell catalog XML: $($_.Exception.Message)"; return $false
     }
 
-    # Find driver pack by SKU
+    # Find driver pack matching SKU
     $packNode = $null
     foreach ($comp in $cat.SelectNodes("//SoftwareComponent")) {
         $dispName = ""
@@ -459,8 +583,7 @@ function Start-DellDriverInstall {
             }
             if (-not $matched) { continue }
         }
-        $packNode = $comp
-        break
+        $packNode = $comp; break
     }
 
     if (-not $packNode) {
@@ -477,29 +600,14 @@ function Start-DellDriverInstall {
 
     if (-not (Test-Path $DriverRoot)) { New-Item -Path $DriverRoot -ItemType Directory -Force | Out-Null }
     SetProgress 30
-
     if (-not (Invoke-CurlDownload -Url $packUrl -OutFile $packFile -TimeoutSec 600)) {
-        Log "Dell driver pack download failed."
-        return $false
+        Log "Dell driver pack download failed."; return $false
     }
     SetProgress 55
 
-    # Extract with watcher
     $extractPath = Join-Path $DriverRoot "Dell_Extracted"
-    if (-not (Test-Path $extractPath)) { New-Item -Path $extractPath -ItemType Directory -Force | Out-Null }
-    Log "Extracting Dell pack silently..."
-    SetExtract -Pct 0 -Label "Starting extraction..."
-
-    $psi                 = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName        = $packFile
-    $psi.Arguments       = "/s /e=`"$extractPath`""
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow  = $true
-    $exProc              = New-Object System.Diagnostics.Process
-    $exProc.StartInfo    = $psi
-    $exProc.Start() | Out-Null
-
-    Watch-Extraction -ExtractProc $exProc -DestPath $extractPath -StallLimitSec 180
+    Log "Extracting Dell pack..."
+    Start-PackExtraction -PackFile $packFile -DestPath $extractPath -StallLimitSec 180
     SetProgress 60
 
     return (Install-DriversFromPath -BasePath $extractPath)
@@ -520,8 +628,7 @@ function Start-HpDriverInstall {
         $platformId = (Get-CimInstance Win32_BaseBoard).Product.Trim()
         Log "HP Platform ID: $platformId"
     } catch {
-        Log "Could not read HP platform ID: $($_.Exception.Message)"
-        return $false
+        Log "Could not read HP platform ID: $($_.Exception.Message)"; return $false
     }
     if (-not $platformId) { Log "Empty HP platform ID."; return $false }
 
@@ -541,7 +648,7 @@ function Start-HpDriverInstall {
     SetExtract -Pct 10 -Label "Extracting HP catalog..."
     expand.exe "`"$hpCatalogCab`"" "`"$hpCatalogXml`"" 2>&1 | Out-Null
     if (-not (Test-Path $hpCatalogXml)) { Log "HP catalog extraction failed."; return $false }
-    SetExtract -Pct 30 -Label "Catalog extracted OK"
+    SetExtract -Pct 40 -Label "Catalog extracted OK"
     SetProgress 20
 
     Log "Parsing HP catalog..."
@@ -549,8 +656,7 @@ function Start-HpDriverInstall {
         $rawXml     = [System.IO.File]::ReadAllText($hpCatalogXml).TrimStart([char]0xFEFF)
         [xml]$hpCat = $rawXml
     } catch {
-        Log "Failed to parse HP catalog: $($_.Exception.Message)"
-        return $false
+        Log "Failed to parse HP catalog: $($_.Exception.Message)"; return $false
     }
 
     $packNode = $null
@@ -572,29 +678,14 @@ function Start-HpDriverInstall {
 
     if (-not (Test-Path $DriverRoot)) { New-Item -Path $DriverRoot -ItemType Directory -Force | Out-Null }
     SetProgress 30
-
     if (-not (Invoke-CurlDownload -Url $packUrl -OutFile $packFile -TimeoutSec 600)) {
-        Log "HP driver pack download failed."
-        return $false
+        Log "HP driver pack download failed."; return $false
     }
     SetProgress 55
 
-    # Extract with watcher
     $extractPath = Join-Path $DriverRoot "HP_Extracted"
-    if (-not (Test-Path $extractPath)) { New-Item -Path $extractPath -ItemType Directory -Force | Out-Null }
-    Log "Extracting HP SoftPaq silently..."
-    SetExtract -Pct 0 -Label "Starting extraction..."
-
-    $psi                 = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName        = $packFile
-    $psi.Arguments       = "/s /e /f `"$extractPath`""
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow  = $true
-    $exProc              = New-Object System.Diagnostics.Process
-    $exProc.StartInfo    = $psi
-    $exProc.Start() | Out-Null
-
-    Watch-Extraction -ExtractProc $exProc -DestPath $extractPath -StallLimitSec 180
+    Log "Extracting HP SoftPaq..."
+    Start-PackExtraction -PackFile $packFile -DestPath $extractPath -StallLimitSec 180
     SetProgress 60
 
     return (Install-DriversFromPath -BasePath $extractPath)
@@ -610,7 +701,6 @@ function Start-LenovoDriverInstall {
     SetDownload -Pct 0 -Label "Waiting..."
     SetExtract  -Pct 0 -Label "Waiting..."
 
-    # Machine type prefix
     $machineType = $null
     try {
         $sku = (Get-CimInstance Win32_ComputerSystemProduct).Name.Trim()
@@ -618,28 +708,21 @@ function Start-LenovoDriverInstall {
             $machineType = $sku.Substring(0, 4).ToUpper()
             Log "Machine type: $sku  ->  prefix: $machineType"
         }
-    } catch {
-        Log "Could not read machine type: $($_.Exception.Message)"
-    }
+    } catch { Log "Could not read machine type: $($_.Exception.Message)" }
     if (-not $machineType) { Log "Cannot determine Lenovo machine type."; return $false }
 
-    # Detect Windows version
     $winVer     = (Get-CimInstance Win32_OperatingSystem).Version
     $osAttr     = if ($winVer -match "^10\.0\.2") { "win11" } else { "win10" }
     $osFallback = if ($osAttr -eq "win11") { "win10" } else { "win11" }
     Log "Detected OS tag: $osAttr"
 
-    # Download catalog
     Log "Fetching Lenovo catalogv2.xml..."
     $catalogFile = Join-Path $env:TEMP "lenovo_catalogv2.xml"
-
     if (-not (Invoke-CurlDownload -Url "https://download.lenovo.com/cdrt/td/catalogv2.xml" -OutFile $catalogFile -TimeoutSec 120)) {
-        Log "Failed to download Lenovo catalog."
-        return $false
+        Log "Failed to download Lenovo catalog."; return $false
     }
     SetProgress 20
 
-    # Parse catalog (byte-level BOM strip)
     Log "Parsing Lenovo catalog..."
     SetExtract -Pct 10 -Label "Parsing catalog..."
     try {
@@ -648,13 +731,11 @@ function Start-LenovoDriverInstall {
         [xml]$cat = $rawText
         Log "Catalog parsed OK."
     } catch {
-        Log "Failed to parse Lenovo catalog: $($_.Exception.Message)"
-        return $false
+        Log "Failed to parse Lenovo catalog: $($_.Exception.Message)"; return $false
     }
-    SetExtract -Pct 20 -Label "Catalog parsed"
+    SetExtract -Pct 30 -Label "Catalog parsed"
     SetProgress 25
 
-    # Find SCCM pack URL
     $packUrl = $null
     foreach ($model in $cat.ModelList.Model) {
         $types = @($model.Types.Type)
@@ -686,62 +767,13 @@ function Start-LenovoDriverInstall {
     SetProgress 30
 
     if (-not (Invoke-CurlDownload -Url $packUrl -OutFile $packFile -TimeoutSec 600)) {
-        Log "Lenovo driver pack download failed."
-        return $false
+        Log "Lenovo driver pack download failed."; return $false
     }
     SetProgress 55
 
-    # Extract with watcher
     $extractPath = Join-Path $DriverRoot "Lenovo_Extracted"
-    if (-not (Test-Path $extractPath)) { New-Item -Path $extractPath -ItemType Directory -Force | Out-Null }
-    Log "Extracting Lenovo pack silently..."
-    SetExtract -Pct 0 -Label "Starting extraction..."
-
-    $ext = [System.IO.Path]::GetExtension($packFile).ToLower()
-    switch ($ext) {
-        ".zip" {
-            # Expand-Archive is synchronous — poll file count manually
-            $zipJob = Start-Job {
-                param($src, $dst)
-                Expand-Archive -Path $src -DestinationPath $dst -Force
-            } -ArgumentList $packFile, $extractPath
-
-            $pulse = 0
-            while ($zipJob.State -eq "Running") {
-                Start-Sleep -Milliseconds 800
-                $cnt   = if (Test-Path $extractPath) { (Get-ChildItem $extractPath -Recurse -EA SilentlyContinue).Count } else { 0 }
-                $pulse = ($pulse + 3) % 95
-                SetExtract -Pct $pulse -Label "$cnt files extracted so far..."
-                [System.Windows.Forms.Application]::DoEvents()
-            }
-            Receive-Job $zipJob -ErrorAction SilentlyContinue | Out-Null
-            Remove-Job  $zipJob
-            Log "ZIP extraction complete."
-        }
-        ".cab" {
-            $psi                 = New-Object System.Diagnostics.ProcessStartInfo
-            $psi.FileName        = "expand.exe"
-            $psi.Arguments       = "`"$packFile`" -F:* `"$extractPath`""
-            $psi.UseShellExecute = $false
-            $psi.CreateNoWindow  = $true
-            $exProc              = New-Object System.Diagnostics.Process
-            $exProc.StartInfo    = $psi
-            $exProc.Start() | Out-Null
-            Watch-Extraction -ExtractProc $exProc -DestPath $extractPath -StallLimitSec 180
-        }
-        default {
-            # Inno Setup EXE
-            $psi                 = New-Object System.Diagnostics.ProcessStartInfo
-            $psi.FileName        = $packFile
-            $psi.Arguments       = "/VERYSILENT /DIR=`"$extractPath`" /EXTRACT=YES"
-            $psi.UseShellExecute = $false
-            $psi.CreateNoWindow  = $true
-            $exProc              = New-Object System.Diagnostics.Process
-            $exProc.StartInfo    = $psi
-            $exProc.Start() | Out-Null
-            Watch-Extraction -ExtractProc $exProc -DestPath $extractPath -StallLimitSec 300
-        }
-    }
+    Log "Extracting Lenovo pack..."
+    Start-PackExtraction -PackFile $packFile -DestPath $extractPath -StallLimitSec 300
     SetProgress 60
 
     return (Install-DriversFromPath -BasePath $extractPath)
@@ -756,14 +788,14 @@ function Start-Install {
     SetProgress 0
     SetDownload -Pct 0 -Label "Waiting..."
     SetExtract  -Pct 0 -Label "Waiting..."
+    $exGroupBox.Text = "Extract"
 
-    # Elevation check
     $id  = [Security.Principal.WindowsIdentity]::GetCurrent()
     $pri = New-Object Security.Principal.WindowsPrincipal($id)
     if (-not $pri.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
         Log "Not running as admin — re-launching elevated..."
         Start-Process powershell `
-            "-ExecutionPolicy Bypass -Command `"irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/DriverInstaller.ps1 | iex`"" `
+            "-ExecutionPolicy Bypass -Command `"irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto.ps1 | iex`"" `
             -Verb RunAs
         exit
     }
@@ -789,15 +821,12 @@ function Start-Install {
     if ($manufacturer -match "Dell") {
         if (-not (Assert-Curl)) { $button.Enabled = $true; return }
         $success = Start-DellDriverInstall -DriverRoot $driverRoot
-
     } elseif ($manufacturer -match "HP|Hewlett") {
         if (-not (Assert-Curl)) { $button.Enabled = $true; return }
         $success = Start-HpDriverInstall -DriverRoot $driverRoot
-
     } elseif ($manufacturer -match "Lenovo") {
         if (-not (Assert-Curl)) { $button.Enabled = $true; return }
         $success = Start-LenovoDriverInstall -DriverRoot $driverRoot
-
     } else {
         Log "Unsupported manufacturer: $manufacturer"
         Log "Supported OEMs: Dell, HP, Lenovo"
@@ -823,7 +852,6 @@ function Start-Install {
         )
         if ($result -eq "Yes") { Restart-Computer -Force }
         else { $button.Enabled = $true }
-
     } else {
         SetDownload -Pct 0 -Label "Failed — see log"
         SetExtract  -Pct 0 -Label "Failed — see log"
