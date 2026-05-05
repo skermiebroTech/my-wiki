@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.3.2
+# Version: 1.3.3
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -12,7 +12,7 @@
 # extracts to C:\DRIVERS, installs all INFs via pnputil.
 # =============================================================
 
-$ScriptVersion  = "1.3.2"
+$ScriptVersion  = "1.3.3"
 $SpinnerFrames  = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex        = 0
 $CancelRequested     = $false
@@ -451,7 +451,6 @@ function Invoke-CurlDownload {
     param(
         [string]$Url,
         [string]$OutFile,
-        [int]$TimeoutSec = 600
     )
 
     $fileName = [System.IO.Path]::GetFileName($OutFile)
@@ -477,7 +476,9 @@ function Invoke-CurlDownload {
     # Start download
     $psi                 = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName        = "curl.exe"
-    $psi.Arguments       = "--location --fail --max-time $TimeoutSec --connect-timeout 30 " +
+    $psi.Arguments       = "--location --fail --connect-timeout 30 " +
+                           "--retry 10 --retry-delay 5 --retry-all-errors " +
+                           "--continue-at - " +
                            "--user-agent `"Mozilla/5.0 (Windows NT 10.0; Win64; x64)`" " +
                            "--output `"$OutFile`" `"$Url`""
     $psi.UseShellExecute = $false
@@ -509,8 +510,8 @@ function Invoke-CurlDownload {
 
         Step-AllSpinners
 
-        if ($stall -gt 90) {
-            Log "  WARNING: download stalled 63s — aborting."
+        if ($stall -gt 300) {
+            Log "  WARNING: download stalled 3.5 min with no progress — aborting."
             $proc.Kill()
             SetDownload -Pct 0 -Label "Stalled — aborted."
             Stop-DlSpinner -Success \$false
@@ -778,7 +779,7 @@ function Start-DellDriverInstall {
     Log "Downloading Dell CatalogPC.cab..."
     $catalogCab = Join-Path $env:TEMP "DellCatalogPC.cab"
     $catalogXml = Join-Path $env:TEMP "CatalogPC.xml"
-    if (-not (Invoke-CurlDownload -Url "https://downloads.dell.com/catalog/CatalogPC.cab" -OutFile $catalogCab -TimeoutSec 180)) {
+    if (-not (Invoke-CurlDownload -Url "https://downloads.dell.com/catalog/CatalogPC.cab" -OutFile $catalogCab)) {
         Log "Failed to download Dell catalog."; return $false
     }
     if (Test-Cancelled) { return $false }
@@ -831,7 +832,7 @@ function Start-DellDriverInstall {
 
     if (-not (Test-Path $DriverRoot)) { New-Item -Path $DriverRoot -ItemType Directory -Force | Out-Null }
     SetProgress 30
-    if (-not (Invoke-CurlDownload -Url $packUrl -OutFile $packFile -TimeoutSec 600)) {
+    if (-not (Invoke-CurlDownload -Url $packUrl -OutFile $packFile)) {
         Log "Dell driver pack download failed."; return $false
     }
     if (Test-Cancelled) { return $false }
@@ -870,7 +871,7 @@ function Start-HpDriverInstall {
     $hpCatalogCab = Join-Path $env:TEMP "HP_$platformId.cab"
     $hpCatalogXml = Join-Path $env:TEMP "HP_${platformId}.xml"
 
-    if (-not (Invoke-CurlDownload -Url $hpCatalogUrl -OutFile $hpCatalogCab -TimeoutSec 120)) {
+    if (-not (Invoke-CurlDownload -Url $hpCatalogUrl -OutFile $hpCatalogCab)) {
         Log "HP platform catalog not found. Opening HP matrix..."
         Start-Process "https://ftp.hp.com/pub/caps-softpaq/cmit/HP_Driverpack_Matrix_x64.html"
         return $false
@@ -911,7 +912,7 @@ function Start-HpDriverInstall {
 
     if (-not (Test-Path $DriverRoot)) { New-Item -Path $DriverRoot -ItemType Directory -Force | Out-Null }
     SetProgress 30
-    if (-not (Invoke-CurlDownload -Url $packUrl -OutFile $packFile -TimeoutSec 600)) {
+    if (-not (Invoke-CurlDownload -Url $packUrl -OutFile $packFile)) {
         Log "HP driver pack download failed."; return $false
     }
     if (Test-Cancelled) { return $false }
@@ -952,7 +953,7 @@ function Start-LenovoDriverInstall {
 
     Log "Fetching Lenovo catalogv2.xml..."
     $catalogFile = Join-Path $env:TEMP "lenovo_catalogv2.xml"
-    if (-not (Invoke-CurlDownload -Url "https://download.lenovo.com/cdrt/td/catalogv2.xml" -OutFile $catalogFile -TimeoutSec 120)) {
+    if (-not (Invoke-CurlDownload -Url "https://download.lenovo.com/cdrt/td/catalogv2.xml" -OutFile $catalogFile)) {
         Log "Failed to download Lenovo catalog."; return $false
     }
     if (Test-Cancelled) { return $false }
@@ -1001,7 +1002,7 @@ function Start-LenovoDriverInstall {
     $packFile = Join-Path $DriverRoot ([System.IO.Path]::GetFileName(([System.Uri]$packUrl).LocalPath))
     SetProgress 30
 
-    if (-not (Invoke-CurlDownload -Url $packUrl -OutFile $packFile -TimeoutSec 600)) {
+    if (-not (Invoke-CurlDownload -Url $packUrl -OutFile $packFile)) {
         Log "Lenovo driver pack download failed."; return $false
     }
     if (Test-Cancelled) { return $false }

@@ -29,13 +29,13 @@ theme:
 
 nav:
   - Home: index.md
-  - Driver Installation Documentation: driver-installation.md
+  - Auto Installer Docs: Auto-Installer-Docs.md
+  - Manual Driver Installation Docs: driver-installation.md
   - Installing CAB file drivers: cab-file-driver-installation.md
-  - todo: todo.md
   - Useful Links: Useful-Links.md
   - Panasonic:
       - FZ-G1 Guide: Panasonic/panasonic-fzg1.md
-  - Auto Installer: auto-driver-installer.md
+  - ToDo: todo.md
 
 markdown_extensions:
   - admonition
@@ -43,6 +43,8 @@ markdown_extensions:
       permalink: true
   - pymdownx.highlight
   - pymdownx.superfences
+  - pymdownx.details
+
 
 plugins:
   - search
