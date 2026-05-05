@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.2.2
+# Version: 1.2.3
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -12,7 +12,7 @@
 # extracts to C:\DRIVERS, installs all INFs via pnputil.
 # =============================================================
 
-$ScriptVersion = "1.2.2"
+$ScriptVersion = "1.2.3"
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -72,7 +72,7 @@ $versionLabel.UseCompatibleTextRendering = $false
 $form.Controls.Add($versionLabel)
 
 # ---- Status box (dark terminal — Courier New for crispness) ----
-$statusBox             = New-Object System.Windows.Forms.TextBox
+$statusBox             = New-Object System.Windows.Forms.RichTextBox
 $statusBox.Multiline   = $true
 $statusBox.ScrollBars  = "Vertical"
 $statusBox.Size        = New-Object System.Drawing.Size(536, 200)
