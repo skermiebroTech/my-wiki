@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.2.0
+# Version: 1.2.2
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -12,7 +12,7 @@
 # extracts to C:\DRIVERS, installs all INFs via pnputil.
 # =============================================================
 
-$ScriptVersion = "1.2.0"
+$ScriptVersion = "1.2.2"
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -50,9 +50,6 @@ $form.StartPosition   = "CenterScreen"
 $form.FormBorderStyle = "FixedSingle"
 $form.MaximizeBox     = $false
 $form.BackColor       = [System.Drawing.Color]::FromArgb(245, 245, 245)
-
-# Enable pixel-sharp ClearType rendering on this form
-[System.Windows.Forms.Application]::SetCompatibleTextRenderingDefault($false)
 
 # ---- Title label ----
 $title           = New-Object System.Windows.Forms.Label
@@ -123,12 +120,13 @@ $exGroupBox.Size      = New-Object System.Drawing.Size(536, 68)
 $exGroupBox.Location  = New-Object System.Drawing.Point(20, 340)
 $form.Controls.Add($exGroupBox)
 
-$exBar          = New-Object System.Windows.Forms.ProgressBar
-$exBar.Size     = New-Object System.Drawing.Size(508, 18)
-$exBar.Location = New-Object System.Drawing.Point(12, 20)
-$exBar.Style    = "Continuous"
-$exBar.Minimum  = 0
-$exBar.Maximum  = 100
+$exBar                       = New-Object System.Windows.Forms.ProgressBar
+$exBar.Size                  = New-Object System.Drawing.Size(508, 18)
+$exBar.Location              = New-Object System.Drawing.Point(12, 20)
+$exBar.Style                 = "Marquee"
+$exBar.MarqueeAnimationSpeed = 30
+$exBar.Minimum               = 0
+$exBar.Maximum               = 100
 $exGroupBox.Controls.Add($exBar)
 
 $exLabel           = New-Object System.Windows.Forms.Label
@@ -207,7 +205,15 @@ function SetDownload {
 
 function SetExtract {
     param([int]$Pct, [string]$Label)
-    $exBar.Value  = [math]::Min([math]::Max($Pct, 0), 100)
+    if ($Pct -ge 100) {
+        # Snap to full solid bar on completion
+        $exBar.Style = "Continuous"
+        $exBar.Value = 100
+    } elseif ($exBar.Style -ne "Marquee") {
+        # Re-enable scrolling if it was switched off
+        $exBar.Style                 = "Marquee"
+        $exBar.MarqueeAnimationSpeed = 30
+    }
     $exLabel.Text = $Label
     [System.Windows.Forms.Application]::DoEvents()
 }
