@@ -143,8 +143,173 @@ function Get-LenovoMachineTypePrefix {
 }
 
 # =========================
-# LENOVO: FIND DIRECT DOWNLOAD LINK FROM SUPPORT PAGE
+# LENOVO: GET DRIVER PACK URL VIA OFFICIAL MODULE OR DIRECT BITS DOWNLOAD
 # =========================
+
+function Install-LenovoClientModule {
+    # Install Lenovo's official Client Scripting Module from PowerShell Gallery
+    # This module uses catalogv2.xml and handles all URL resolution internally
+    try {
+        if (-not (Get-Module -ListAvailable -Name "Lenovo.Client.Scripting" -ErrorAction SilentlyContinue)) {
+            Log "Installing Lenovo.Client.Scripting module from PowerShell Gallery..."
+            SetStage "Installing Lenovo module..."
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            Install-Module -Name "Lenovo.Client.Scripting" -Force -Scope CurrentUser -ErrorAction Stop
+            Log "Module installed OK."
+        }
+        Import-Module "Lenovo.Client.Scripting" -Force -ErrorAction Stop
+        Log "Lenovo.Client.Scripting module loaded."
+        return $true
+    } catch {
+        Log "Could not install/load Lenovo.Client.Scripting: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+function Get-LenovoSccmUrlFromCatalog {
+    param(
+        [string[]]$SmbiosCodes,
+        [string]$TargetOSName = "Windows 11",
+        [string]$MachineType  = ""
+    )
+
+    $winVer = if ($TargetOSName -match "11") { "11" } else { "10" }
+
+    # Try Lenovo's official PowerShell module first (uses catalogv2.xml internally)
+    if (Install-LenovoClientModule) {
+        try {
+            Log "Using Get-LnvDriverPack for machine type ${MachineType}, Windows ${winVer}, Latest..."
+            SetStage "Finding driver pack via Lenovo module..."
+
+            # Find-LnvDriverPack returns URL without downloading; try Latest build version first
+            $packInfo = Find-LnvDriverPack -MachineType $MachineType -WindowsVersion $winVer -OSBuildVersion "Latest" -ErrorAction Stop
+            if ($packInfo -and $packInfo.URL) {
+                Log "Found SCCM pack URL via module: $($packInfo.URL)"
+                return $packInfo.URL
+            }
+        } catch {
+            Log "Find-LnvDriverPack failed: $($_.Exception.Message)"
+        }
+
+        # Try without OSBuildVersion (older module versions)
+        try {
+            $packInfo = Find-LnvDriverPack -MachineType $MachineType -WindowsVersion $winVer -ErrorAction Stop
+            if ($packInfo -and $packInfo.URL) {
+                Log "Found SCCM pack URL via module (no build ver): $($packInfo.URL)"
+                return $packInfo.URL
+            }
+        } catch {
+            Log "Find-LnvDriverPack (no build ver) failed: $($_.Exception.Message)"
+        }
+
+        # Win10 fallback
+        if ($winVer -eq "11") {
+            Log "No Win11 pack found — trying Win10 fallback via module..."
+            try {
+                $packInfo = Find-LnvDriverPack -MachineType $MachineType -WindowsVersion "10" -OSBuildVersion "Latest" -ErrorAction Stop
+                if ($packInfo -and $packInfo.URL) {
+                    Log "Found Win10 fallback SCCM URL: $($packInfo.URL)"
+                    return $packInfo.URL
+                }
+            } catch {
+                Log "Win10 fallback also failed: $($_.Exception.Message)"
+            }
+        }
+    }
+
+    # Module failed - try catalogv2.xml directly (the XML the module uses internally)
+    Log "Trying catalogv2.xml directly..."
+    SetStage "Reading Lenovo driver catalog..."
+    try {
+        $Global:ProgressPreference = 'SilentlyContinue'
+        $resp = Invoke-WebRequest -Uri "https://download.lenovo.com/cdrt/td/catalogv2.xml" `
+            -UseBasicParsing -TimeoutSec 60 `
+            -Headers @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" } `
+            -ErrorAction Stop
+        $Global:ProgressPreference = 'Continue'
+
+        [xml]$cat = $resp.Content
+        [System.Windows.Forms.Application]::DoEvents()
+
+        # catalogv2.xml structure: <Catalog><Model><Types><Type>{MT}</Type></Types><SCCM os="win11">{URL}</SCCM></Model>
+        $osAttr = if ($winVer -eq "11") { "win11" } else { "win10" }
+        $osFallback = if ($osAttr -eq "win11") { "win10" } else { "win11" }
+
+        foreach ($model in $cat.Catalog.Model) {
+            $types = @($model.Types.Type)
+            $matched = $types | Where-Object { $_ -like "${MachineType}*" }
+            if (-not $matched) { continue }
+
+            Log "Matched model in catalogv2.xml for ${MachineType}"
+            # Try preferred OS first then fallback
+            foreach ($os in @($osAttr, $osFallback)) {
+                $sccmNode = $model.SCCM | Where-Object { $_.os -eq $os } | Select-Object -First 1
+                if ($sccmNode -and $sccmNode."#text" -match "^https?://") {
+                    $url = $sccmNode."#text"
+                    Log "catalogv2.xml SCCM URL [${os}]: ${url}"
+                    return $url
+                }
+            }
+        }
+        Log "Machine type ${MachineType} not found in catalogv2.xml"
+    } catch {
+        $Global:ProgressPreference = 'Continue'
+        Log "catalogv2.xml fetch failed: $($_.Exception.Message)"
+    }
+
+    return $null
+}
+
+function Get-LenovoBiosUrlFromCatalog {
+    param(
+        [string[]]$SmbiosCodes,
+        [string]$TargetOSName = "Windows 11",
+        [string]$MachineType  = ""
+    )
+
+    $winVer = if ($TargetOSName -match "11") { "11" } else { "10" }
+
+    if (Get-Module -Name "Lenovo.Client.Scripting" -ErrorAction SilentlyContinue) {
+        try {
+            $biosInfo = Get-LnvBiosUpdateUrl -MachineType $MachineType -ErrorAction Stop
+            if ($biosInfo -and $biosInfo.URL) {
+                Log "BIOS URL via module: $($biosInfo.URL)"
+                return $biosInfo.URL
+            }
+        } catch {
+            Log "Get-LnvBiosUpdateUrl failed: $($_.Exception.Message)"
+        }
+    }
+
+    # catalogv2.xml BIOS fallback
+    try {
+        if (-not $script:catalogXml) {
+            $Global:ProgressPreference = 'SilentlyContinue'
+            $resp = Invoke-WebRequest -Uri "https://download.lenovo.com/cdrt/td/catalogv2.xml" `
+                -UseBasicParsing -TimeoutSec 60 `
+                -Headers @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" } `
+                -ErrorAction Stop
+            $Global:ProgressPreference = 'Continue'
+            [xml]$script:catalogXml = $resp.Content
+        }
+        foreach ($model in $script:catalogXml.Catalog.Model) {
+            $types = @($model.Types.Type)
+            if (-not ($types | Where-Object { $_ -like "${MachineType}*" })) { continue }
+            $biosUrl = $model.BIOS
+            if ($biosUrl -and $biosUrl -match "^https?://") {
+                Log "BIOS URL from catalogv2.xml: ${biosUrl}"
+                return $biosUrl
+            }
+        }
+    } catch {
+        $Global:ProgressPreference = 'Continue'
+        Log "catalogv2.xml BIOS lookup failed: $($_.Exception.Message)"
+    }
+
+    return $null
+}
+
+# Page-scrape fallback (support.lenovo.com may be blocked on some networks)
 function Get-LenovoDirectDownloadLink {
     param(
         [string]$SupportPageUrl,
@@ -158,12 +323,10 @@ function Get-LenovoDirectDownloadLink {
 
     $pageContent = $null
     try {
-        # Invoke-WebRequest uses Windows WinHTTP — handles TLS/cookies like a browser
-        # This is more reliable than curl for Lenovo pages which need proper browser headers
         $Global:ProgressPreference = 'SilentlyContinue'
-        $resp = Invoke-WebRequest -Uri $SupportPageUrl -UseBasicParsing -TimeoutSec 60 `
+        $resp = Invoke-WebRequest -Uri $SupportPageUrl -UseBasicParsing -TimeoutSec 45 `
             -Headers @{
-                "Accept"          = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+                "Accept"          = "text/html,application/xhtml+xml,*/*;q=0.8"
                 "Accept-Language" = "en-US,en;q=0.9"
                 "User-Agent"      = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             } -ErrorAction Stop
@@ -177,82 +340,40 @@ function Get-LenovoDirectDownloadLink {
     }
 
     [System.Windows.Forms.Application]::DoEvents()
-
-    if (-not $pageContent -or $pageContent.Length -lt 100) {
-        Log "Empty or tiny response for ${LinkType} page."
-        return $null
-    }
-
-    # The Lenovo support page pre-bakes all file data into a customData JS variable:
-    # var customData = window.customData || { ... "Files":[{"URL":"https://download.lenovo.com/...","OperatingSystemKeys":["Windows 11 (64-bit)"],...}] ... }
-    # Extract URL + OperatingSystemKeys pairs from this JSON blob using regex
+    if (-not $pageContent -or $pageContent.Length -lt 100) { return $null }
 
     $urlOsPairs = @()
     $pairPattern = '"URL":"(https?://download\.lenovo\.com/[^"]+\.(?:exe|zip|cab))"[^}]{0,500}?"OperatingSystemKeys":\["([^"]+)"\]'
-    $pairMatches = [regex]::Matches($pageContent, $pairPattern)
-
-    foreach ($m in $pairMatches) {
+    foreach ($m in [regex]::Matches($pageContent, $pairPattern)) {
         $urlOsPairs += [PSCustomObject]@{ URL = $m.Groups[1].Value; OS = $m.Groups[2].Value }
     }
-
-    # Fallback: if no OS-paired URLs found, grab all download.lenovo.com EXEs
     if ($urlOsPairs.Count -eq 0) {
-        Log "No OS-paired URLs found — trying URL-only extraction..."
-        $urlPattern = '"URL":"(https?://download\.lenovo\.com/[^"]+\.(?:exe|zip|cab))"'
-        $urlMatches = [regex]::Matches($pageContent, $urlPattern)
-        foreach ($m in $urlMatches) {
+        foreach ($m in [regex]::Matches($pageContent, '"URL":"(https?://download\.lenovo\.com/[^"]+\.(?:exe|zip|cab))"')) {
             $url = $m.Groups[1].Value
-            if ($url -notmatch "readme") {
-                $urlOsPairs += [PSCustomObject]@{ URL = $url; OS = "unknown" }
-            }
+            if ($url -notmatch "readme") { $urlOsPairs += [PSCustomObject]@{ URL = $url; OS = "unknown" } }
         }
     }
 
-    if ($urlOsPairs.Count -eq 0) {
-        Log "No download URLs found on ${LinkType} page."
-        return $null
-    }
-
-    Log "Found $($urlOsPairs.Count) candidate(s) on page:"
-    $urlOsPairs | ForEach-Object { Log "  [$($_.OS)] $($_.URL)" }
+    if ($urlOsPairs.Count -eq 0) { Log "No URLs found on ${LinkType} page."; return $null }
+    Log "Found $($urlOsPairs.Count) candidate(s) from page."
 
     if ($LinkType -eq "SCCM") {
-        # Win11: prefer 24H2 > 23H2/22H2 > 21H2 > any Win11
         $win11 = $urlOsPairs | Where-Object { $_.OS -match "Windows 11" -and $_.URL -notmatch "readme" }
         $preferred = $win11 | Where-Object { $_.URL -match "w11_24|win11_24" } | Select-Object -Last 1
         if (-not $preferred) { $preferred = $win11 | Where-Object { $_.URL -match "w11_22|win11_22" } | Select-Object -Last 1 }
-        if (-not $preferred) { $preferred = $win11 | Where-Object { $_.URL -match "w11_21|win11_21" } | Select-Object -Last 1 }
         if (-not $preferred) { $preferred = $win11 | Select-Object -Last 1 }
-
         if (-not $preferred) {
-            Log "No Windows 11 SCCM pack found — falling back to Windows 10..."
             $win10 = $urlOsPairs | Where-Object { $_.OS -match "Windows 10" -and $_.URL -notmatch "readme" }
-            $preferred = $win10 | Where-Object { $_.URL -match "22h2|21h2|21h1|20h2" } | Select-Object -Last 1
+            $preferred = $win10 | Where-Object { $_.URL -match "22h2|21h2|21h1" } | Select-Object -Last 1
             if (-not $preferred) { $preferred = $win10 | Select-Object -Last 1 }
         }
-
-        if (-not $preferred) {
-            $preferred = $urlOsPairs | Where-Object { $_.URL -notmatch "readme" } | Select-Object -Last 1
-        }
-
-        if ($preferred) {
-            Log "Selected SCCM URL [$($preferred.OS)]: $($preferred.URL)"
-            return $preferred.URL
-        }
-
-        Log "Could not select a preferred SCCM URL from page."
-        return $null
+        if (-not $preferred) { $preferred = $urlOsPairs | Where-Object { $_.URL -notmatch "readme" } | Select-Object -Last 1 }
+        if ($preferred) { Log "Selected SCCM URL [$($preferred.OS)]: $($preferred.URL)"; return $preferred.URL }
+    } else {
+        $preferred = $urlOsPairs | Where-Object { $_.URL -match "\.exe$" -and ($_.URL -match "bios|uefi") -and $_.URL -notmatch "readme" } | Select-Object -First 1
+        if (-not $preferred) { $preferred = $urlOsPairs | Where-Object { $_.URL -match "\.exe$" -and $_.URL -notmatch "readme" } | Select-Object -First 1 }
+        if ($preferred) { Log "Selected BIOS URL: $($preferred.URL)"; return $preferred.URL }
     }
-
-    # BIOS: prefer EXE with bios/uefi in URL, fallback to first non-readme EXE
-    $preferred = $urlOsPairs | Where-Object { $_.URL -match "\.exe$" -and ($_.URL -match "bios|uefi") -and $_.URL -notmatch "readme" } | Select-Object -First 1
-    if (-not $preferred) {
-        $preferred = $urlOsPairs | Where-Object { $_.URL -match "\.exe$" -and $_.URL -notmatch "readme" } | Select-Object -First 1
-    }
-
-    if ($preferred) { Log "Selected BIOS URL: $($preferred.URL)"; return $preferred.URL }
-
-    Log "Could not find a BIOS URL on page."
     return $null
 }
 # =========================
@@ -291,13 +412,14 @@ function Start-LenovoDriverDownload {
         return $false
     }
 
-    $modelId = $null; $modelName = $null
+    $modelId = $null; $modelName = $null; $modelEntry = $null
     foreach ($entry in $modelFamilyData) {
         if ($entry.types -is [array]) {
             foreach ($t in $entry.types) {
                 if ($t -like "$($MachineTypePrefix)*") {
-                    $modelId   = $entry.id
-                    $modelName = $entry.name
+                    $modelId    = $entry.id
+                    $modelName  = $entry.name
+                    $modelEntry = $entry   # preserve full entry for SMBIOS lookup
                     break
                 }
             }
@@ -398,12 +520,29 @@ function Start-LenovoDriverDownload {
     Log "SCCM support page: $sccmSupportPageUrl"
 
     # ---- Get direct download URLs ----
-    $driverPackUrl = Get-LenovoDirectDownloadLink -SupportPageUrl $sccmSupportPageUrl -ModelName $modelName -TargetOSName $TargetOS -LinkType "SCCM"
-    $biosFileUrl   = if ($biosPageUrl) {
+    # Primary: Thin Installer XML catalog (download.lenovo.com CDN — not blocked like support pages)
+    $smbiosCodes = @()
+    if ($modelEntry.smbios) { $smbiosCodes = @($modelEntry.smbios) }
+
+    $driverPackUrl = $null
+    $biosFileUrl   = $null
+
+    if ($smbiosCodes.Count -gt 0 -or $MachineTypePrefix) {
+        Log "Catalog lookup for machine type: ${MachineTypePrefix}"
+        $driverPackUrl = Get-LenovoSccmUrlFromCatalog -SmbiosCodes $smbiosCodes -TargetOSName $TargetOS -MachineType $MachineTypePrefix
+        $biosFileUrl   = Get-LenovoBiosUrlFromCatalog  -SmbiosCodes $smbiosCodes -TargetOSName $TargetOS -MachineType $MachineTypePrefix
+    }
+
+    # Fallback: scrape the support page HTML (may be blocked on some networks)
+    if (-not $driverPackUrl) {
+        Log "Catalog lookup failed or no SMBIOS — trying support page scrape..."
+        $driverPackUrl = Get-LenovoDirectDownloadLink -SupportPageUrl $sccmSupportPageUrl -ModelName $modelName -TargetOSName $TargetOS -LinkType "SCCM"
+    }
+    if (-not $biosFileUrl -and $biosPageUrl) {
         $rawBios = Get-LenovoDirectDownloadLink -SupportPageUrl $biosPageUrl -ModelName $modelName -TargetOSName $TargetOS -LinkType "BIOS"
-        if ($rawBios -is [array]) { $rawBios | Where-Object { $_ -is [string] -and $_ -match "^https?://" } | Select-Object -First 1 }
-        else { $rawBios }
-    } else { $null }
+        if ($rawBios -is [array]) { $biosFileUrl = $rawBios | Where-Object { $_ -is [string] -and $_ -match "^https?://" } | Select-Object -First 1 }
+        else { $biosFileUrl = $rawBios }
+    }
 
     # ---- Validate SCCM URL ----
     # Unwrap array if function returned ($true, "url") due to pipeline quirk
