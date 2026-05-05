@@ -983,16 +983,16 @@
 </code></pre></div>
 <div class="admonition info">
 <p class="admonition-title">Service Tags</p>
-</div>
 <p>The Service Tag is read from <code>Win32_BIOS.SerialNumber</code> and the System SKU from <code>Win32_ComputerSystem.SystemSKUNumber</code>. The catalog is searched for a <code>SoftwareComponent</code> with "Driver Pack" in its display name matching the detected SKU.</p>
+</div>
 <h4 id="hp">HP<a class="headerlink" href="#hp" title="Permanent link">&para;</a></h4>
 <p>Downloads a platform-specific catalog cab using the BaseBoard product ID:</p>
 <div class="highlight"><pre><span></span><code>https://ftp.hp.com/pub/caps-softpaq/cmit/imagepal/ref/{platformId}/{platformId}.cab
 </code></pre></div>
 <div class="admonition info">
 <p class="admonition-title">note</p>
-</div>
 <p>The catalog is parsed for a SoftPaq with a "Driver Pack" category, and the direct download URL is extracted.</p>
+</div>
 <hr />
 <h3 id="3-download">3. Download<a class="headerlink" href="#3-download" title="Permanent link">&para;</a></h3>
 <p>The driver pack is downloaded using the inbox <code>curl.exe</code> (available on Windows 10 1803+). A silent <code>HEAD</code> request is made first to get the file size, enabling a true percentage progress bar.</p>
@@ -1093,8 +1093,8 @@
 </ol>
 <div class="admonition warning">
 <p class="admonition-title">warning</p>
-</div>
 <p>Cancellation during extraction may leave a partial <code>C:\DRIVERS\{OEM}_Extracted</code> folder. This is safe to delete manually and will be overwritten on the next run.</p>
+</div>
 <hr />
 <h2 id="log-file">Log File<a class="headerlink" href="#log-file" title="Permanent link">&para;</a></h2>
 <p>Every run appends a timestamped log to:</p>
@@ -1167,8 +1167,8 @@
 </table>
 <div class="admonition warning">
 <p class="admonition-title">Unsupported machines</p>
-</div>
 <p>If the manufacturer is not Dell, HP, or Lenovo the script will display an error and exit gracefully without making any changes to the system.</p>
+</div>
 <hr />
 <h2 id="requirements">Requirements<a class="headerlink" href="#requirements" title="Permanent link">&para;</a></h2>
 <ul>
