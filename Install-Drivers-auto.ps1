@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.2.5
+# Version: 1.2.7
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -12,7 +12,9 @@
 # extracts to C:\DRIVERS, installs all INFs via pnputil.
 # =============================================================
 
-$ScriptVersion = "1.2.5"
+$ScriptVersion  = "1.2.7"
+$SpinnerFrames  = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
+$SpinnerIndex   = 0
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -93,6 +95,17 @@ $dlGroupBox.Size      = New-Object System.Drawing.Size(536, 68)
 $dlGroupBox.Location  = New-Object System.Drawing.Point(20, 265)
 $form.Controls.Add($dlGroupBox)
 
+# Download spinner label
+$dlSpinnerLabel           = New-Object System.Windows.Forms.Label
+$dlSpinnerLabel.AutoSize  = $true
+$dlSpinnerLabel.Font      = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+$dlSpinnerLabel.ForeColor = [System.Drawing.Color]::FromArgb(0, 100, 180)
+$dlSpinnerLabel.BackColor = [System.Drawing.Color]::FromArgb(245, 245, 245)
+$dlSpinnerLabel.Location  = New-Object System.Drawing.Point(72, 0)
+$dlSpinnerLabel.Text      = ""
+$dlSpinnerLabel.UseCompatibleTextRendering = $false
+$dlGroupBox.Controls.Add($dlSpinnerLabel)
+
 $dlBar                       = New-Object System.Windows.Forms.ProgressBar
 $dlBar.Size                  = New-Object System.Drawing.Size(508, 18)
 $dlBar.Location              = New-Object System.Drawing.Point(12, 20)
@@ -121,6 +134,17 @@ $exGroupBox.Size      = New-Object System.Drawing.Size(536, 68)
 $exGroupBox.Location  = New-Object System.Drawing.Point(20, 340)
 $form.Controls.Add($exGroupBox)
 
+# Spinner label — sits inside the group box, top-left, overlays the title gap
+$exSpinnerLabel           = New-Object System.Windows.Forms.Label
+$exSpinnerLabel.AutoSize  = $true
+$exSpinnerLabel.Font      = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+$exSpinnerLabel.ForeColor = [System.Drawing.Color]::FromArgb(0, 140, 80)
+$exSpinnerLabel.BackColor = [System.Drawing.Color]::FromArgb(245, 245, 245)
+$exSpinnerLabel.Location  = New-Object System.Drawing.Point(58, 0)
+$exSpinnerLabel.Text      = ""
+$exSpinnerLabel.UseCompatibleTextRendering = $false
+$exGroupBox.Controls.Add($exSpinnerLabel)
+
 $exBar                       = New-Object System.Windows.Forms.ProgressBar
 $exBar.Size                  = New-Object System.Drawing.Size(508, 18)
 $exBar.Location              = New-Object System.Drawing.Point(12, 20)
@@ -148,6 +172,17 @@ $overallGroupBox.ForeColor = [System.Drawing.Color]::FromArgb(80, 80, 80)
 $overallGroupBox.Size      = New-Object System.Drawing.Size(536, 48)
 $overallGroupBox.Location  = New-Object System.Drawing.Point(20, 415)
 $form.Controls.Add($overallGroupBox)
+
+# Overall spinner label
+$overallSpinnerLabel           = New-Object System.Windows.Forms.Label
+$overallSpinnerLabel.AutoSize  = $true
+$overallSpinnerLabel.Font      = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+$overallSpinnerLabel.ForeColor = [System.Drawing.Color]::FromArgb(80, 80, 80)
+$overallSpinnerLabel.BackColor = [System.Drawing.Color]::FromArgb(245, 245, 245)
+$overallSpinnerLabel.Location  = New-Object System.Drawing.Point(62, 0)
+$overallSpinnerLabel.Text      = ""
+$overallSpinnerLabel.UseCompatibleTextRendering = $false
+$overallGroupBox.Controls.Add($overallSpinnerLabel)
 
 $progress          = New-Object System.Windows.Forms.ProgressBar
 $progress.Size     = New-Object System.Drawing.Size(508, 18)
@@ -229,6 +264,65 @@ function SetExtract {
         $exBar.Value = [math]::Min($Pct, 99)
     }
     $exLabel.Text = $Label
+    [System.Windows.Forms.Application]::DoEvents()
+}
+
+# ---- Spinner helpers (one per section) ----
+function Step-DlSpinner {
+    $script:SpinnerIndex    = ($script:SpinnerIndex + 1) % $SpinnerFrames.Count
+    $dlSpinnerLabel.Text    = " " + $SpinnerFrames[$script:SpinnerIndex]
+    [System.Windows.Forms.Application]::DoEvents()
+}
+function Stop-DlSpinner {
+    param([bool]$Success = $true)
+    $dlSpinnerLabel.Text      = if ($Success) { " ✓" } else { " ✗" }
+    $dlSpinnerLabel.ForeColor = if ($Success) {
+        [System.Drawing.Color]::FromArgb(0, 100, 180)
+    } else {
+        [System.Drawing.Color]::FromArgb(200, 40, 40)
+    }
+    [System.Windows.Forms.Application]::DoEvents()
+}
+
+function Step-ExSpinner {
+    $script:SpinnerIndex      = ($script:SpinnerIndex + 1) % $SpinnerFrames.Count
+    $exSpinnerLabel.Text      = " " + $SpinnerFrames[$script:SpinnerIndex]
+    [System.Windows.Forms.Application]::DoEvents()
+}
+function Stop-ExSpinner {
+    param([bool]$Success = $true)
+    $exSpinnerLabel.Text      = if ($Success) { " ✓" } else { " ✗" }
+    $exSpinnerLabel.ForeColor = if ($Success) {
+        [System.Drawing.Color]::FromArgb(0, 140, 80)
+    } else {
+        [System.Drawing.Color]::FromArgb(200, 40, 40)
+    }
+    [System.Windows.Forms.Application]::DoEvents()
+}
+
+function Step-OverallSpinner {
+    $script:SpinnerIndex         = ($script:SpinnerIndex + 1) % $SpinnerFrames.Count
+    $overallSpinnerLabel.Text    = " " + $SpinnerFrames[$script:SpinnerIndex]
+    [System.Windows.Forms.Application]::DoEvents()
+}
+function Stop-OverallSpinner {
+    param([bool]$Success = $true)
+    $overallSpinnerLabel.Text      = if ($Success) { " ✓" } else { " ✗" }
+    $overallSpinnerLabel.ForeColor = if ($Success) {
+        [System.Drawing.Color]::FromArgb(80, 80, 80)
+    } else {
+        [System.Drawing.Color]::FromArgb(200, 40, 40)
+    }
+    [System.Windows.Forms.Application]::DoEvents()
+}
+
+# Step all three at once (used in download loop which drives the tick)
+function Step-AllSpinners {
+    $script:SpinnerIndex         = ($script:SpinnerIndex + 1) % $SpinnerFrames.Count
+    $f                           = $SpinnerFrames[$script:SpinnerIndex]
+    $dlSpinnerLabel.Text         = " " + $f
+    $exSpinnerLabel.Text         = " " + $f
+    $overallSpinnerLabel.Text    = " " + $f
     [System.Windows.Forms.Application]::DoEvents()
 }
 
@@ -325,28 +419,34 @@ function Invoke-CurlDownload {
             Log "  $mbDone MB received"
         }
 
+        Step-AllSpinners
+
         if ($stall -gt 90) {
             Log "  WARNING: download stalled 63s — aborting."
             $proc.Kill()
             SetDownload -Pct 0 -Label "Stalled — aborted."
+            Stop-DlSpinner -Success \$false
             return $false
         }
     }
 
     if ($proc.ExitCode -ne 0) {
         Log "  curl failed (exit $($proc.ExitCode))"
-        SetDownload -Pct 0 -Label "Failed (curl exit $($proc.ExitCode))"
+        SetDownload -Pct 0 -Label "Failed (curl exit \$(\$proc.ExitCode))"
+    Stop-DlSpinner -Success \$false
         return $false
     }
     if (-not (Test-Path $OutFile) -or (Get-Item $OutFile).Length -eq 0) {
         Log "  File missing or empty after download."
         SetDownload -Pct 0 -Label "Failed — file empty."
+    Stop-DlSpinner -Success \$false
         return $false
     }
 
     $finalMB = [math]::Round((Get-Item $OutFile).Length / 1MB, 1)
     Log "  Download complete: $finalMB MB"
     SetDownload -Pct 100 -Label "Complete — $finalMB MB"
+    Stop-DlSpinner -Success $true
     return $true
 }
 
@@ -367,6 +467,9 @@ function Watch-Extraction {
     $lastCount = 0
 
     # -1 = Marquee mode (scrolling bar, count shown in label)
+    $script:SpinnerIndex       = 0
+    $exSpinnerLabel.Text       = " " + $SpinnerFrames[0]
+    $overallSpinnerLabel.Text  = " " + $SpinnerFrames[0]
     SetExtract -Pct -1 -Label "Extracting..."
 
     while (-not $ExtractProc.HasExited) {
@@ -385,6 +488,7 @@ function Watch-Extraction {
             SetExtract -Pct -1 -Label "$count files extracted..."
         }
 
+        Step-ExSpinner
         [System.Windows.Forms.Application]::DoEvents()
 
         if ($stall -gt [int]($StallLimitSec * 1.25)) {
@@ -400,6 +504,8 @@ function Watch-Extraction {
     } else { 0 }
 
     SetExtract -Pct 100 -Label "Done — $finalCount files extracted"
+    Stop-ExSpinner -Success $true
+    Stop-OverallSpinner -Success $true
     Log "  Extraction finished: $finalCount files in $DestPath"
 }
 
@@ -418,7 +524,10 @@ function Install-DriversFromPath {
 
     $total = $infs.Count; $i = 0
     Log "Found $total INF file(s) — installing via pnputil..."
-    $exGroupBox.Text = "Install INFs"
+    $exGroupBox.Text      = "Install INFs"
+    $exSpinnerLabel.Text  = ""
+    $exSpinnerLabel.Text  = " " + $SpinnerFrames[0]
+    $script:SpinnerIndex  = 0
     # Switch from Marquee to Continuous so percentage values are visible
     $exBar.Style = "Continuous"
     $exBar.Value = 0
@@ -433,11 +542,15 @@ function Install-DriversFromPath {
         Log "[$i/$total] $($inf.Name)"
         $out = pnputil /add-driver "`"$($inf.FullName)`"" /install 2>&1
         foreach ($l in $out) { Log "  $l" }
+        Step-ExSpinner
+        Step-OverallSpinner
         [System.Windows.Forms.Application]::DoEvents()
     }
 
     SetProgress 100
     SetExtract -Pct 100 -Label "All $total INFs installed."
+    Stop-ExSpinner -Success $true
+    Stop-OverallSpinner -Success $true
     $exGroupBox.Text = "Extract / Install"
     Log "All INFs processed."
     return $true
@@ -474,6 +587,9 @@ function Start-PackExtraction {
             } -ArgumentList $PackFile, $DestPath
 
             $stall = 0; $lastCount = 0
+            $script:SpinnerIndex      = 0
+            $exSpinnerLabel.Text      = " " + $SpinnerFrames[0]
+            $overallSpinnerLabel.Text = " " + $SpinnerFrames[0]
             SetExtract -Pct -1 -Label "Starting ZIP extraction..."
             while ($zipJob.State -eq "Running") {
                 Start-Sleep -Milliseconds 700
@@ -488,6 +604,8 @@ function Start-PackExtraction {
                 } else {
                     SetExtract -Pct -1 -Label "$count files extracted..."
                 }
+                Step-ExSpinner
+                Step-OverallSpinner
                 [System.Windows.Forms.Application]::DoEvents()
                 if ($stall -gt 375) { Log "  ZIP stalled — stopping job."; Stop-Job $zipJob; break }
             }
@@ -497,6 +615,8 @@ function Start-PackExtraction {
                 (Get-ChildItem $DestPath -Recurse -EA SilentlyContinue).Count
             } else { 0 }
             SetExtract -Pct 100 -Label "Done — $finalCount files extracted"
+            Stop-ExSpinner -Success $true
+            Stop-OverallSpinner -Success $true
             Log "  ZIP extraction complete. $finalCount files."
         }
 
@@ -799,6 +919,10 @@ function Start-Install {
     SetDownload -Pct 0 -Label "Waiting..."
     SetExtract  -Pct 0 -Label "Waiting..."
     $exGroupBox.Text = "Extract"
+    $dlSpinnerLabel.Text         = ""
+    $exSpinnerLabel.Text         = ""
+    $overallSpinnerLabel.Text    = ""
+    $script:SpinnerIndex         = 0
 
     $id  = [Security.Principal.WindowsIdentity]::GetCurrent()
     $pri = New-Object Security.Principal.WindowsPrincipal($id)
@@ -865,6 +989,9 @@ function Start-Install {
     } else {
         SetDownload -Pct 0 -Label "Failed — see log"
         SetExtract  -Pct 0 -Label "Failed — see log"
+        Stop-DlSpinner      -Success $false
+        Stop-ExSpinner      -Success $false
+        Stop-OverallSpinner -Success $false
         Log "Driver installation did not complete. Check log: $LogFile"
         [System.Windows.Forms.MessageBox]::Show(
             "Driver installation failed or no pack was found.`nCheck the log:`n`n$LogFile",
