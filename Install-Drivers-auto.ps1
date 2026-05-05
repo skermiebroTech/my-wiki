@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.3.0
+# Version: 1.3.1
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -12,7 +12,7 @@
 # extracts to C:\DRIVERS, installs all INFs via pnputil.
 # =============================================================
 
-$ScriptVersion  = "1.3.0"
+$ScriptVersion  = "1.3.1"
 $SpinnerFrames  = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex        = 0
 $CancelRequested     = $false
@@ -486,20 +486,25 @@ function Invoke-CurlDownload {
     $proc.StartInfo      = $psi
     $proc.Start() | Out-Null
 
-    $lastSize = 0; $stall = 0
+    $lastSize = 0; $stall = 0; $prevSize = 0
     while (-not $proc.HasExited) {
         Start-Sleep -Milliseconds 700
         $sz = if (Test-Path $OutFile) { (Get-Item $OutFile -EA SilentlyContinue).Length } else { 0 }
         if ($sz -gt $lastSize) { $stall = 0; $lastSize = $sz } else { $stall++ }
         $mbDone = [math]::Round($sz / 1MB, 1)
 
+        # Speed: bytes gained in last 700ms tick -> MB/s
+        $speedMBs = [math]::Round(($sz - $prevSize) / 1MB / 0.7, 1)
+        $prevSize = $sz
+        $speedStr = if ($speedMBs -gt 0) { "  $speedMBs MB/s" } else { "" }
+
         if ($totalMB -gt 0) {
             $pct = [math]::Min([int](($sz / $totalBytes) * 100), 99)
-            SetDownload -Pct $pct -Label "$mbDone MB / $totalMB MB  ($pct%)"
-            Log "  $mbDone MB / $totalMB MB ($pct%)"
+            SetDownload -Pct $pct -Label "$mbDone MB / $totalMB MB  ($pct%)$speedStr"
+            Log "  $mbDone MB / $totalMB MB ($pct%)$speedStr"
         } else {
-            SetDownload -Pct 0 -Label "$mbDone MB received..."
-            Log "  $mbDone MB received"
+            SetDownload -Pct 0 -Label "$mbDone MB received...$speedStr"
+            Log "  $mbDone MB received$speedStr"
         }
 
         Step-AllSpinners
