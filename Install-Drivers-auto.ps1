@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.2.3
+# Version: 1.2.4
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -12,7 +12,7 @@
 # extracts to C:\DRIVERS, installs all INFs via pnputil.
 # =============================================================
 
-$ScriptVersion = "1.2.3"
+$ScriptVersion = "1.2.4"
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -250,7 +250,7 @@ function Get-PackFileCount {
         # Heuristic for EXE/CAB: driver packs average ~4 KB per file
         try {
             $sizeBytes = (Get-Item $PackFile).Length
-            $estimated = [math]::Max([int]($sizeBytes / 4096), 50)
+            $estimated = [math]::Max([int]($sizeBytes / 512000), 10)
             Log "  Pre-scan: estimated ~$estimated files (size-based heuristic)"
             return $estimated
         } catch {
@@ -417,6 +417,9 @@ function Install-DriversFromPath {
     $total = $infs.Count; $i = 0
     Log "Found $total INF file(s) — installing via pnputil..."
     $exGroupBox.Text = "Install INFs"
+    # Switch from Marquee to Continuous so percentage values are visible
+    $exBar.Style = "Continuous"
+    $exBar.Value = 0
 
     foreach ($inf in $infs) {
         $i++
