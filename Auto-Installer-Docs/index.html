@@ -948,8 +948,10 @@
 <p>Run this from the <strong>Win+R</strong> box on any supported machine:</p>
 <div class="highlight"><pre><span></span><code><span class="n">powershell</span> <span class="n">-ExecutionPolicy</span> <span class="n">Bypass</span> <span class="n">-Command</span> <span class="s2">&quot;irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto.ps1 | iex&quot;</span>
 </code></pre></div>
-<p>! ! ! tip "Audit Mode" 
-This command works without any prior software installation. <code>irm</code> (Invoke-RestMethod) fetches the script directly from GitHub and <code>iex</code> runs it in memory — no file is saved to disk first.</p>
+<div class="admonition tip">
+<p class="admonition-title">Audit Mode</p>
+</div>
+<p>This command works without any prior software installation. <code>irm</code> (Invoke-RestMethod) fetches the script directly from GitHub and <code>iex</code> runs it in memory — no file is saved to disk first.</p>
 <hr />
 <h2 id="how-it-works">How It Works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h2>
 <p>The script follows the same four-stage pipeline regardless of manufacturer:</p>
@@ -971,28 +973,34 @@ This command works without any prior software installation. <code>irm</code> (In
 <div class="highlight"><pre><span></span><code>https://download.lenovo.com/cdrt/td/catalogv2.xml
 </code></pre></div>
 <p>The first 4 characters of the machine type (e.g. <code>20W0</code> for a ThinkPad T14 Gen 2i) are used to match the correct model entry. The script prefers a <strong>Win11</strong> SCCM pack and falls back to <strong>Win10</strong> automatically if one isn't available.</p>
-<p>! ! ! note "BOM handling"
-    Lenovo's catalog XML contains a UTF-8 BOM that breaks PowerShell's XML parser. The script strips it at the byte level before parsing to prevent this.</p>
+<div class="admonition note">
+<p class="admonition-title">BOM handling</p>
+<p>Lenovo's catalog XML contains a UTF-8 BOM that breaks PowerShell's XML parser. The script strips it at the byte level before parsing to prevent this.</p>
+</div>
 <h4 id="dell">Dell<a class="headerlink" href="#dell" title="Permanent link">&para;</a></h4>
 <p>Downloads <code>CatalogPC.cab</code> from Dell's CDN and extracts it:</p>
 <div class="highlight"><pre><span></span><code>https://downloads.dell.com/catalog/CatalogPC.cab
 </code></pre></div>
-<p>! ! ! info ""
-The Service Tag is read from <code>Win32_BIOS.SerialNumber</code> and the System SKU from <code>Win32_ComputerSystem.SystemSKUNumber</code>. The catalog is searched for a <code>SoftwareComponent</code> with "Driver Pack" in its display name matching the detected SKU.</p>
+<div class="admonition info"></div>
+<p>The Service Tag is read from <code>Win32_BIOS.SerialNumber</code> and the System SKU from <code>Win32_ComputerSystem.SystemSKUNumber</code>. The catalog is searched for a <code>SoftwareComponent</code> with "Driver Pack" in its display name matching the detected SKU.</p>
 <h4 id="hp">HP<a class="headerlink" href="#hp" title="Permanent link">&para;</a></h4>
 <p>Downloads a platform-specific catalog cab using the BaseBoard product ID:</p>
 <div class="highlight"><pre><span></span><code>https://ftp.hp.com/pub/caps-softpaq/cmit/imagepal/ref/{platformId}/{platformId}.cab
 </code></pre></div>
-<p>! ! ! info "note" 
-The catalog is parsed for a SoftPaq with a "Driver Pack" category, and the direct download URL is extracted.</p>
+<div class="admonition info">
+<p class="admonition-title">note</p>
+</div>
+<p>The catalog is parsed for a SoftPaq with a "Driver Pack" category, and the direct download URL is extracted.</p>
 <hr />
 <h3 id="3-download">3. Download<a class="headerlink" href="#3-download" title="Permanent link">&para;</a></h3>
 <p>The driver pack is downloaded using the inbox <code>curl.exe</code> (available on Windows 10 1803+). A silent <code>HEAD</code> request is made first to get the file size, enabling a true percentage progress bar.</p>
 <p>The download bar shows live progress:</p>
 <div class="highlight"><pre><span></span><code>1 234.5 MB / 1 954.5 MB  (63%)  376 Mbps
 </code></pre></div>
-<p>! ! ! info "Large packs"
-    Lenovo SCCM packs are typically ~2 GB. At 100 Mbps this takes around 2–3 minutes. Downloads have no time limit and will automatically resume if the connection drops, retrying up to 10 times before giving up.</p>
+<div class="admonition info">
+<p class="admonition-title">Large packs</p>
+<p>Lenovo SCCM packs are typically ~2 GB. At 100 Mbps this takes around 2–3 minutes. Downloads have no time limit and will automatically resume if the connection drops, retrying up to 10 times before giving up.</p>
+</div>
 <hr />
 <h3 id="4-extract">4. Extract<a class="headerlink" href="#4-extract" title="Permanent link">&para;</a></h3>
 <p>The pack is silently extracted to <code>C:\DRIVERS\{OEM}_Extracted</code> using the appropriate flags per format:</p>
@@ -1081,8 +1089,10 @@ The catalog is parsed for a SoftPaq with a "Driver Pack" category, and the direc
 <li>Reset all bars and spinners</li>
 <li>Re-enable the Install button</li>
 </ol>
-<p>! ! ! "warning"
-Cancellation during extraction may leave a partial <code>C:\DRIVERS\{OEM}_Extracted</code> folder. This is safe to delete manually and will be overwritten on the next run.</p>
+<div class="admonition warning">
+<p class="admonition-title">warning</p>
+</div>
+<p>Cancellation during extraction may leave a partial <code>C:\DRIVERS\{OEM}_Extracted</code> folder. This is safe to delete manually and will be overwritten on the next run.</p>
 <hr />
 <h2 id="log-file">Log File<a class="headerlink" href="#log-file" title="Permanent link">&para;</a></h2>
 <p>Every run appends a timestamped log to:</p>
@@ -1153,8 +1163,10 @@ Cancellation during extraction may leave a partial <code>C:\DRIVERS\{OEM}_Extrac
 </tr>
 </tbody>
 </table>
-<p>! ! ! warning "Unsupported machines"
-If the manufacturer is not Dell, HP, or Lenovo the script will display an error and exit gracefully without making any changes to the system.</p>
+<div class="admonition warning">
+<p class="admonition-title">Unsupported machines</p>
+</div>
+<p>If the manufacturer is not Dell, HP, or Lenovo the script will display an error and exit gracefully without making any changes to the system.</p>
 <hr />
 <h2 id="requirements">Requirements<a class="headerlink" href="#requirements" title="Permanent link">&para;</a></h2>
 <ul>
