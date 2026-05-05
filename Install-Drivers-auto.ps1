@@ -168,8 +168,8 @@ function Get-LenovoDirectDownloadLink {
         return $null
     }
 
-    Log "Querying Lenovo driver API for $docId..."
-    SetStage "Querying Lenovo driver API ($docId)..."
+    Log "Querying Lenovo driver API for ${docId}..."
+    SetStage "Querying Lenovo driver API (${docId})..."
 
     # Try multiple API endpoint variants — Lenovo's API is region-sensitive
     $apiUrls = @(
@@ -200,14 +200,14 @@ function Get-LenovoDirectDownloadLink {
                 # Check the response actually has file data (not just a null body error)
                 if ($candidate -notmatch '"body"\s*:\s*null') {
                     $jsonText = $candidate
-                    Log "Got valid response from: $apiUrl"
+                    Log "Got valid response from: ${apiUrl}"
                     break
                 } else {
-                    Log "API returned null body from: $apiUrl"
+                    Log "API returned null body from: ${apiUrl}"
                 }
             }
         } catch {
-            Log "API attempt failed ($apiUrl): $($_.Exception.Message)"
+            Log "API attempt failed (${apiUrl}): $($_.Exception.Message)"
             $Global:ProgressPreference = 'Continue'
         }
         $cur = $progress.Value
@@ -216,7 +216,7 @@ function Get-LenovoDirectDownloadLink {
     }
 
     if (-not $jsonText -or $jsonText.Length -lt 10) {
-        Log "All API endpoints failed for $docId — trying direct URL regex from support page..."
+        Log "All API endpoints failed for ${docId} — trying direct URL regex from support page..."
         # Emergency fallback: use known Lenovo download URL pattern from recipecard version
         return $null
     }
@@ -224,10 +224,10 @@ function Get-LenovoDirectDownloadLink {
     try {
         $apiData = $jsonText | ConvertFrom-Json
     } catch {
-        Log "Failed to parse API JSON for $docId: $($_.Exception.Message)"
+        Log "Failed to parse API JSON for ${docId}: $($_.Exception.Message)"
         $urlPat = '"URL"\s*:\s*"(https?://download\.lenovo\.com/[^"]+\.(?:exe|zip|cab))"'
         $m = [regex]::Match($jsonText, $urlPat)
-        if ($m.Success) { $url = $m.Groups[1].Value; Log "Regex fallback URL: $url"; return $url }
+        if ($m.Success) { $url = $m.Groups[1].Value; Log "Regex fallback URL: ${url}"; return $url }
         return $null
     }
 
@@ -236,7 +236,7 @@ function Get-LenovoDirectDownloadLink {
     try { $files = $apiData.body.DriverDetails.Files } catch {}
     if (-not $files) { try { $files = $apiData.Files } catch {} }
     if (-not $files -or $files.Count -eq 0) {
-        Log "No files in API response for $docId. Raw: $($jsonText.Substring(0, [Math]::Min(300,$jsonText.Length)))"
+        Log "No files in API response for ${docId}. Raw: $($jsonText.Substring(0, [Math]::Min(300,$jsonText.Length)))"
         return $null
     }
 
