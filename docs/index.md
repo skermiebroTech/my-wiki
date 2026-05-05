@@ -1,7 +1,7 @@
 # ⚡ Quick Driver Installation
-## Semi-Automatic one liner:
+## Automatic one liner:
 ```
-powershell -WindowStyle Hidden -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers.ps1 | iex"
+powershell -WindowStyle Hidden -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto.ps1 | iex"
 ```
 ## Links
 
