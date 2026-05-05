@@ -942,7 +942,7 @@
 
 
 <h1 id="auto-driver-installer">Auto Driver Installer<a class="headerlink" href="#auto-driver-installer" title="Permanent link">&para;</a></h1>
-<p>A fully automated PowerShell driver installer for <strong>Dell</strong>, <strong>HP</strong>, and <strong>Lenovo</strong> machines. Designed to run in Windows audit mode with a single command — no manual downloads, no clicking through wizards.</p>
+<p>A fully automated PowerShell driver installer for <strong>Dell</strong>, <strong>HP</strong>, and <strong>Lenovo</strong> machines. Designed to run in Windows audit mode with a single command no manual downloads, no clicking through wizards.</p>
 <hr />
 <h2 id="quick-start">Quick Start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
 <p>Run this from the <strong>Win+R</strong> box on any supported machine:</p>
@@ -995,7 +995,7 @@
 </div>
 <hr />
 <h3 id="3-download">3. Download<a class="headerlink" href="#3-download" title="Permanent link">&para;</a></h3>
-<p>The driver pack is downloaded using the inbox <code>curl.exe</code> (available on Windows 10 1803+).</p>
+<p>The driver pack is downloaded using <code>curl.exe</code> (available on Windows 10 1803+).</p>
 <p>The download bar shows live progress:</p>
 <div class="highlight"><pre><span></span><code>1234.5 MB Received 376 Mbps
 </code></pre></div>
@@ -1005,7 +1005,7 @@
 </div>
 <hr />
 <h3 id="4-extract">4. Extract<a class="headerlink" href="#4-extract" title="Permanent link">&para;</a></h3>
-<p>The pack is silently extracted to <code>C:\DRIVERS\{OEM}_Extracted</code> using the appropriate flags per format:</p>
+<p>The pack is extracted to <code>C:\DRIVERS\{OEM}_Extracted</code> using the appropriate flags per format:</p>
 <table>
 <thead>
 <tr>
@@ -1037,13 +1037,13 @@
 </tr>
 </tbody>
 </table>
-<p>The extract bar shows a live file count as files land in the destination folder. For ZIP files the total is known exactly (pre-scanned via the ZipFile API). For EXE/CAB the bar scrolls as a Marquee with a running count.</p>
+<p>The extract bar shows a live file count as files land in the destination folder. For ZIP files the total is known exactly (pre-scanned via the ZipFile API). For EXE/CAB a running count is displayed.</p>
 <hr />
 <h3 id="5-install-infs">5. Install INFs<a class="headerlink" href="#5-install-infs" title="Permanent link">&para;</a></h3>
 <p>All <code>.inf</code> files found recursively under the extraction path are installed using:</p>
 <div class="highlight"><pre><span></span><code><span class="n">pnputil</span> <span class="p">/</span><span class="nb">add-driver</span> <span class="s2">&quot;path\to\driver.inf&quot;</span> <span class="p">/</span><span class="n">install</span>
 </code></pre></div>
-<p>The install bar tracks progress as <code>X / Y INFs (Z remaining)</code>. Each INF is processed whether it results in a new install, an update, or is already up to date — pnputil handles all cases gracefully.</p>
+<p>The install bar tracks progress. Each INF is processed whether it results in a new install, an update, or is already up to date — pnputil handles all cases gracefully.</p>
 <hr />
 <h2 id="user-interface">User Interface<a class="headerlink" href="#user-interface" title="Permanent link">&para;</a></h2>
 <p>The tool has a simple GUI built with Windows Forms:</p>
@@ -1111,18 +1111,6 @@
 </tr>
 </thead>
 <tbody>
-<tr>
-<td>App launches</td>
-<td>Ascending sci-fi arpeggio</td>
-</tr>
-<tr>
-<td>Download starts</td>
-<td>Fast upward frequency sweep</td>
-</tr>
-<tr>
-<td>Extraction complete</td>
-<td>Harmonic shimmer chord</td>
-</tr>
 <tr>
 <td>Each INF installed</td>
 <td>Tight keyclick</td>
