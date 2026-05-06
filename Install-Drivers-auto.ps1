@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.4.0
+# Version: 1.4.1
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -10,7 +10,7 @@
 # Supports: Dell, HP, Lenovo
 # =============================================================
 
-$ScriptVersion   = "1.4.0"
+$ScriptVersion   = "1.4.1"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -867,12 +867,14 @@ function Start-DellDriverInstall {
     $candidates = @()
     foreach ($pkg in $cat.SelectNodes("//*[local-name()='DriverPackage']")) {
 
-        # Match on 'name' attribute of <Model> nodes (Dell-recommended method)
+        # Match on 'name' attribute of <Model> nodes (Dell-recommended method).
+        # Use exact case-insensitive equality only — substring matching causes
+        # "Latitude 7330 Rugged Extreme" to match a search for "Latitude 7330".
         $modelMatched = $false
         foreach ($modelNode in $pkg.SelectNodes(".//*[local-name()='Model']")) {
             $nameAttr = $modelNode.GetAttribute("name")
             foreach ($tok in $searchNames) {
-                if ($nameAttr -ieq $tok -or $nameAttr -like "*$tok*" -or $tok -like "*$nameAttr*") {
+                if ($nameAttr -ieq $tok) {
                     $modelMatched = $true; break
                 }
             }
