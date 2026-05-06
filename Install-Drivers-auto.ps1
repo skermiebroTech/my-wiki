@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.4.4
+# Version: 1.4.5
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -10,7 +10,7 @@
 # Supports: Dell, HP, Lenovo
 # =============================================================
 
-$ScriptVersion   = "1.4.4"
+$ScriptVersion   = "1.4.5"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -238,15 +238,19 @@ $form.Controls.Add($cancelButton)
 
 # =========================
 # SOUND HELPER
-# Uses built-in Windows SystemSounds — no external files needed.
+# Plays WAV files directly from C:\Windows\Media\ using SoundPlayer.
+# These files are always present regardless of Windows sound scheme settings,
+# making this reliable in audit mode and on freshly imaged systems.
 #
-#   Start            -> Asterisk    (informational chime)
-#   DownloadComplete -> Beep        (short neutral beep)
-#   ExtractComplete  -> Beep        (short neutral beep)
-#   DriverAdded      -> Beep        (subtle tick per INF installed)
-#   Success          -> Exclamation (positive completion fanfare)
-#   Failure          -> Hand        (Windows error/stop sound)
-#   Cancel           -> Hand        (Windows error/stop sound)
+#   Start            -> Windows Notify.wav       (informational chime)
+#   DownloadComplete -> Windows Print complete.wav
+#   ExtractComplete  -> Windows Print complete.wav
+#   DriverAdded      -> Windows Navigation Start.wav  (subtle tick per INF)
+#   Success          -> Windows Logon.wav        (positive completion)
+#   Failure          -> Windows Critical Stop.wav
+#   Cancel           -> Windows Critical Stop.wav
+#
+# Falls back gracefully if a specific file is missing.
 # =========================
 function Play-Sound {
     param(
@@ -254,16 +258,31 @@ function Play-Sound {
         [string]$Event
     )
     if (-not $soundCheckbox.Checked) { return }
+
+    $mediaDir = "$env:SystemRoot\Media"
+
+    # Ordered preference lists — first file found wins
+    $wavCandidates = switch ($Event) {
+        "Start"            { @("Windows Notify.wav", "Windows Notify System Generic.wav", "chimes.wav") }
+        "DownloadComplete" { @("Windows Print complete.wav", "Windows Notify.wav", "chimes.wav") }
+        "ExtractComplete"  { @("Windows Print complete.wav", "Windows Notify.wav", "chimes.wav") }
+        "DriverAdded"      { @("Windows Navigation Start.wav", "Windows Notify Calendar.wav", "Windows Notify.wav") }
+        "Success"          { @("Windows Logon.wav", "Windows Notify.wav", "tada.wav") }
+        "Failure"          { @("Windows Critical Stop.wav", "Windows Foreground.wav", "chord.wav") }
+        "Cancel"           { @("Windows Critical Stop.wav", "Windows Foreground.wav", "chord.wav") }
+    }
+
+    $wavFile = $null
+    foreach ($candidate in $wavCandidates) {
+        $path = Join-Path $mediaDir $candidate
+        if (Test-Path $path) { $wavFile = $path; break }
+    }
+
+    if (-not $wavFile) { return }
+
     try {
-        switch ($Event) {
-            "Start"            { [System.Media.SystemSounds]::Asterisk.Play()    }
-            "DownloadComplete" { [System.Media.SystemSounds]::Beep.Play()        }
-            "ExtractComplete"  { [System.Media.SystemSounds]::Beep.Play()        }
-            "DriverAdded"      { [System.Media.SystemSounds]::Beep.Play()        }
-            "Success"          { [System.Media.SystemSounds]::Exclamation.Play() }
-            "Failure"          { [System.Media.SystemSounds]::Hand.Play()        }
-            "Cancel"           { [System.Media.SystemSounds]::Hand.Play()        }
-        }
+        $player = New-Object System.Media.SoundPlayer $wavFile
+        $player.Play()   # async — non-blocking
     } catch {}
 }
 
