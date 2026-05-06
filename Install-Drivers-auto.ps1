@@ -215,7 +215,7 @@ $form.Controls.Add($soundCheckbox)
 $button            = New-Object System.Windows.Forms.Button
 $button.Text       = "Install Drivers"
 $button.Size       = New-Object System.Drawing.Size(155, 36)
-$button.Location   = New-Object System.Drawing.Point(155, 515)
+$button.Location   = New-Object System.Drawing.Point(155, 483)
 $button.Font       = $FontUIBold
 $button.BackColor  = [System.Drawing.Color]::FromArgb(0, 120, 215)
 $button.ForeColor  = [System.Drawing.Color]::White
@@ -227,7 +227,7 @@ $form.Controls.Add($button)
 $cancelButton            = New-Object System.Windows.Forms.Button
 $cancelButton.Text       = "Cancel"
 $cancelButton.Size       = New-Object System.Drawing.Size(100, 36)
-$cancelButton.Location   = New-Object System.Drawing.Point(320, 515)
+$cancelButton.Location   = New-Object System.Drawing.Point(320, 483)
 $cancelButton.Font       = $FontUIBold
 $cancelButton.BackColor  = [System.Drawing.Color]::FromArgb(160, 160, 160)
 $cancelButton.ForeColor  = [System.Drawing.Color]::White
