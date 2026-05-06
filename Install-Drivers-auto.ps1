@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.4.2
+# Version: 1.4.3
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -10,7 +10,7 @@
 # Supports: Dell, HP, Lenovo
 # =============================================================
 
-$ScriptVersion   = "1.4.2"
+$ScriptVersion   = "1.4.3"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -658,8 +658,8 @@ function Start-PackExtraction {
                 } else { 0 }
             }
 
-            # Synchronous launcher — UseShellExecute+Hidden so child GUI windows
-            # inherit the hidden window station and don't appear on screen.
+            # Synchronous launcher with live file count — UseShellExecute+Hidden so
+            # child GUI windows inherit the hidden window station and don't appear.
             function TrySync {
                 param([string]$ExeArgs)
                 $p                 = New-Object System.Diagnostics.ProcessStartInfo
@@ -670,7 +670,19 @@ function Start-PackExtraction {
                 $proc = New-Object System.Diagnostics.Process
                 $proc.StartInfo = $p
                 $proc.Start() | Out-Null
-                $proc.WaitForExit()
+                # Poll live while extracting so the UI shows file count progress
+                while (-not $proc.HasExited) {
+                    Start-Sleep -Milliseconds 700
+                    $n = & $CountFiles
+                    SetExtract -Pct -1 -Label "$n files extracted..."
+                    Step-ExSpinner
+                    Step-OverallSpinner
+                    [System.Windows.Forms.Application]::DoEvents()
+                    if ($script:CancelRequested) {
+                        try { $proc.Kill() } catch {}
+                        break
+                    }
+                }
                 Start-Sleep -Seconds 2
                 return (& $CountFiles)
             }
