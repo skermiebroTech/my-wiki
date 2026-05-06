@@ -743,10 +743,10 @@ function Start-PackExtraction {
 
             # Last resort: Inno Setup (only if all vendor formats failed)
             if (-not $extracted) {
-                Log "  All vendor formats failed — trying Inno Setup (/VERYSILENT /DIR /EXTRACT=YES)..."
+                Log "  All vendor formats failed — trying Lenovo (-s -fdest)..."
                 $p = New-Object System.Diagnostics.ProcessStartInfo
                 $p.FileName        = $PackFile
-                $p.Arguments       = "/VERYSILENT /DIR=`"$DestPath`" /EXTRACT=YES"
+                $p.Arguments       = "-s -f`"$DestPath`""
                 $p.UseShellExecute = $true
                 $p.WindowStyle     = [System.Diagnostics.ProcessWindowStyle]::Hidden
                 $proc = New-Object System.Diagnostics.Process
