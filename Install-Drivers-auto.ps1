@@ -657,12 +657,15 @@ function Start-PackExtraction {
             }
 
             function TrySync {
-                param([string]$Args)
+                param([string]$ExeArgs)
                 $p = New-Object System.Diagnostics.ProcessStartInfo
                 $p.FileName        = $PackFile
-                $p.Arguments       = $Args
-                $p.UseShellExecute = $false
-                $p.CreateNoWindow  = $true
+                $p.Arguments       = $ExeArgs
+                # UseShellExecute = $true + WindowStyle Hidden causes Windows to
+                # set SW_HIDE in STARTUPINFO, which child GUI processes inherit.
+                # CreateNoWindow alone only suppresses the direct console window.
+                $p.UseShellExecute = $true
+                $p.WindowStyle     = [System.Diagnostics.ProcessWindowStyle]::Hidden
                 $proc = New-Object System.Diagnostics.Process
                 $proc.StartInfo = $p
                 $proc.Start() | Out-Null
@@ -675,8 +678,8 @@ function Start-PackExtraction {
                 $p = New-Object System.Diagnostics.ProcessStartInfo
                 $p.FileName        = $PackFile
                 $p.Arguments       = "/s /e /f `"$DestPath`""
-                $p.UseShellExecute = $false
-                $p.CreateNoWindow  = $true
+                $p.UseShellExecute = $true
+                $p.WindowStyle     = [System.Diagnostics.ProcessWindowStyle]::Hidden
                 $proc = New-Object System.Diagnostics.Process
                 $proc.StartInfo = $p
                 $proc.Start() | Out-Null
@@ -744,8 +747,8 @@ function Start-PackExtraction {
                 $p = New-Object System.Diagnostics.ProcessStartInfo
                 $p.FileName        = $PackFile
                 $p.Arguments       = "/VERYSILENT /DIR=`"$DestPath`" /EXTRACT=YES"
-                $p.UseShellExecute = $false
-                $p.CreateNoWindow  = $true
+                $p.UseShellExecute = $true
+                $p.WindowStyle     = [System.Diagnostics.ProcessWindowStyle]::Hidden
                 $proc = New-Object System.Diagnostics.Process
                 $proc.StartInfo = $p
                 $proc.Start() | Out-Null
