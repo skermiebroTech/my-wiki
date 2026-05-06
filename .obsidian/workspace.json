@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "docs/todo.md",
+                "file": "docs/index.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "todo"
+              "title": "index"
             }
           }
         ]
@@ -185,10 +185,6 @@
   },
   "active": "c699af67c7046aa9",
   "lastOpenFiles": [
-    "Install-Drivers-debug.ps1",
-    "Install-Drivers-auto copy 2.ps1",
-    "docs/index.md",
-    "Install-Drivers-auto copy.ps1",
     "site/search/search_index.json",
     "site/search",
     "site/Panasonic/panasonic-fzg1/index.html",
@@ -197,9 +193,13 @@
     "site/todo/index.html",
     "site/todo",
     "site/driver-installation/index.html",
-    "docs/todo.md",
+    "site/driver-installation",
+    "site/cab-file-driver-installation/index.html",
+    "site/cab-file-driver-installation",
     "docs/auto-driver-installer.md.old.md",
     "docs/Auto-Installer-Docs.md",
+    "docs/todo.md",
+    "docs/index.md",
     "docs/cab-file-driver-installation.md",
     "docs/driver-installation.md",
     "docs/Useful-Links.md",
