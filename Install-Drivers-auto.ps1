@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.4.1
+# Version: 1.4.2
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -10,7 +10,7 @@
 # Supports: Dell, HP, Lenovo
 # =============================================================
 
-$ScriptVersion   = "1.4.1"
+$ScriptVersion   = "1.4.2"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -569,9 +569,12 @@ function Install-DriversFromPath {
 
 # =========================
 # SHARED EXTRACT RUNNER
-# HP SoftPaq EXEs use:  /s /e /f "<dest>"
-# Dell/Lenovo use Inno: /VERYSILENT /DIR="<dest>" /EXTRACT=YES
-# We try HP flags first; if no files appear after 5 s we retry with Inno flags.
+# Vendor-specific format is always tried first.
+# Extraction format confirmed per OEM:
+#   Dell:    /s /e="<dest>"                         (synchronous)
+#   HP:      /s /e /f "<dest>"                      (async)
+#   Lenovo:  /VERYSILENT /DIR="<dest>" /EXTRACT=YES  (Inno Setup, synchronous)
+# Remaining formats are tried as fallbacks if the primary produces 0 files.
 # =========================
 function Start-PackExtraction {
     param(
@@ -639,14 +642,13 @@ function Start-PackExtraction {
         }
 
         default {
-            # EXE extractor format varies by OEM:
-            #   Dell:    /s /e="<dest>"                        (synchronous)
-            #   Lenovo:  -s -f"<dest>"                         (synchronous)
-            #   HP:      /s /e /f "<dest>"                     (async)
-            #   Inno:    /VERYSILENT /DIR="<dest>" /EXTRACT=YES (async, last resort)
+            # EXE extractor format confirmed per OEM:
+            #   Lenovo:  /VERYSILENT /DIR="<dest>" /EXTRACT=YES  (Inno Setup — confirmed working)
+            #   Dell:    /s /e="<dest>"                          (synchronous)
+            #   HP:      /s /e /f "<dest>"                       (async)
             #
-            # We try the vendor-specific format first and stop immediately if it
-            # produces files. Only fall through to the other formats if it fails.
+            # Vendor-specific format always runs first. Fallbacks only run if
+            # the primary produces 0 files in the destination.
 
             Log "Extracting EXE pack (Vendor=$Vendor)..."
 
@@ -656,14 +658,13 @@ function Start-PackExtraction {
                 } else { 0 }
             }
 
+            # Synchronous launcher — UseShellExecute+Hidden so child GUI windows
+            # inherit the hidden window station and don't appear on screen.
             function TrySync {
                 param([string]$ExeArgs)
-                $p = New-Object System.Diagnostics.ProcessStartInfo
+                $p                 = New-Object System.Diagnostics.ProcessStartInfo
                 $p.FileName        = $PackFile
                 $p.Arguments       = $ExeArgs
-                # UseShellExecute = $true + WindowStyle Hidden causes Windows to
-                # set SW_HIDE in STARTUPINFO, which child GUI processes inherit.
-                # CreateNoWindow alone only suppresses the direct console window.
                 $p.UseShellExecute = $true
                 $p.WindowStyle     = [System.Diagnostics.ProcessWindowStyle]::Hidden
                 $proc = New-Object System.Diagnostics.Process
@@ -674,8 +675,9 @@ function Start-PackExtraction {
                 return (& $CountFiles)
             }
 
+            # Async launcher for HP SoftPaq (extracts asynchronously)
             function TryAsyncHP {
-                $p = New-Object System.Diagnostics.ProcessStartInfo
+                $p                 = New-Object System.Diagnostics.ProcessStartInfo
                 $p.FileName        = $PackFile
                 $p.Arguments       = "/s /e /f `"$DestPath`""
                 $p.UseShellExecute = $true
@@ -700,30 +702,29 @@ function Start-PackExtraction {
                 return (& $CountFiles)
             }
 
-            # Build the attempt list — vendor-specific format goes first
-            # Each entry: [label, scriptblock that returns file count]
+            # Build attempt list — vendor format first, others as fallback
             $attempts = [System.Collections.Generic.List[object]]::new()
 
             switch ($Vendor) {
                 "Dell" {
-                    $attempts.Add(@{ Label = "Dell (/s /e=dest)";  Action = { TrySync "/s /e=`"$DestPath`"" } })
-                    $attempts.Add(@{ Label = "Lenovo (-s -fdest)"; Action = { TrySync "-s -f`"$DestPath`"" } })
-                    $attempts.Add(@{ Label = "HP (/s /e /f dest)"; Action = { TryAsyncHP } })
+                    $attempts.Add(@{ Label = "Dell (/s /e=dest)";           Action = { TrySync "/s /e=`"$DestPath`"" } })
+                    $attempts.Add(@{ Label = "Lenovo (Inno /VERYSILENT)";   Action = { TrySync "/VERYSILENT /DIR=`"$DestPath`" /EXTRACT=YES" } })
+                    $attempts.Add(@{ Label = "HP (/s /e /f dest)";          Action = { TryAsyncHP } })
                 }
                 "Lenovo" {
-                    $attempts.Add(@{ Label = "Lenovo (-s -fdest)"; Action = { TrySync "-s -f`"$DestPath`"" } })
-                    $attempts.Add(@{ Label = "Dell (/s /e=dest)";  Action = { TrySync "/s /e=`"$DestPath`"" } })
-                    $attempts.Add(@{ Label = "HP (/s /e /f dest)"; Action = { TryAsyncHP } })
+                    $attempts.Add(@{ Label = "Lenovo (Inno /VERYSILENT)";   Action = { TrySync "/VERYSILENT /DIR=`"$DestPath`" /EXTRACT=YES" } })
+                    $attempts.Add(@{ Label = "Dell (/s /e=dest)";           Action = { TrySync "/s /e=`"$DestPath`"" } })
+                    $attempts.Add(@{ Label = "HP (/s /e /f dest)";          Action = { TryAsyncHP } })
                 }
                 "HP" {
-                    $attempts.Add(@{ Label = "HP (/s /e /f dest)"; Action = { TryAsyncHP } })
-                    $attempts.Add(@{ Label = "Dell (/s /e=dest)";  Action = { TrySync "/s /e=`"$DestPath`"" } })
-                    $attempts.Add(@{ Label = "Lenovo (-s -fdest)"; Action = { TrySync "-s -f`"$DestPath`"" } })
+                    $attempts.Add(@{ Label = "HP (/s /e /f dest)";          Action = { TryAsyncHP } })
+                    $attempts.Add(@{ Label = "Dell (/s /e=dest)";           Action = { TrySync "/s /e=`"$DestPath`"" } })
+                    $attempts.Add(@{ Label = "Lenovo (Inno /VERYSILENT)";   Action = { TrySync "/VERYSILENT /DIR=`"$DestPath`" /EXTRACT=YES" } })
                 }
                 default {
-                    $attempts.Add(@{ Label = "Dell (/s /e=dest)";  Action = { TrySync "/s /e=`"$DestPath`"" } })
-                    $attempts.Add(@{ Label = "Lenovo (-s -fdest)"; Action = { TrySync "-s -f`"$DestPath`"" } })
-                    $attempts.Add(@{ Label = "HP (/s /e /f dest)"; Action = { TryAsyncHP } })
+                    $attempts.Add(@{ Label = "Dell (/s /e=dest)";           Action = { TrySync "/s /e=`"$DestPath`"" } })
+                    $attempts.Add(@{ Label = "Lenovo (Inno /VERYSILENT)";   Action = { TrySync "/VERYSILENT /DIR=`"$DestPath`" /EXTRACT=YES" } })
+                    $attempts.Add(@{ Label = "HP (/s /e /f dest)";          Action = { TryAsyncHP } })
                 }
             }
 
@@ -741,10 +742,10 @@ function Start-PackExtraction {
                 }
             }
 
-            # Last resort: Inno Setup (only if all vendor formats failed)
+            # Last resort: Lenovo -s -f (older Lenovo packs use this instead of Inno)
             if (-not $extracted) {
-                Log "  All vendor formats failed — trying Lenovo (-s -fdest)..."
-                $p = New-Object System.Diagnostics.ProcessStartInfo
+                Log "  All primary formats failed — trying Lenovo legacy (-s -fdest)..."
+                $p                 = New-Object System.Diagnostics.ProcessStartInfo
                 $p.FileName        = $PackFile
                 $p.Arguments       = "-s -f`"$DestPath`""
                 $p.UseShellExecute = $true
@@ -790,31 +791,12 @@ function Start-DellDriverInstall {
 
     # ---------------------------------------------------------------
     # Dell publishes TWO catalogs:
-    #   CatalogPC.cab       - all individual drivers/firmware (NOT driver packs)
+    #   CatalogPC.cab         - individual drivers/firmware (NOT driver packs)
     #   DriverPackCatalog.cab - driver packs only (what we need)
     #
-    # DriverPackCatalog.xml structure (confirmed by Dell docs):
-    #   <DriverPackManifest>
-    #     <DriverPackage path="FOLDER.../Model-Platform_Win11_x.x_Axx.exe" ...>
-    #       <Name><Display lang="en">Latitude 7430 Windows 11 Driver Pack</Display></Name>
-    #       <SupportedSystems>
-    #         <Brand key="4" prefix="LAT">
-    #           <Model systemID="0B0B" name="Latitude 7430">
-    #             <Display>Latitude-7430</Display>
-    #           </Model>
-    #         </Brand>
-    #       </SupportedSystems>
-    #       <SupportedOperatingSystems>
-    #         <OperatingSystem osCode="W21P4" ...>
-    #           <Display>Windows 11</Display>
-    #         </OperatingSystem>
-    #       </SupportedOperatingSystems>
-    #     </DriverPackage>
-    #   </DriverPackManifest>
-    #
-    # Match strategy (per Dell docs): use the 'name' attribute on <Model> nodes
-    # since systemID is not readily accessible via WMI. The 'name' value matches
-    # the WMI Win32_ComputerSystem.Model string (e.g. "Latitude 7430").
+    # Match on the 'name' attribute of <Model> nodes — exact equality only.
+    # Substring matching would cause "Latitude 7330 Rugged Extreme" to match
+    # a search for "Latitude 7330".
     # ---------------------------------------------------------------
 
     Log "Downloading Dell DriverPackCatalog.cab..."
@@ -851,25 +833,19 @@ function Start-DellDriverInstall {
     }
 
     # Build model name search tokens from WMI model string
-    # WMI: "Latitude 7430" — the catalog 'name' attribute uses the same value
-    # Also try stripping the family prefix in case of slight differences
     $searchNames = @()
     if ($ModelName) {
-        $searchNames += $ModelName                                      # "Latitude 7430"
-        $searchNames += ($ModelName -replace '\s+Notebook.*$','')       # strip "Notebook PC" suffix
-        $searchNames += ($ModelName -replace '^Dell\s+','')             # strip leading "Dell "
+        $searchNames += $ModelName                                # "Latitude 7430"
+        $searchNames += ($ModelName -replace '\s+Notebook.*$','') # strip "Notebook PC" suffix
+        $searchNames += ($ModelName -replace '^Dell\s+','')       # strip leading "Dell "
         $searchNames = $searchNames | Select-Object -Unique | Where-Object { $_.Length -gt 3 }
     }
     Log "Searching catalog — model tokens: $($searchNames -join ' | ')"
 
-    # Collect all matching driver pack entries
-    # Root element is <DriverPackManifest>, packages are <DriverPackage> nodes
     $candidates = @()
     foreach ($pkg in $cat.SelectNodes("//*[local-name()='DriverPackage']")) {
 
-        # Match on 'name' attribute of <Model> nodes (Dell-recommended method).
-        # Use exact case-insensitive equality only — substring matching causes
-        # "Latitude 7330 Rugged Extreme" to match a search for "Latitude 7330".
+        # Exact case-insensitive equality only — no substring matching
         $modelMatched = $false
         foreach ($modelNode in $pkg.SelectNodes(".//*[local-name()='Model']")) {
             $nameAttr = $modelNode.GetAttribute("name")
@@ -882,7 +858,6 @@ function Start-DellDriverInstall {
         }
         if (-not $modelMatched) { continue }
 
-        # Determine OS support from <SupportedOperatingSystems>
         $supportsWin11 = $false
         $supportsWin10 = $false
         foreach ($osNode in $pkg.SelectNodes(".//*[local-name()='OperatingSystem']")) {
@@ -912,7 +887,6 @@ function Start-DellDriverInstall {
         return $false
     }
 
-    # Pick best match for detected OS
     $chosen = $null
     if ($isWin11) {
         $chosen = $candidates | Where-Object { $_.Win11 } | Select-Object -First 1
@@ -956,17 +930,6 @@ function Start-DellDriverInstall {
 
 # =========================
 # HP
-# Strategy: download the HP Driver Pack Matrix HTML page (the authoritative
-# source HP actually maintains), locate the row matching this machine's model
-# name, and pick the best SoftPaq EXE URL for the detected OS version.
-#
-# The matrix table structure (from ftp.hp.com/pub/caps-softpaq/cmit/HP_Driverpack_Matrix_x64.html):
-#   - Each <tr> starts with a cell listing one or more model names
-#   - Subsequent cells contain either "-" or an <a href="...spNNNNN.exe"> link
-#   - Column order (left to right) is newest OS to oldest OS
-#
-# We download the raw HTML, find the table row(s) whose model cell contains
-# our model string, then walk across the columns preferring the best OS match.
 # =========================
 function Start-HpDriverInstall {
     param([string]$DriverRoot, [string]$ModelName)
@@ -975,9 +938,8 @@ function Start-HpDriverInstall {
     SetDownload -Pct 0 -Label "Waiting..."
     SetExtract  -Pct 0 -Label "Waiting..."
 
-    # Detect OS build to prefer the right column
-    $osBuild   = $null
-    $isWin11   = $false
+    $osBuild = $null
+    $isWin11 = $false
     try {
         $osBuild = [int](Get-CimInstance Win32_OperatingSystem).BuildNumber
         $isWin11 = $osBuild -ge 22000
@@ -986,8 +948,6 @@ function Start-HpDriverInstall {
         Log "Could not read OS build: $($_.Exception.Message)"
     }
 
-    # Download the Driver Pack Matrix HTML — this is the page HP maintains with
-    # every supported model and direct .exe links, so it's always up to date.
     $matrixUrl  = "https://ftp.hp.com/pub/caps-softpaq/cmit/HP_Driverpack_Matrix_x64.html"
     $matrixFile = Join-Path $env:TEMP "HP_DPMatrix.html"
     Remove-Item $matrixFile -EA SilentlyContinue
@@ -1006,44 +966,29 @@ function Start-HpDriverInstall {
     SetExtract -Pct 20 -Label "Parsing matrix..."
     SetProgress 20
 
-    # Build search tokens from the model name.
-    # e.g. "HP ProBook 430 G8 Notebook PC" -> try progressively shorter substrings
-    # so we can still match if HP abbreviates the name in the table.
     $searchTokens = @()
     if ($ModelName) {
-        # Remove "HP " prefix since it appears on every row and would match everything
         $stripped = $ModelName -replace '(?i)^HP\s+', ''
-        $searchTokens += $stripped                                    # "ProBook 430 G8 Notebook PC"
-        $searchTokens += ($stripped -replace '\s+Notebook.*$', '')   # "ProBook 430 G8"
-        $searchTokens += ($stripped -replace '\s+PC.*$',       '')   # may trim further
+        $searchTokens += $stripped
+        $searchTokens += ($stripped -replace '\s+Notebook.*$', '')
+        $searchTokens += ($stripped -replace '\s+PC.*$',       '')
         $searchTokens = $searchTokens | Select-Object -Unique | Where-Object { $_.Length -gt 4 }
     }
     Log "Search tokens: $($searchTokens -join ' | ')"
 
-    # Parse table rows with a regex — we need the raw HTML cells, not markdown.
-    # Pattern: find <tr>...</tr> blocks, split into <td>/<th> cells, check first
-    # cell for a model name match, then scan remaining cells for .exe hrefs.
     $packUrl   = $null
     $packSpNum = $null
-
-    # Normalise line endings and collapse whitespace inside tags for easier regex
-    $flat = $matrixHtml -replace "`r`n|`r|`n", " " -replace "\s{2,}", " "
-
-    # Extract all <tr>...</tr> blocks
-    $rows = [regex]::Matches($flat, '(?i)<tr[^>]*>(.*?)</tr>')
+    $flat      = $matrixHtml -replace "`r`n|`r|`n", " " -replace "\s{2,}", " "
+    $rows      = [regex]::Matches($flat, '(?i)<tr[^>]*>(.*?)</tr>')
 
     foreach ($row in $rows) {
         $rowHtml = $row.Groups[1].Value
-
-        # Split into cells
-        $cells = [regex]::Matches($rowHtml, '(?i)<t[dh][^>]*>(.*?)</t[dh]>')
+        $cells   = [regex]::Matches($rowHtml, '(?i)<t[dh][^>]*>(.*?)</t[dh]>')
         if ($cells.Count -lt 2) { continue }
 
-        # First cell = model name(s) — strip all tags to get plain text
         $modelCell = [regex]::Replace($cells[0].Groups[1].Value, '<[^>]+>', ' ')
         $modelCell = [System.Net.WebUtility]::HtmlDecode($modelCell) -replace '\s+', ' '
 
-        # Check if any of our search tokens appear in this cell
         $matched = $false
         foreach ($tok in $searchTokens) {
             if ($modelCell -match [regex]::Escape($tok)) { $matched = $true; break }
@@ -1052,35 +997,23 @@ function Start-HpDriverInstall {
 
         Log "  Matched matrix row: $($modelCell.Trim() -replace '\s+',' ')"
 
-        # Collect all spNNNNN.exe hrefs from this row in column order (left = newest OS)
         $allLinks = [regex]::Matches($rowHtml, '(?i)href="([^"]*sp\d+\.exe)"')
         if ($allLinks.Count -eq 0) {
             Log "  Row matched but contains no .exe links — skipping."
             continue
         }
 
-        # All links are valid candidates. We want the newest (leftmost = index 0).
-        # But we do a light preference: if Win11 pick first link, if Win10 skip
-        # pure Win11-only links by checking the tooltip text for "Windows 10".
-        # In practice for most models the same pack covers both, so just take first.
         $bestUrl = $allLinks[0].Groups[1].Value
-        if (-not $bestUrl.StartsWith("http")) {
-            $bestUrl = "https://ftp.hp.com$bestUrl"
-        }
+        if (-not $bestUrl.StartsWith("http")) { $bestUrl = "https://ftp.hp.com$bestUrl" }
 
-        # If the machine is Win10 and the first link's tooltip only mentions Win11,
-        # walk forward to find a Win10-labelled link.
         if (-not $isWin11) {
             foreach ($lm in $allLinks) {
                 $href = $lm.Groups[1].Value
                 if (-not $href.StartsWith("http")) { $href = "https://ftp.hp.com$href" }
-                # The title attribute of the surrounding <a> tag has the version tooltip
-                $aTag = [regex]::Match($rowHtml, "(?i)<a[^>]+href=""[^""]*$([regex]::Escape([System.IO.Path]::GetFileName($href)))[^""]*""[^>]*>")
+                $aTag  = [regex]::Match($rowHtml, "(?i)<a[^>]+href=""[^""]*$([regex]::Escape([System.IO.Path]::GetFileName($href)))[^""]*""[^>]*>")
                 $title = if ($aTag.Success) { $aTag.Value } else { "" }
-                # Accept if title is blank (we can't tell) or explicitly mentions Win10
                 if ($title -eq "" -or $title -match "(?i)windows 10") {
-                    $bestUrl = $href
-                    break
+                    $bestUrl = $href; break
                 }
             }
         }
@@ -1228,16 +1161,12 @@ function Start-LenovoDriverInstall {
 
 # =========================
 # DEVICE INFO DUMP
-# Collects every WMI/CIM field that could be useful for debugging
-# driver pack lookup failures. All errors are caught individually so
-# one bad query never stops the rest from printing.
 # =========================
 function Write-DeviceInfo {
     Log "============================================"
     Log "  DEVICE INFORMATION DUMP"
     Log "============================================"
 
-    # ---- System / Chassis ----
     Log "-- System --"
     try {
         $cs = Get-CimInstance Win32_ComputerSystem
@@ -1259,7 +1188,6 @@ function Write-DeviceInfo {
         Log "  CSProduct.Vendor   : $($csp.Vendor)"
     } catch { Log "  [Win32_ComputerSystemProduct ERROR] $($_.Exception.Message)" }
 
-    # ---- BIOS ----
     Log "-- BIOS --"
     try {
         $bios = Get-CimInstance Win32_BIOS
@@ -1271,7 +1199,6 @@ function Write-DeviceInfo {
         Log "  Version            : $($bios.Version)"
     } catch { Log "  [Win32_BIOS ERROR] $($_.Exception.Message)" }
 
-    # ---- Baseboard (HP Platform ID lives here) ----
     Log "-- Baseboard --"
     try {
         $bb = Get-CimInstance Win32_BaseBoard
@@ -1281,7 +1208,6 @@ function Write-DeviceInfo {
         Log "  Version            : $($bb.Version)"
     } catch { Log "  [Win32_BaseBoard ERROR] $($_.Exception.Message)" }
 
-    # ---- Enclosure / Chassis type ----
     Log "-- Enclosure --"
     try {
         $enc = Get-CimInstance Win32_SystemEnclosure
@@ -1291,7 +1217,6 @@ function Write-DeviceInfo {
         Log "  Manufacturer       : $($enc.Manufacturer)"
     } catch { Log "  [Win32_SystemEnclosure ERROR] $($_.Exception.Message)" }
 
-    # ---- Operating System ----
     Log "-- Operating System --"
     try {
         $os = Get-CimInstance Win32_OperatingSystem
@@ -1305,7 +1230,6 @@ function Write-DeviceInfo {
         Log "  LastBootUpTime     : $($os.LastBootUpTime)"
     } catch { Log "  [Win32_OperatingSystem ERROR] $($_.Exception.Message)" }
 
-    # ---- CPU ----
     Log "-- Processor --"
     try {
         $cpus = Get-CimInstance Win32_Processor
@@ -1320,7 +1244,6 @@ function Write-DeviceInfo {
         }
     } catch { Log "  [Win32_Processor ERROR] $($_.Exception.Message)" }
 
-    # ---- GPU ----
     Log "-- Video Controller --"
     try {
         $gpus = Get-CimInstance Win32_VideoController
@@ -1335,7 +1258,6 @@ function Write-DeviceInfo {
         }
     } catch { Log "  [Win32_VideoController ERROR] $($_.Exception.Message)" }
 
-    # ---- Network adapters ----
     Log "-- Network Adapters --"
     try {
         $nics = Get-CimInstance Win32_NetworkAdapter | Where-Object { $_.PhysicalAdapter -eq $true }
@@ -1347,7 +1269,6 @@ function Write-DeviceInfo {
         }
     } catch { Log "  [Win32_NetworkAdapter ERROR] $($_.Exception.Message)" }
 
-    # ---- Storage ----
     Log "-- Disk Drives --"
     try {
         $disks = Get-CimInstance Win32_DiskDrive
@@ -1362,7 +1283,6 @@ function Write-DeviceInfo {
         }
     } catch { Log "  [Win32_DiskDrive ERROR] $($_.Exception.Message)" }
 
-    # ---- RAM sticks ----
     Log "-- Physical Memory --"
     try {
         $dimms = Get-CimInstance Win32_PhysicalMemory
@@ -1378,7 +1298,6 @@ function Write-DeviceInfo {
         }
     } catch { Log "  [Win32_PhysicalMemory ERROR] $($_.Exception.Message)" }
 
-    # ---- Battery (laptops) ----
     Log "-- Battery --"
     try {
         $batts = Get-CimInstance Win32_Battery
@@ -1395,7 +1314,6 @@ function Write-DeviceInfo {
         }
     } catch { Log "  [Win32_Battery ERROR] $($_.Exception.Message)" }
 
-    # ---- PnP devices with missing drivers ----
     Log "-- PnP Devices (problem state / no driver) --"
     try {
         $problem = Get-CimInstance Win32_PnPEntity |
@@ -1411,14 +1329,12 @@ function Write-DeviceInfo {
         }
     } catch { Log "  [Win32_PnPEntity ERROR] $($_.Exception.Message)" }
 
-    # ---- Installed drivers via pnputil ----
     Log "-- pnputil driver store (first 20 OEM INFs) --"
     try {
         $pnpOut = & pnputil /enum-drivers 2>&1 | Select-Object -First 60
         foreach ($line in $pnpOut) { Log "  $line" }
     } catch { Log "  [pnputil ERROR] $($_.Exception.Message)" }
 
-    # ---- Environment snapshot ----
     Log "-- Environment --"
     Log "  TEMP               : $env:TEMP"
     Log "  COMPUTERNAME       : $env:COMPUTERNAME"
@@ -1427,7 +1343,6 @@ function Write-DeviceInfo {
     Log "  PS Version         : $($PSVersionTable.PSVersion)"
     Log "  curl.exe path      : $($(Get-Command curl.exe -EA SilentlyContinue).Source)"
 
-    # ---- Free disk space on C: ----
     Log "-- Disk Space --"
     try {
         $c = Get-PSDrive C -EA Stop
@@ -1480,7 +1395,6 @@ function Start-Install {
     Log "Model        : $model  (copied to clipboard)"
     $title.Text = "Driver Installer - $model"
 
-    # Full device dump — logged before any OEM work so the log is useful even on early failure
     Write-DeviceInfo
 
     SetProgress 5
