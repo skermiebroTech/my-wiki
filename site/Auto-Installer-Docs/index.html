@@ -458,6 +458,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#sound-events" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sound Events
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#cancellation" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -473,17 +484,6 @@
     <span class="md-ellipsis">
       
         Log File
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#sound-events" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Sound Events
       
     </span>
   </a>
@@ -870,6 +870,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#sound-events" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sound Events
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#cancellation" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -885,17 +896,6 @@
     <span class="md-ellipsis">
       
         Log File
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#sound-events" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Sound Events
       
     </span>
   </a>
@@ -942,7 +942,7 @@
 
 
 <h1 id="auto-driver-installer">Auto Driver Installer<a class="headerlink" href="#auto-driver-installer" title="Permanent link">&para;</a></h1>
-<p>A fully automated PowerShell driver installer for <strong>Dell</strong>, <strong>HP</strong>, and <strong>Lenovo</strong> machines. Designed to run in Windows audit mode with a single command no manual downloads, no clicking through wizards.</p>
+<p>A fully automated PowerShell driver installer for <strong>Dell</strong>, <strong>HP</strong>, and <strong>Lenovo</strong> machines. Designed to run in Windows audit mode with a single command — no manual downloads, no clicking through wizards.</p>
 <hr />
 <h2 id="quick-start">Quick Start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
 <p>Run this from the <strong>Win+R</strong> box on any supported machine:</p>
@@ -954,7 +954,7 @@
 </div>
 <hr />
 <h2 id="how-it-works">How It Works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h2>
-<p>The script follows the same four-stage pipeline regardless of manufacturer:</p>
+<p>The script follows the same pipeline regardless of manufacturer:</p>
 <div class="highlight"><pre><span></span><code>Detect → Catalog → Download → Extract → Install
 </code></pre></div>
 <h3 id="1-detect">1. Detect<a class="headerlink" href="#1-detect" title="Permanent link">&para;</a></h3>
@@ -963,6 +963,7 @@
 <li><strong>Manufacturer</strong> — from <code>Win32_ComputerSystem</code></li>
 <li><strong>Model / Machine Type</strong> — from <code>Win32_ComputerSystemProduct</code> (Lenovo) or <code>Win32_ComputerSystem</code> (Dell/HP)</li>
 <li>The model name is automatically <strong>copied to clipboard</strong> for convenience</li>
+<li>A full <strong>device information dump</strong> is written to the log at startup, covering CPU, GPU, RAM, disks, NICs, battery, PnP problem devices, and driver store contents</li>
 </ul>
 <p>If the script is not running as Administrator it re-launches itself elevated automatically.</p>
 <hr />
@@ -978,52 +979,56 @@
 <p>Lenovo's catalog XML contains a UTF-8 BOM that breaks PowerShell's XML parser. The script strips it at the byte level before parsing to prevent this.</p>
 </div>
 <h4 id="dell">Dell<a class="headerlink" href="#dell" title="Permanent link">&para;</a></h4>
-<p>Downloads <code>CatalogPC.cab</code> from Dell's CDN and extracts it:</p>
-<div class="highlight"><pre><span></span><code>https://downloads.dell.com/catalog/CatalogPC.cab
+<p>Downloads <code>DriverPackCatalog.cab</code> from Dell's CDN and extracts it:</p>
+<div class="highlight"><pre><span></span><code>https://downloads.dell.com/catalog/DriverPackCatalog.cab
 </code></pre></div>
 <div class="admonition info">
-<p class="admonition-title">Service Tags</p>
-<p>The Service Tag is read from <code>Win32_BIOS.SerialNumber</code> and the System SKU from <code>Win32_ComputerSystem.SystemSKUNumber</code>. The catalog is searched for a <code>SoftwareComponent</code> with "Driver Pack" in its display name matching the detected SKU.</p>
+<p class="admonition-title">Driver Pack Catalog vs CatalogPC</p>
+<p>The script uses <code>DriverPackCatalog.cab</code> — not <code>CatalogPC.cab</code>. The driver pack catalog contains only full SCCM-style driver packs, which is what this tool requires. <code>CatalogPC.cab</code> lists individual drivers and firmware and is not used.</p>
 </div>
+<p>The catalog is searched for a <code>DriverPackage</code> entry whose <code>&lt;Model name="..."&gt;</code> attribute exactly matches the WMI model string (case-insensitive). Substring matching is intentionally avoided — for example, "Latitude 7330" will not match a "Latitude 7330 Rugged Extreme" pack.</p>
+<p>The Service Tag is read from <code>Win32_BIOS.SerialNumber</code> for logging. If no matching pack is found in the catalog, the script opens the Dell support page for that Service Tag automatically.</p>
 <h4 id="hp">HP<a class="headerlink" href="#hp" title="Permanent link">&para;</a></h4>
-<p>Downloads a platform-specific catalog cab using the BaseBoard product ID:</p>
-<div class="highlight"><pre><span></span><code>https://ftp.hp.com/pub/caps-softpaq/cmit/imagepal/ref/{platformId}/{platformId}.cab
+<p>Downloads the HP Driver Pack Matrix HTML page from HP's FTP server:</p>
+<div class="highlight"><pre><span></span><code>https://ftp.hp.com/pub/caps-softpaq/cmit/HP_Driverpack_Matrix_x64.html
 </code></pre></div>
-<div class="admonition info">
-<p class="admonition-title">note</p>
-<p>The catalog is parsed for a SoftPaq with a "Driver Pack" category, and the direct download URL is extracted.</p>
-</div>
+<p>The page is parsed for a table row matching the detected model name. The script extracts a direct SoftPaq <code>.exe</code> download URL from the matched row, preferring a <strong>Win10</strong> pack when running on Windows 10. If no match is found the matrix page is opened in the browser for manual selection.</p>
 <hr />
 <h3 id="3-download">3. Download<a class="headerlink" href="#3-download" title="Permanent link">&para;</a></h3>
 <p>The driver pack is downloaded using <code>curl.exe</code> (available on Windows 10 1803+).</p>
-<p>The download bar shows live progress:</p>
-<div class="highlight"><pre><span></span><code>1234.5 MB Received 376 Mbps
+<p>The download bar shows live progress including speed:</p>
+<div class="highlight"><pre><span></span><code>1234.5 MB / 2100.0 MB  (58%)  376.2 Mbps
 </code></pre></div>
 <div class="admonition info">
 <p class="admonition-title">Large packs</p>
-<p>SCCM packs are typically ~2 GB. At 100 Mbps this takes around 2–3 minutes. Downloads have no time limit and will automatically resume if the connection drops, retrying up to 10 times before giving up.</p>
+<p>SCCM packs are typically 1.5–3 GB. Downloads retry automatically up to 10 times on failure, resume interrupted transfers with <code>--continue-at -</code>, and abort if the connection stalls for more than 3.5 minutes.</p>
 </div>
 <hr />
 <h3 id="4-extract">4. Extract<a class="headerlink" href="#4-extract" title="Permanent link">&para;</a></h3>
-<p>The pack is extracted to <code>C:\DRIVERS\{OEM}_Extracted</code> using the appropriate flags per format:</p>
+<p>The pack is extracted to <code>C:\DRIVERS\{OEM}_Extracted</code> using the appropriate method per format:</p>
 <table>
 <thead>
 <tr>
 <th>Format</th>
-<th>Extractor</th>
+<th>Method</th>
 <th>Flags</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>.exe</code> (Inno Setup)</td>
+<td><code>.exe</code> (Lenovo / Inno Setup)</td>
 <td>Pack itself</td>
 <td><code>/VERYSILENT /DIR="..." /EXTRACT=YES</code></td>
 </tr>
 <tr>
-<td><code>.exe</code> (Dell/HP)</td>
+<td><code>.exe</code> (Dell)</td>
 <td>Pack itself</td>
-<td><code>/s /e="..."</code> or <code>/s /e /f "..."</code></td>
+<td><code>/s /e="..."</code></td>
+</tr>
+<tr>
+<td><code>.exe</code> (HP SoftPaq)</td>
+<td>Pack itself</td>
+<td><code>/s /e /f "..."</code> (async)</td>
 </tr>
 <tr>
 <td><code>.zip</code></td>
@@ -1037,13 +1042,18 @@
 </tr>
 </tbody>
 </table>
-<p>The extract bar shows a live file count as files land in the destination folder. For ZIP files the total is known exactly (pre-scanned via the ZipFile API). For EXE/CAB a running count is displayed.</p>
+<p>The vendor-specific extraction format is always tried first. If it produces zero files, the remaining formats are tried as fallbacks in order. A final legacy fallback of <code>-s -f"&lt;dest&gt;"</code> is attempted for older Lenovo packs if all other formats fail.</p>
+<p>The extract bar shows a live file count as files land in the destination folder.</p>
+<div class="admonition note">
+<p class="admonition-title">HP async extraction</p>
+<p>HP SoftPaqs extract asynchronously — the installer process exits before extraction is complete. The script polls the destination folder for up to 30 seconds after the process exits before falling back to the next format.</p>
+</div>
 <hr />
 <h3 id="5-install-infs">5. Install INFs<a class="headerlink" href="#5-install-infs" title="Permanent link">&para;</a></h3>
 <p>All <code>.inf</code> files found recursively under the extraction path are installed using:</p>
 <div class="highlight"><pre><span></span><code><span class="n">pnputil</span> <span class="p">/</span><span class="nb">add-driver</span> <span class="s2">&quot;path\to\driver.inf&quot;</span> <span class="p">/</span><span class="n">install</span>
 </code></pre></div>
-<p>The install bar tracks progress. Each INF is processed whether it results in a new install, an update, or is already up to date — pnputil handles all cases gracefully.</p>
+<p>The install bar tracks progress through each INF. Each is processed whether it results in a new install, an update, or is already current — pnputil handles all cases gracefully.</p>
 <hr />
 <h2 id="user-interface">User Interface<a class="headerlink" href="#user-interface" title="Permanent link">&para;</a></h2>
 <p>The tool has a simple GUI built with Windows Forms:</p>
@@ -1061,7 +1071,7 @@
 </tr>
 <tr>
 <td><strong>Download bar</strong></td>
-<td>Marquee while connecting, fills with % + Mbps once underway</td>
+<td>Marquee while connecting, shows MB received + speed once underway</td>
 </tr>
 <tr>
 <td><strong>Extract bar</strong></td>
@@ -1077,54 +1087,67 @@
 </tr>
 <tr>
 <td><strong>Sound FX</strong></td>
-<td>Space-age sound effects tied to key events (on by default, toggle via checkbox)</td>
+<td>Sound effects tied to key events (on by default, toggle via checkbox)</td>
 </tr>
 </tbody>
 </table>
-<hr />
-<h2 id="cancellation">Cancellation<a class="headerlink" href="#cancellation" title="Permanent link">&para;</a></h2>
-<p>Clicking <strong>Cancel</strong> during any stage will:</p>
-<ol>
-<li>Set a cancellation flag</li>
-<li>Kill the active curl download process immediately</li>
-<li>Kill any running extractor process</li>
-<li>Reset all bars and spinners</li>
-<li>Re-enable the Install button</li>
-</ol>
-<div class="admonition warning">
-<p class="admonition-title">warning</p>
-<p>Cancellation during extraction may leave a partial <code>C:\DRIVERS\{OEM}_Extracted</code> folder. This is safe to delete manually and will be overwritten on the next run.</p>
-</div>
-<hr />
-<h2 id="log-file">Log File<a class="headerlink" href="#log-file" title="Permanent link">&para;</a></h2>
-<p>Every run appends a timestamped log to:</p>
-<div class="highlight"><pre><span></span><code>C:\Users\{user}\Downloads\DriverInstaller_YYYYMMDD_HHmmss.log
-</code></pre></div>
-<p>The path is shown at the bottom of the window and is useful for debugging failures.</p>
 <hr />
 <h2 id="sound-events">Sound Events<a class="headerlink" href="#sound-events" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
 <th>Event</th>
-<th>Sound</th>
+<th>Sound file</th>
 </tr>
 </thead>
 <tbody>
 <tr>
+<td>Script started</td>
+<td><code>Windows Notify.wav</code></td>
+</tr>
+<tr>
+<td>Download complete</td>
+<td><code>Windows Print complete.wav</code></td>
+</tr>
+<tr>
+<td>Extraction complete</td>
+<td><code>Windows Print complete.wav</code></td>
+</tr>
+<tr>
 <td>Each INF installed</td>
-<td>Tight keyclick</td>
+<td><code>Windows Navigation Start.wav</code></td>
 </tr>
 <tr>
 <td>Installation complete</td>
-<td>Triumphant 4-note fanfare</td>
+<td><code>Windows Logon.wav</code></td>
 </tr>
 <tr>
 <td>Failure / cancelled</td>
-<td>Descending dissonant buzz</td>
+<td><code>Windows Critical Stop.wav</code></td>
 </tr>
 </tbody>
 </table>
+<p>Sounds are played asynchronously using <code>System.Media.SoundPlayer</code>. All files are sourced from <code>C:\Windows\Media\</code> — no external audio files are required. Each event has a preference list of fallback filenames in case a specific file is absent (e.g. on minimal or freshly imaged systems).</p>
+<hr />
+<h2 id="cancellation">Cancellation<a class="headerlink" href="#cancellation" title="Permanent link">&para;</a></h2>
+<p>Clicking <strong>Cancel</strong> during any stage will:</p>
+<ol>
+<li>Set a cancellation flag checked between all major operations</li>
+<li>Kill the active <code>curl.exe</code> download process immediately</li>
+<li>Kill any running extractor process</li>
+<li>Reset all bars and spinners to a failed state</li>
+<li>Re-enable the Install button</li>
+</ol>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>Cancellation during extraction may leave a partial <code>C:\DRIVERS\{OEM}_Extracted</code> folder. This is safe to delete manually and will be overwritten on the next run.</p>
+</div>
+<hr />
+<h2 id="log-file">Log File<a class="headerlink" href="#log-file" title="Permanent link">&para;</a></h2>
+<p>Every run writes a timestamped log to:</p>
+<div class="highlight"><pre><span></span><code>C:\Users\{user}\Downloads\DriverInstaller_YYYYMMDD_HHmmss.log
+</code></pre></div>
+<p>The path is shown at the bottom of the window. The log includes the full device information dump, all download progress entries, extraction file counts, and pnputil output for every INF.</p>
 <hr />
 <h2 id="supported-manufacturers">Supported Manufacturers<a class="headerlink" href="#supported-manufacturers" title="Permanent link">&para;</a></h2>
 <table>
@@ -1143,12 +1166,12 @@
 </tr>
 <tr>
 <td>Dell</td>
-<td><code>CatalogPC.cab</code> (CDN)</td>
+<td><code>DriverPackCatalog.cab</code> (CDN)</td>
 <td>Self-extracting <code>.exe</code></td>
 </tr>
 <tr>
 <td>HP</td>
-<td>Platform catalog <code>.cab</code> (FTP)</td>
+<td><code>HP_Driverpack_Matrix_x64.html</code> (FTP)</td>
 <td>SoftPaq <code>.exe</code></td>
 </tr>
 </tbody>
@@ -1169,7 +1192,7 @@
 <p class="admonition-title">Use outside of audit mode is currently untested</p>
 </div>
 <hr />
-<p>Author: Joel Skerman | Date: 06 May 2026</p>
+<p>Author: Joel Skerman | Date: 07 May 2026</p>
 
 
 
