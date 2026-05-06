@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.3.6
+# Version: 1.4.0
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -10,7 +10,7 @@
 # Supports: Dell, HP, Lenovo
 # =============================================================
 
-$ScriptVersion   = "1.3.6"
+$ScriptVersion   = "1.4.0"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -577,7 +577,9 @@ function Start-PackExtraction {
     param(
         [string]$PackFile,
         [string]$DestPath,
-        [int]$StallLimitSec = 300
+        [int]$StallLimitSec = 300,
+        [ValidateSet("Dell","HP","Lenovo","")]
+        [string]$Vendor = ""
     )
 
     if (-not (Test-Path $DestPath)) {
@@ -637,96 +639,118 @@ function Start-PackExtraction {
         }
 
         default {
-            # Dell driver packs use:  /s /e="<dest>"   (note = sign, no space)
-            # HP SoftPaq packs use:   /s /e /f "<dest>"
-            # Inno Setup (Lenovo):    /VERYSILENT /DIR="<dest>" /EXTRACT=YES
+            # EXE extractor format varies by OEM:
+            #   Dell:    /s /e="<dest>"                        (synchronous)
+            #   Lenovo:  -s -f"<dest>"                         (synchronous)
+            #   HP:      /s /e /f "<dest>"                     (async)
+            #   Inno:    /VERYSILENT /DIR="<dest>" /EXTRACT=YES (async, last resort)
             #
-            # Strategy: try Dell format first (most common for our use case),
-            # then HP format, then Inno. Check for files after each attempt.
+            # We try the vendor-specific format first and stop immediately if it
+            # produces files. Only fall through to the other formats if it fails.
 
-            Log "Extracting EXE pack..."
+            Log "Extracting EXE pack (Vendor=$Vendor)..."
 
-            # Attempt 1: Dell /s /e="<dest>"
-            Log "  Attempt 1: Dell format (/s /e=dest)..."
-            $psi              = New-Object System.Diagnostics.ProcessStartInfo
-            $psi.FileName     = $PackFile
-            $psi.Arguments    = "/s /e=`"$DestPath`""
-            $psi.UseShellExecute = $false
-            $psi.CreateNoWindow  = $true
-            $exProc           = New-Object System.Diagnostics.Process
-            $exProc.StartInfo = $psi
-            $exProc.Start() | Out-Null
-            $exProc.WaitForExit()
-            Start-Sleep -Seconds 2
-
-            $fileCount = if (Test-Path $DestPath) {
-                (Get-ChildItem $DestPath -Recurse -EA SilentlyContinue).Count
-            } else { 0 }
-            Log "  After Dell format: $fileCount files in $DestPath"
-
-            if ($fileCount -gt 0) {
-                # Dell extraction succeeded — just report and move on
-                $finalCount = $fileCount
-                SetExtract -Pct 100 -Label "Done — $finalCount files extracted"
-                Stop-ExSpinner      -Success $true
-                Stop-OverallSpinner -Success $true
-                Log "  Extraction finished: $finalCount files in $DestPath"
-                return
-            }
-
-            # Attempt 2: HP SoftPaq /s /e /f "<dest>"
-            Log "  Attempt 2: HP SoftPaq format (/s /e /f dest)..."
-            $psi2              = New-Object System.Diagnostics.ProcessStartInfo
-            $psi2.FileName     = $PackFile
-            $psi2.Arguments    = "/s /e /f `"$DestPath`""
-            $psi2.UseShellExecute = $false
-            $psi2.CreateNoWindow  = $true
-            $exProc            = New-Object System.Diagnostics.Process
-            $exProc.StartInfo  = $psi2
-            $exProc.Start() | Out-Null
-
-            # HP extracts asynchronously — watch with watcher
-            $fileCount2 = 0
-            $watchStart = Get-Date
-            while (-not $exProc.HasExited) {
-                Start-Sleep -Milliseconds 700
-                $fileCount2 = if (Test-Path $DestPath) {
+            $CountFiles = {
+                if (Test-Path $DestPath) {
                     (Get-ChildItem $DestPath -Recurse -EA SilentlyContinue).Count
                 } else { 0 }
-                SetExtract -Pct -1 -Label "$fileCount2 files extracted..."
-                Step-ExSpinner
-                [System.Windows.Forms.Application]::DoEvents()
-                if (((Get-Date) - $watchStart).TotalSeconds -gt 30 -and $fileCount2 -eq 0) {
-                    Log "  HP format produced no output after 30s — killing."
-                    try { $exProc.Kill() } catch {}
+            }
+
+            function TrySync {
+                param([string]$Args)
+                $p = New-Object System.Diagnostics.ProcessStartInfo
+                $p.FileName        = $PackFile
+                $p.Arguments       = $Args
+                $p.UseShellExecute = $false
+                $p.CreateNoWindow  = $true
+                $proc = New-Object System.Diagnostics.Process
+                $proc.StartInfo = $p
+                $proc.Start() | Out-Null
+                $proc.WaitForExit()
+                Start-Sleep -Seconds 2
+                return (& $CountFiles)
+            }
+
+            function TryAsyncHP {
+                $p = New-Object System.Diagnostics.ProcessStartInfo
+                $p.FileName        = $PackFile
+                $p.Arguments       = "/s /e /f `"$DestPath`""
+                $p.UseShellExecute = $false
+                $p.CreateNoWindow  = $true
+                $proc = New-Object System.Diagnostics.Process
+                $proc.StartInfo = $p
+                $proc.Start() | Out-Null
+                $start = Get-Date
+                while (-not $proc.HasExited) {
+                    Start-Sleep -Milliseconds 700
+                    $n = & $CountFiles
+                    SetExtract -Pct -1 -Label "$n files extracted..."
+                    Step-ExSpinner
+                    [System.Windows.Forms.Application]::DoEvents()
+                    if (((Get-Date) - $start).TotalSeconds -gt 30 -and $n -eq 0) {
+                        Log "  HP format timed out with no output — killing."
+                        try { $proc.Kill() } catch {}
+                        break
+                    }
+                }
+                Start-Sleep -Seconds 2
+                return (& $CountFiles)
+            }
+
+            # Build the attempt list — vendor-specific format goes first
+            # Each entry: [label, scriptblock that returns file count]
+            $attempts = [System.Collections.Generic.List[object]]::new()
+
+            switch ($Vendor) {
+                "Dell" {
+                    $attempts.Add(@{ Label = "Dell (/s /e=dest)";  Action = { TrySync "/s /e=`"$DestPath`"" } })
+                    $attempts.Add(@{ Label = "Lenovo (-s -fdest)"; Action = { TrySync "-s -f`"$DestPath`"" } })
+                    $attempts.Add(@{ Label = "HP (/s /e /f dest)"; Action = { TryAsyncHP } })
+                }
+                "Lenovo" {
+                    $attempts.Add(@{ Label = "Lenovo (-s -fdest)"; Action = { TrySync "-s -f`"$DestPath`"" } })
+                    $attempts.Add(@{ Label = "Dell (/s /e=dest)";  Action = { TrySync "/s /e=`"$DestPath`"" } })
+                    $attempts.Add(@{ Label = "HP (/s /e /f dest)"; Action = { TryAsyncHP } })
+                }
+                "HP" {
+                    $attempts.Add(@{ Label = "HP (/s /e /f dest)"; Action = { TryAsyncHP } })
+                    $attempts.Add(@{ Label = "Dell (/s /e=dest)";  Action = { TrySync "/s /e=`"$DestPath`"" } })
+                    $attempts.Add(@{ Label = "Lenovo (-s -fdest)"; Action = { TrySync "-s -f`"$DestPath`"" } })
+                }
+                default {
+                    $attempts.Add(@{ Label = "Dell (/s /e=dest)";  Action = { TrySync "/s /e=`"$DestPath`"" } })
+                    $attempts.Add(@{ Label = "Lenovo (-s -fdest)"; Action = { TrySync "-s -f`"$DestPath`"" } })
+                    $attempts.Add(@{ Label = "HP (/s /e /f dest)"; Action = { TryAsyncHP } })
+                }
+            }
+
+            $extracted = $false
+            foreach ($attempt in $attempts) {
+                Log "  Trying: $($attempt.Label)..."
+                $n = & $attempt.Action
+                Log "  Result: $n files in $DestPath"
+                if ($n -gt 0) {
+                    SetExtract -Pct 100 -Label "Done — $n files extracted"
+                    Stop-ExSpinner -Success $true; Stop-OverallSpinner -Success $true
+                    Log "  Extraction finished: $n files in $DestPath"
+                    $extracted = $true
                     break
                 }
             }
-            Start-Sleep -Seconds 2
-            $fileCount2 = if (Test-Path $DestPath) {
-                (Get-ChildItem $DestPath -Recurse -EA SilentlyContinue).Count
-            } else { 0 }
-            Log "  After HP format: $fileCount2 files in $DestPath"
 
-            if ($fileCount2 -gt 0) {
-                SetExtract -Pct 100 -Label "Done — $fileCount2 files extracted"
-                Stop-ExSpinner      -Success $true
-                Stop-OverallSpinner -Success $true
-                Log "  Extraction finished: $fileCount2 files in $DestPath"
-                return
+            # Last resort: Inno Setup (only if all vendor formats failed)
+            if (-not $extracted) {
+                Log "  All vendor formats failed — trying Inno Setup (/VERYSILENT /DIR /EXTRACT=YES)..."
+                $p = New-Object System.Diagnostics.ProcessStartInfo
+                $p.FileName        = $PackFile
+                $p.Arguments       = "/VERYSILENT /DIR=`"$DestPath`" /EXTRACT=YES"
+                $p.UseShellExecute = $false
+                $p.CreateNoWindow  = $true
+                $proc = New-Object System.Diagnostics.Process
+                $proc.StartInfo = $p
+                $proc.Start() | Out-Null
+                Watch-Extraction -ExtractProc $proc -DestPath $DestPath -StallLimitSec $StallLimitSec
             }
-
-            # Attempt 3: Inno Setup /VERYSILENT /DIR="<dest>" /EXTRACT=YES (Lenovo)
-            Log "  Attempt 3: Inno Setup format..."
-            $psi3              = New-Object System.Diagnostics.ProcessStartInfo
-            $psi3.FileName     = $PackFile
-            $psi3.Arguments    = "/VERYSILENT /DIR=`"$DestPath`" /EXTRACT=YES"
-            $psi3.UseShellExecute = $false
-            $psi3.CreateNoWindow  = $true
-            $exProc            = New-Object System.Diagnostics.Process
-            $exProc.StartInfo  = $psi3
-            $exProc.Start() | Out-Null
-            Watch-Extraction -ExtractProc $exProc -DestPath $DestPath -StallLimitSec $StallLimitSec
         }
     }
 }
@@ -919,7 +943,7 @@ function Start-DellDriverInstall {
 
     $extractPath = Join-Path $DriverRoot "Dell_Extracted"
     Log "Extracting Dell pack..."
-    Start-PackExtraction -PackFile $packFile -DestPath $extractPath -StallLimitSec 300
+    Start-PackExtraction -PackFile $packFile -DestPath $extractPath -StallLimitSec 300 -Vendor "Dell"
     SetProgress 60
 
     return (Install-DriversFromPath -BasePath $extractPath)
@@ -1091,7 +1115,7 @@ function Start-HpDriverInstall {
 
     $extractPath = Join-Path $DriverRoot "HP_Extracted"
     Log "Extracting HP SoftPaq..."
-    Start-PackExtraction -PackFile $packFile -DestPath $extractPath -StallLimitSec 300
+    Start-PackExtraction -PackFile $packFile -DestPath $extractPath -StallLimitSec 300 -Vendor "HP"
     SetProgress 60
 
     return (Install-DriversFromPath -BasePath $extractPath)
@@ -1191,7 +1215,7 @@ function Start-LenovoDriverInstall {
 
     $extractPath = Join-Path $DriverRoot "Lenovo_Extracted"
     Log "Extracting Lenovo pack..."
-    Start-PackExtraction -PackFile $packFile -DestPath $extractPath -StallLimitSec 300
+    Start-PackExtraction -PackFile $packFile -DestPath $extractPath -StallLimitSec 300 -Vendor "Lenovo"
     SetProgress 60
 
     return (Install-DriversFromPath -BasePath $extractPath)
