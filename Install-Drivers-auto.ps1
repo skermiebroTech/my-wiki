@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.4.3
+# Version: 1.4.4
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -10,7 +10,7 @@
 # Supports: Dell, HP, Lenovo
 # =============================================================
 
-$ScriptVersion   = "1.4.3"
+$ScriptVersion   = "1.4.4"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -45,7 +45,7 @@ $FontTitleBold = New-Object System.Drawing.Font("Segoe UI",    13,  [System.Draw
 # =========================
 $form                 = New-Object System.Windows.Forms.Form
 $form.Text            = "Driver Installer Tool  v$ScriptVersion"
-$form.Size            = New-Object System.Drawing.Size(580, 530)
+$form.Size            = New-Object System.Drawing.Size(580, 560)
 $form.StartPosition   = "CenterScreen"
 $form.FormBorderStyle = "FixedSingle"
 $form.MaximizeBox     = $false
@@ -198,11 +198,24 @@ $logLabel.Text      = "Log: $LogFile"
 $logLabel.UseCompatibleTextRendering = $false
 $form.Controls.Add($logLabel)
 
+# =========================
+# SOUND TOGGLE CHECKBOX
+# =========================
+$soundCheckbox                   = New-Object System.Windows.Forms.CheckBox
+$soundCheckbox.Text              = "Sound FX"
+$soundCheckbox.Checked           = $true
+$soundCheckbox.Font              = $FontUIBold
+$soundCheckbox.ForeColor         = [System.Drawing.Color]::FromArgb(60, 60, 60)
+$soundCheckbox.AutoSize          = $true
+$soundCheckbox.Location          = New-Object System.Drawing.Point(20, 490)
+$soundCheckbox.UseCompatibleTextRendering = $false
+$form.Controls.Add($soundCheckbox)
+
 # Install button
 $button            = New-Object System.Windows.Forms.Button
 $button.Text       = "Install Drivers"
 $button.Size       = New-Object System.Drawing.Size(155, 36)
-$button.Location   = New-Object System.Drawing.Point(155, 488)
+$button.Location   = New-Object System.Drawing.Point(155, 515)
 $button.Font       = $FontUIBold
 $button.BackColor  = [System.Drawing.Color]::FromArgb(0, 120, 215)
 $button.ForeColor  = [System.Drawing.Color]::White
@@ -214,7 +227,7 @@ $form.Controls.Add($button)
 $cancelButton            = New-Object System.Windows.Forms.Button
 $cancelButton.Text       = "Cancel"
 $cancelButton.Size       = New-Object System.Drawing.Size(100, 36)
-$cancelButton.Location   = New-Object System.Drawing.Point(320, 488)
+$cancelButton.Location   = New-Object System.Drawing.Point(320, 515)
 $cancelButton.Font       = $FontUIBold
 $cancelButton.BackColor  = [System.Drawing.Color]::FromArgb(160, 160, 160)
 $cancelButton.ForeColor  = [System.Drawing.Color]::White
@@ -222,6 +235,37 @@ $cancelButton.FlatStyle  = "Flat"
 $cancelButton.FlatAppearance.BorderSize = 0
 $cancelButton.Enabled    = $false
 $form.Controls.Add($cancelButton)
+
+# =========================
+# SOUND HELPER
+# Uses built-in Windows SystemSounds — no external files needed.
+#
+#   Start            -> Asterisk    (informational chime)
+#   DownloadComplete -> Beep        (short neutral beep)
+#   ExtractComplete  -> Beep        (short neutral beep)
+#   DriverAdded      -> Beep        (subtle tick per INF installed)
+#   Success          -> Exclamation (positive completion fanfare)
+#   Failure          -> Hand        (Windows error/stop sound)
+#   Cancel           -> Hand        (Windows error/stop sound)
+# =========================
+function Play-Sound {
+    param(
+        [ValidateSet("Start","DownloadComplete","ExtractComplete","DriverAdded","Success","Failure","Cancel")]
+        [string]$Event
+    )
+    if (-not $soundCheckbox.Checked) { return }
+    try {
+        switch ($Event) {
+            "Start"            { [System.Media.SystemSounds]::Asterisk.Play()    }
+            "DownloadComplete" { [System.Media.SystemSounds]::Beep.Play()        }
+            "ExtractComplete"  { [System.Media.SystemSounds]::Beep.Play()        }
+            "DriverAdded"      { [System.Media.SystemSounds]::Beep.Play()        }
+            "Success"          { [System.Media.SystemSounds]::Exclamation.Play() }
+            "Failure"          { [System.Media.SystemSounds]::Hand.Play()        }
+            "Cancel"           { [System.Media.SystemSounds]::Hand.Play()        }
+        }
+    } catch {}
+}
 
 # =========================
 # BUTTON STATE HELPERS
@@ -355,6 +399,7 @@ function Test-Cancelled {
         Stop-DlSpinner      -Success $false
         Stop-ExSpinner      -Success $false
         Stop-OverallSpinner -Success $false
+        Play-Sound -Event "Cancel"
         Set-ButtonIdle
         return $true
     }
@@ -457,6 +502,7 @@ function Invoke-CurlDownload {
     Log "  Download complete: $finalMB MB"
     SetDownload -Pct 100 -Label "Complete — $finalMB MB"
     Stop-DlSpinner -Success $true
+    Play-Sound -Event "DownloadComplete"
     return $true
 }
 
@@ -516,6 +562,7 @@ function Watch-Extraction {
     SetExtract -Pct 100 -Label "Done — $finalCount files extracted"
     Stop-ExSpinner      -Success $true
     Stop-OverallSpinner -Success $true
+    Play-Sound -Event "ExtractComplete"
     Log "  Extraction finished: $finalCount files in $DestPath"
 }
 
@@ -549,6 +596,7 @@ function Install-DriversFromPath {
         Log "[$i/$total] $($inf.Name)"
         $out = pnputil /add-driver "`"$($inf.FullName)`"" /install 2>&1
         foreach ($l in $out) { Log "  $l" }
+        Play-Sound -Event "DriverAdded"
         Step-ExSpinner
         Step-OverallSpinner
         [System.Windows.Forms.Application]::DoEvents()
@@ -625,6 +673,7 @@ function Start-PackExtraction {
             SetExtract -Pct 100 -Label "Done — $finalCount files extracted"
             Stop-ExSpinner      -Success $true
             Stop-OverallSpinner -Success $true
+            Play-Sound -Event "ExtractComplete"
             Log "  ZIP extraction complete. $finalCount files."
         }
 
@@ -639,6 +688,7 @@ function Start-PackExtraction {
             $exProc.StartInfo    = $psi
             $exProc.Start() | Out-Null
             Watch-Extraction -ExtractProc $exProc -DestPath $DestPath -StallLimitSec $StallLimitSec
+            # Watch-Extraction fires ExtractComplete sound internally
         }
 
         default {
@@ -748,6 +798,7 @@ function Start-PackExtraction {
                 if ($n -gt 0) {
                     SetExtract -Pct 100 -Label "Done — $n files extracted"
                     Stop-ExSpinner -Success $true; Stop-OverallSpinner -Success $true
+                    Play-Sound -Event "ExtractComplete"
                     Log "  Extraction finished: $n files in $DestPath"
                     $extracted = $true
                     break
@@ -766,6 +817,7 @@ function Start-PackExtraction {
                 $proc.StartInfo = $p
                 $proc.Start() | Out-Null
                 Watch-Extraction -ExtractProc $proc -DestPath $DestPath -StallLimitSec $StallLimitSec
+                # Watch-Extraction fires ExtractComplete sound internally
             }
         }
     }
@@ -1397,6 +1449,8 @@ function Start-Install {
     Log "Log: $LogFile"
     Log "--------------------------------------------"
 
+    Play-Sound -Event "Start"
+
     $cs           = Get-CimInstance Win32_ComputerSystem
     $manufacturer = $cs.Manufacturer.Trim()
     $model        = $cs.Model.Trim()
@@ -1441,6 +1495,7 @@ function Start-Install {
         SetExtract  -Pct 100 -Label "Complete"
         Log "Driver installation complete!"
         Log "Log saved to: $LogFile"
+        Play-Sound -Event "Success"
 
         $result = [System.Windows.Forms.MessageBox]::Show(
             "Drivers installed successfully for:`n$model`n`nReboot now to complete installation?",
@@ -1454,6 +1509,7 @@ function Start-Install {
         Stop-DlSpinner      -Success $false
         Stop-ExSpinner      -Success $false
         Stop-OverallSpinner -Success $false
+        Play-Sound -Event "Failure"
         Log "Driver installation did not complete. Check log: $LogFile"
         [System.Windows.Forms.MessageBox]::Show(
             "Driver installation failed or no pack was found.`nCheck the log:`n`n$LogFile",
@@ -1472,6 +1528,7 @@ $cancelButton.Add_Click({
     if ($cancelButton.Enabled) {
         $script:CancelRequested = $true
         Log "--- Cancel requested by user ---"
+        Play-Sound -Event "Cancel"
         $cancelButton.Enabled   = $false
         $cancelButton.BackColor = [System.Drawing.Color]::FromArgb(160, 160, 160)
         [System.Windows.Forms.Application]::DoEvents()

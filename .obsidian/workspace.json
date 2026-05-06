@@ -185,6 +185,7 @@
   },
   "active": "c699af67c7046aa9",
   "lastOpenFiles": [
+    "DriverInstaller-Sounds.ps1",
     "script-backup/Install-Drivers-debug.ps1",
     "script-backup/Install-Drivers-auto-wed-6-may.ps1",
     "script-backup/Install-Drivers-auto copy.ps1",
@@ -195,7 +196,6 @@
     "site/Panasonic",
     "site/todo/index.html",
     "site/todo",
-    "site/driver-installation/index.html",
     "docs/auto-driver-installer.md.old.md",
     "docs/Auto-Installer-Docs.md",
     "docs/todo.md",
