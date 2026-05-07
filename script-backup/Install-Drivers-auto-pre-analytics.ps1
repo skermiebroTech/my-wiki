@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.4.6
+# Version: 1.4.5
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -10,7 +10,7 @@
 # Supports: Dell, HP, Lenovo
 # =============================================================
 
-$ScriptVersion   = "1.4.6"
+$ScriptVersion   = "1.4.5"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -238,6 +238,19 @@ $form.Controls.Add($cancelButton)
 
 # =========================
 # SOUND HELPER
+# Plays WAV files directly from C:\Windows\Media\ using SoundPlayer.
+# These files are always present regardless of Windows sound scheme settings,
+# making this reliable in audit mode and on freshly imaged systems.
+#
+#   Start            -> Windows Notify.wav       (informational chime)
+#   DownloadComplete -> Windows Print complete.wav
+#   ExtractComplete  -> Windows Print complete.wav
+#   DriverAdded      -> Windows Navigation Start.wav  (subtle tick per INF)
+#   Success          -> Windows Logon.wav        (positive completion)
+#   Failure          -> Windows Critical Stop.wav
+#   Cancel           -> Windows Critical Stop.wav
+#
+# Falls back gracefully if a specific file is missing.
 # =========================
 function Play-Sound {
     param(
@@ -248,6 +261,7 @@ function Play-Sound {
 
     $mediaDir = "$env:SystemRoot\Media"
 
+    # Ordered preference lists — first file found wins
     $wavCandidates = switch ($Event) {
         "Start"            { @("Windows Notify.wav", "Windows Notify System Generic.wav", "chimes.wav") }
         "DownloadComplete" { @("Windows Print complete.wav", "Windows Notify.wav", "chimes.wav") }
@@ -268,7 +282,7 @@ function Play-Sound {
 
     try {
         $player = New-Object System.Media.SoundPlayer $wavFile
-        $player.Play()
+        $player.Play()   # async — non-blocking
     } catch {}
 }
 
@@ -420,125 +434,6 @@ function Assert-Curl {
 }
 
 # =========================
-# GOOGLE ANALYTICS 4
-# Sends a single "driver_install" event to GA4 via the Measurement Protocol.
-# Fires after install completes (success, failure, or cancel).
-#
-# Parameters captured:
-#   result          - success | failure | cancelled
-#   script_version  - e.g. 1.4.6
-#   manufacturer    - Dell | HP | Lenovo
-#   model           - full WMI model string
-#   serial          - service tag / serial number
-#   os_version      - e.g. 10.0.22631
-#   os_build        - e.g. 22631
-#   inf_count       - number of INFs installed (0 if failed/cancelled)
-#   download_mb     - driver pack size in MB (0 if not downloaded)
-#   duration_sec    - total elapsed seconds for the run
-#
-# Uses curl.exe (already required by the script) so no extra dependencies.
-# Fails gracefully — errors are logged but never block the main flow.
-# =========================
-$GA4_MEASUREMENT_ID = "G-VHM4KQLY1E"
-$GA4_API_SECRET     = "pfRhGEmwTT-0nAIiOk3Buw"
-$GA4_ENDPOINT       = "https://www.google-analytics.com/mp/collect"
-
-# Analytics state — populated during the run, read by Send-GA4Event
-$script:AnalyticsManufacturer = ""
-$script:AnalyticsModel        = ""
-$script:AnalyticsSerial       = ""
-$script:AnalyticsOsVersion    = ""
-$script:AnalyticsOsBuild      = 0
-$script:AnalyticsInfCount     = 0
-$script:AnalyticsDownloadMB   = 0.0
-$script:AnalyticsStartTime    = $null
-
-function Send-GA4Event {
-    param(
-        [ValidateSet("success","failure","cancelled")]
-        [string]$Result
-    )
-
-    $durationSec = 0
-    if ($script:AnalyticsStartTime) {
-        $durationSec = [int]((Get-Date) - $script:AnalyticsStartTime).TotalSeconds
-    }
-
-    # GA4 requires a client_id — use a hash of the serial so the same machine
-    # is consistently identified without storing any PII externally.
-    $clientId = "unknown"
-    if ($script:AnalyticsSerial) {
-        $bytes    = [System.Text.Encoding]::UTF8.GetBytes($script:AnalyticsSerial)
-        $sha      = [System.Security.Cryptography.SHA256]::Create()
-        $hash     = $sha.ComputeHash($bytes)
-        $clientId = [System.BitConverter]::ToString($hash).Replace("-","").Substring(0,16).ToLower()
-    }
-
-    # Build the JSON payload manually — avoids ConvertTo-Json depth issues on PS 4/5
-    $payload = @"
-{
-  "client_id": "$clientId",
-  "events": [
-    {
-      "name": "driver_install",
-      "params": {
-        "result":         "$Result",
-        "script_version": "$ScriptVersion",
-        "manufacturer":   "$($script:AnalyticsManufacturer -replace '"','\"')",
-        "model":          "$($script:AnalyticsModel -replace '"','\"')",
-        "serial":         "$($script:AnalyticsSerial -replace '"','\"')",
-        "os_version":     "$($script:AnalyticsOsVersion -replace '"','\"')",
-        "os_build":       $($script:AnalyticsOsBuild),
-        "inf_count":      $($script:AnalyticsInfCount),
-        "download_mb":    $($script:AnalyticsDownloadMB),
-        "duration_sec":   $durationSec
-      }
-    }
-  ]
-}
-"@
-
-    $url = "$GA4_ENDPOINT`?measurement_id=$GA4_MEASUREMENT_ID&api_secret=$GA4_API_SECRET"
-
-    Log "Sending analytics (result=$Result, model=$($script:AnalyticsModel), infs=$($script:AnalyticsInfCount), dl=$($script:AnalyticsDownloadMB)MB, duration=${durationSec}s)..."
-
-    try {
-        # Write payload to a temp file so curl can POST it cleanly
-        $payloadFile = Join-Path $env:TEMP "ga4_payload_$(Get-Date -Format 'HHmmss').json"
-        [System.IO.File]::WriteAllText($payloadFile, $payload, [System.Text.Encoding]::UTF8)
-
-        $curlArgs = "--silent --max-time 10 --connect-timeout 8 " +
-                    "-H `"Content-Type: application/json`" " +
-                    "--data `@`"$payloadFile`" " +
-                    "`"$url`""
-
-        $psi                        = New-Object System.Diagnostics.ProcessStartInfo
-        $psi.FileName               = "curl.exe"
-        $psi.Arguments              = $curlArgs
-        $psi.UseShellExecute        = $false
-        $psi.CreateNoWindow         = $true
-        $psi.RedirectStandardOutput = $true
-        $psi.RedirectStandardError  = $true
-        $proc                       = New-Object System.Diagnostics.Process
-        $proc.StartInfo             = $psi
-        $proc.Start() | Out-Null
-        $stdout = $proc.StandardOutput.ReadToEnd()
-        $stderr = $proc.StandardError.ReadToEnd()
-        $proc.WaitForExit()
-
-        Remove-Item $payloadFile -EA SilentlyContinue
-
-        if ($proc.ExitCode -ne 0) {
-            Log "  Analytics warning: curl exit $($proc.ExitCode) — $stderr"
-        } else {
-            Log "  Analytics sent OK."
-        }
-    } catch {
-        Log "  Analytics error: $($_.Exception.Message)"
-    }
-}
-
-# =========================
 # CURL DOWNLOAD
 # =========================
 function Invoke-CurlDownload {
@@ -552,6 +447,7 @@ function Invoke-CurlDownload {
     Log "  URL: $Url"
     SetDownload -Pct 0 -Label "Connecting..."
 
+    # HEAD request to get file size
     $totalBytes = 0
     try {
         $headResult = & curl.exe --silent --head --max-time 15 --connect-timeout 10 `
@@ -622,12 +518,6 @@ function Invoke-CurlDownload {
     }
 
     $finalMB = [math]::Round((Get-Item $OutFile).Length / 1MB, 1)
-
-    # Track download size for analytics (keep the largest file — the driver pack)
-    if ($finalMB -gt $script:AnalyticsDownloadMB) {
-        $script:AnalyticsDownloadMB = $finalMB
-    }
-
     Log "  Download complete: $finalMB MB"
     SetDownload -Pct 100 -Label "Complete — $finalMB MB"
     Stop-DlSpinner -Success $true
@@ -731,14 +621,9 @@ function Install-DriversFromPath {
         [System.Windows.Forms.Application]::DoEvents()
         if ($script:CancelRequested) {
             Log "INF installation cancelled at $i / $total"
-            # Record how many were installed before cancel
-            $script:AnalyticsInfCount = $i
             break
         }
     }
-
-    # Record final INF count for analytics
-    $script:AnalyticsInfCount = $i
 
     SetProgress 100
     SetExtract -Pct 100 -Label "All $total INFs installed."
@@ -751,6 +636,12 @@ function Install-DriversFromPath {
 
 # =========================
 # SHARED EXTRACT RUNNER
+# Vendor-specific format is always tried first.
+# Extraction format confirmed per OEM:
+#   Dell:    /s /e="<dest>"                         (synchronous)
+#   HP:      /s /e /f "<dest>"                      (async)
+#   Lenovo:  /VERYSILENT /DIR="<dest>" /EXTRACT=YES  (Inno Setup, synchronous)
+# Remaining formats are tried as fallbacks if the primary produces 0 files.
 # =========================
 function Start-PackExtraction {
     param(
@@ -816,9 +707,18 @@ function Start-PackExtraction {
             $exProc.StartInfo    = $psi
             $exProc.Start() | Out-Null
             Watch-Extraction -ExtractProc $exProc -DestPath $DestPath -StallLimitSec $StallLimitSec
+            # Watch-Extraction fires ExtractComplete sound internally
         }
 
         default {
+            # EXE extractor format confirmed per OEM:
+            #   Lenovo:  /VERYSILENT /DIR="<dest>" /EXTRACT=YES  (Inno Setup — confirmed working)
+            #   Dell:    /s /e="<dest>"                          (synchronous)
+            #   HP:      /s /e /f "<dest>"                       (async)
+            #
+            # Vendor-specific format always runs first. Fallbacks only run if
+            # the primary produces 0 files in the destination.
+
             Log "Extracting EXE pack (Vendor=$Vendor)..."
 
             $CountFiles = {
@@ -827,6 +727,8 @@ function Start-PackExtraction {
                 } else { 0 }
             }
 
+            # Synchronous launcher with live file count — UseShellExecute+Hidden so
+            # child GUI windows inherit the hidden window station and don't appear.
             function TrySync {
                 param([string]$ExeArgs)
                 $p                 = New-Object System.Diagnostics.ProcessStartInfo
@@ -837,6 +739,7 @@ function Start-PackExtraction {
                 $proc = New-Object System.Diagnostics.Process
                 $proc.StartInfo = $p
                 $proc.Start() | Out-Null
+                # Poll live while extracting so the UI shows file count progress
                 while (-not $proc.HasExited) {
                     Start-Sleep -Milliseconds 700
                     $n = & $CountFiles
@@ -853,6 +756,7 @@ function Start-PackExtraction {
                 return (& $CountFiles)
             }
 
+            # Async launcher for HP SoftPaq (extracts asynchronously)
             function TryAsyncHP {
                 $p                 = New-Object System.Diagnostics.ProcessStartInfo
                 $p.FileName        = $PackFile
@@ -879,6 +783,7 @@ function Start-PackExtraction {
                 return (& $CountFiles)
             }
 
+            # Build attempt list — vendor format first, others as fallback
             $attempts = [System.Collections.Generic.List[object]]::new()
 
             switch ($Vendor) {
@@ -919,6 +824,7 @@ function Start-PackExtraction {
                 }
             }
 
+            # Last resort: Lenovo -s -f (older Lenovo packs use this instead of Inno)
             if (-not $extracted) {
                 Log "  All primary formats failed — trying Lenovo legacy (-s -fdest)..."
                 $p                 = New-Object System.Diagnostics.ProcessStartInfo
@@ -930,6 +836,7 @@ function Start-PackExtraction {
                 $proc.StartInfo = $p
                 $proc.Start() | Out-Null
                 Watch-Extraction -ExtractProc $proc -DestPath $DestPath -StallLimitSec $StallLimitSec
+                # Watch-Extraction fires ExtractComplete sound internally
             }
         }
     }
@@ -949,7 +856,6 @@ function Start-DellDriverInstall {
     try {
         $serviceTag = (Get-CimInstance Win32_BIOS).SerialNumber.Trim()
         Log "Service Tag: $serviceTag"
-        $script:AnalyticsSerial = $serviceTag
     } catch {
         Log "Could not read Service Tag: $($_.Exception.Message)"
         return $false
@@ -959,11 +865,22 @@ function Start-DellDriverInstall {
         return $false
     }
 
+    # Detect OS build for Win10/Win11 pack preference
     $isWin11 = $false
     try {
         $isWin11 = [int](Get-CimInstance Win32_OperatingSystem).BuildNumber -ge 22000
         Log "OS: $(if ($isWin11) {'Windows 11'} else {'Windows 10'})"
     } catch {}
+
+    # ---------------------------------------------------------------
+    # Dell publishes TWO catalogs:
+    #   CatalogPC.cab         - individual drivers/firmware (NOT driver packs)
+    #   DriverPackCatalog.cab - driver packs only (what we need)
+    #
+    # Match on the 'name' attribute of <Model> nodes — exact equality only.
+    # Substring matching would cause "Latitude 7330 Rugged Extreme" to match
+    # a search for "Latitude 7330".
+    # ---------------------------------------------------------------
 
     Log "Downloading Dell DriverPackCatalog.cab..."
     $catalogCab = Join-Path $env:TEMP "DellDriverPackCatalog.cab"
@@ -998,17 +915,20 @@ function Start-DellDriverInstall {
         return $false
     }
 
+    # Build model name search tokens from WMI model string
     $searchNames = @()
     if ($ModelName) {
-        $searchNames += $ModelName
-        $searchNames += ($ModelName -replace '\s+Notebook.*$','')
-        $searchNames += ($ModelName -replace '^Dell\s+','')
+        $searchNames += $ModelName                                # "Latitude 7430"
+        $searchNames += ($ModelName -replace '\s+Notebook.*$','') # strip "Notebook PC" suffix
+        $searchNames += ($ModelName -replace '^Dell\s+','')       # strip leading "Dell "
         $searchNames = $searchNames | Select-Object -Unique | Where-Object { $_.Length -gt 3 }
     }
     Log "Searching catalog — model tokens: $($searchNames -join ' | ')"
 
     $candidates = @()
     foreach ($pkg in $cat.SelectNodes("//*[local-name()='DriverPackage']")) {
+
+        # Exact case-insensitive equality only — no substring matching
         $modelMatched = $false
         foreach ($modelNode in $pkg.SelectNodes(".//*[local-name()='Model']")) {
             $nameAttr = $modelNode.GetAttribute("name")
@@ -1100,11 +1020,6 @@ function Start-HpDriverInstall {
     Log "=== HP: Starting automated driver install ==="
     SetDownload -Pct 0 -Label "Waiting..."
     SetExtract  -Pct 0 -Label "Waiting..."
-
-    # Capture serial for analytics
-    try {
-        $script:AnalyticsSerial = (Get-CimInstance Win32_BIOS).SerialNumber.Trim()
-    } catch {}
 
     $osBuild = $null
     $isWin11 = $false
@@ -1251,11 +1166,6 @@ function Start-LenovoDriverInstall {
         Log "Cannot determine Lenovo machine type."
         return $false
     }
-
-    # Capture serial for analytics
-    try {
-        $script:AnalyticsSerial = (Get-CimInstance Win32_BIOS).SerialNumber.Trim()
-    } catch {}
 
     $winVer     = (Get-CimInstance Win32_OperatingSystem).Version
     $osAttr     = if ($winVer -match "^10\.0\.2") { "win11" } else { "win10" }
@@ -1533,16 +1443,7 @@ function Write-DeviceInfo {
 # =========================
 function Start-Install {
 
-    $script:CancelRequested       = $false
-    $script:AnalyticsInfCount     = 0
-    $script:AnalyticsDownloadMB   = 0.0
-    $script:AnalyticsSerial       = ""
-    $script:AnalyticsManufacturer = ""
-    $script:AnalyticsModel        = ""
-    $script:AnalyticsOsVersion    = ""
-    $script:AnalyticsOsBuild      = 0
-    $script:AnalyticsStartTime    = Get-Date
-
+    $script:CancelRequested = $false
     Set-ButtonRunning
     SetProgress 0
     SetDownload -Pct 0 -Label "Waiting..."
@@ -1574,15 +1475,6 @@ function Start-Install {
     $manufacturer = $cs.Manufacturer.Trim()
     $model        = $cs.Model.Trim()
 
-    # Populate analytics state
-    $script:AnalyticsManufacturer = $manufacturer
-    $script:AnalyticsModel        = $model
-    try {
-        $osObj = Get-CimInstance Win32_OperatingSystem
-        $script:AnalyticsOsVersion = $osObj.Version
-        $script:AnalyticsOsBuild   = [int]$osObj.BuildNumber
-    } catch {}
-
     try { [System.Windows.Forms.Clipboard]::SetText($model) } catch {}
 
     Log "Manufacturer : $manufacturer"
@@ -1597,41 +1489,23 @@ function Start-Install {
     $success    = $false
 
     if ($manufacturer -match "Dell") {
-        if (-not (Assert-Curl)) {
-            Send-GA4Event -Result "failure"
-            Set-ButtonIdle
-            return
-        }
+        if (-not (Assert-Curl)) { Set-ButtonIdle; return }
         $success = Start-DellDriverInstall -DriverRoot $driverRoot -ModelName $model
     } elseif ($manufacturer -match "HP|Hewlett") {
-        if (-not (Assert-Curl)) {
-            Send-GA4Event -Result "failure"
-            Set-ButtonIdle
-            return
-        }
+        if (-not (Assert-Curl)) { Set-ButtonIdle; return }
         $success = Start-HpDriverInstall -DriverRoot $driverRoot -ModelName $model
     } elseif ($manufacturer -match "Lenovo") {
-        if (-not (Assert-Curl)) {
-            Send-GA4Event -Result "failure"
-            Set-ButtonIdle
-            return
-        }
+        if (-not (Assert-Curl)) { Set-ButtonIdle; return }
         $success = Start-LenovoDriverInstall -DriverRoot $driverRoot
     } else {
         Log "Unsupported manufacturer: $manufacturer"
         Log "Supported OEMs: Dell, HP, Lenovo"
-        Send-GA4Event -Result "failure"
         [System.Windows.Forms.MessageBox]::Show(
             "Manufacturer '$manufacturer' is not supported.`nSupported: Dell, HP, Lenovo",
             "Unsupported Manufacturer", "OK", "Warning"
         )
         Set-ButtonIdle
         return
-    }
-
-    # Check for cancel before deciding result
-    if ($script:CancelRequested) {
-        Send-GA4Event -Result "cancelled"
     }
 
     Log "--------------------------------------------"
@@ -1641,9 +1515,11 @@ function Start-Install {
         SetExtract  -Pct 100 -Label "Complete"
         Log "Driver installation complete!"
         Log "Log saved to: $LogFile"
-        Send-GA4Event -Result "success"
         Play-Sound -Event "Success"
 
+        # Clean up driver pack and extracted files — installed drivers are
+        # already in the driver store so this folder is no longer needed.
+        # Keeps the image clean before sysprep.
         if (Test-Path $driverRoot) {
             Log "Cleaning up $driverRoot..."
             try {
@@ -1661,9 +1537,6 @@ function Start-Install {
         if ($result -eq "Yes") { Restart-Computer -Force }
         else { Set-ButtonIdle }
     } else {
-        if (-not $script:CancelRequested) {
-            Send-GA4Event -Result "failure"
-        }
         SetDownload -Pct 0 -Label "Failed — see log"
         SetExtract  -Pct 0 -Label "Failed — see log"
         Stop-DlSpinner      -Success $false
