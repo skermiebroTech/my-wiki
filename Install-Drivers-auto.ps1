@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.4.6
+# Version: 1.4.7
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -10,7 +10,7 @@
 # Supports: Dell, HP, Lenovo
 # =============================================================
 
-$ScriptVersion   = "1.4.6"
+$ScriptVersion   = "1.4.7"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -504,8 +504,10 @@ function Send-GA4Event {
 
     try {
         # Write payload to a temp file so curl can POST it cleanly
+        # Must use UTF-8 WITHOUT BOM — GA4 rejects the BOM character as invalid JSON
         $payloadFile = Join-Path $env:TEMP "ga4_payload_$(Get-Date -Format 'HHmmss').json"
-        [System.IO.File]::WriteAllText($payloadFile, $payload, [System.Text.Encoding]::UTF8)
+        $utf8NoBom   = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText($payloadFile, $payload, $utf8NoBom)
 
         $curlArgs = "--silent --max-time 10 --connect-timeout 8 " +
                     "-H `"Content-Type: application/json`" " +
