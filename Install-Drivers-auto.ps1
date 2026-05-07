@@ -1461,6 +1461,7 @@ function Start-Install {
         Start-Process powershell `
             "-ExecutionPolicy Bypass -Command `"irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto.ps1 | iex`"" `
             -Verb RunAs
+        $form.Close()
         exit
     }
 
