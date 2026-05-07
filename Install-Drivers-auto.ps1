@@ -1516,6 +1516,19 @@ function Start-Install {
         Log "Log saved to: $LogFile"
         Play-Sound -Event "Success"
 
+        # Clean up driver pack and extracted files — installed drivers are
+        # already in the driver store so this folder is no longer needed.
+        # Keeps the image clean before sysprep.
+        if (Test-Path $driverRoot) {
+            Log "Cleaning up $driverRoot..."
+            try {
+                Remove-Item $driverRoot -Recurse -Force -ErrorAction Stop
+                Log "  $driverRoot removed."
+            } catch {
+                Log "  WARNING: Could not remove $driverRoot — $($_.Exception.Message)"
+            }
+        }
+
         $result = [System.Windows.Forms.MessageBox]::Show(
             "Drivers installed successfully for:`n$model`n`nReboot now to complete installation?",
             "Installation Complete", "YesNo", "Information"
