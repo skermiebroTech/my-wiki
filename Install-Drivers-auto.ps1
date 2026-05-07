@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.4.7
+# Version: 1.4.8
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -10,7 +10,7 @@
 # Supports: Dell, HP, Lenovo
 # =============================================================
 
-$ScriptVersion   = "1.4.7"
+$ScriptVersion   = "1.4.8"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -420,30 +420,20 @@ function Assert-Curl {
 }
 
 # =========================
-# GOOGLE ANALYTICS 4
-# Sends a single "driver_install" event to GA4 via the Measurement Protocol.
+# GOOGLE SHEETS ANALYTICS
+# Sends a single row to a Google Sheet via Apps Script webhook.
 # Fires after install completes (success, failure, or cancel).
 #
-# Parameters captured:
-#   result          - success | failure | cancelled
-#   script_version  - e.g. 1.4.6
-#   manufacturer    - Dell | HP | Lenovo
-#   model           - full WMI model string
-#   serial          - service tag / serial number
-#   os_version      - e.g. 10.0.22631
-#   os_build        - e.g. 22631
-#   inf_count       - number of INFs installed (0 if failed/cancelled)
-#   download_mb     - driver pack size in MB (0 if not downloaded)
-#   duration_sec    - total elapsed seconds for the run
+# Columns written:
+#   Timestamp, Result, Manufacturer, Model, Serial Hash,
+#   OS Version, OS Build, INF Count, Download MB, Duration Sec, Script Version
 #
 # Uses curl.exe (already required by the script) so no extra dependencies.
 # Fails gracefully — errors are logged but never block the main flow.
 # =========================
-$GA4_MEASUREMENT_ID = "G-VHM4KQLY1E"
-$GA4_API_SECRET     = "pfRhGEmwTT-0nAIiOk3Buw"
-$GA4_ENDPOINT       = "https://www.google-analytics.com/mp/collect"
+$SHEETS_WEBHOOK = "https://script.google.com/macros/s/AKfycbygEF0i6j_6rSstmfQ2sQPLn0KjkqxZwUwIRjyCsd911IP9kALucv2cImMFumGoUUs/exec"
 
-# Analytics state — populated during the run, read by Send-GA4Event
+# Analytics state — populated during the run, read by Send-AnalyticsEvent
 $script:AnalyticsManufacturer = ""
 $script:AnalyticsModel        = ""
 $script:AnalyticsSerial       = ""
@@ -453,7 +443,7 @@ $script:AnalyticsInfCount     = 0
 $script:AnalyticsDownloadMB   = 0.0
 $script:AnalyticsStartTime    = $null
 
-function Send-GA4Event {
+function Send-AnalyticsEvent {
     param(
         [ValidateSet("success","failure","cancelled")]
         [string]$Result
@@ -464,55 +454,45 @@ function Send-GA4Event {
         $durationSec = [int]((Get-Date) - $script:AnalyticsStartTime).TotalSeconds
     }
 
-    # GA4 requires a client_id — use a hash of the serial so the same machine
-    # is consistently identified without storing any PII externally.
-    $clientId = "unknown"
+    # Hash the serial so the same machine is consistently identified
+    # without storing the raw serial number externally.
+    $serialHash = "unknown"
     if ($script:AnalyticsSerial) {
-        $bytes    = [System.Text.Encoding]::UTF8.GetBytes($script:AnalyticsSerial)
-        $sha      = [System.Security.Cryptography.SHA256]::Create()
-        $hash     = $sha.ComputeHash($bytes)
-        $clientId = [System.BitConverter]::ToString($hash).Replace("-","").Substring(0,16).ToLower()
+        $bytes      = [System.Text.Encoding]::UTF8.GetBytes($script:AnalyticsSerial)
+        $sha        = [System.Security.Cryptography.SHA256]::Create()
+        $hash       = $sha.ComputeHash($bytes)
+        $serialHash = [System.BitConverter]::ToString($hash).Replace("-","").Substring(0,16).ToLower()
     }
 
-    # Build the JSON payload manually — avoids ConvertTo-Json depth issues on PS 4/5
+    # Build JSON payload — manual string build avoids ConvertTo-Json depth issues on PS 4/5
     $payload = @"
 {
-  "client_id": "$clientId",
-  "events": [
-    {
-      "name": "driver_install",
-      "params": {
-        "result":         "$Result",
-        "script_version": "$ScriptVersion",
-        "manufacturer":   "$($script:AnalyticsManufacturer -replace '"','\"')",
-        "model":          "$($script:AnalyticsModel -replace '"','\"')",
-        "serial":         "$($script:AnalyticsSerial -replace '"','\"')",
-        "os_version":     "$($script:AnalyticsOsVersion -replace '"','\"')",
-        "os_build":       $($script:AnalyticsOsBuild),
-        "inf_count":      $($script:AnalyticsInfCount),
-        "download_mb":    $($script:AnalyticsDownloadMB),
-        "duration_sec":   $durationSec
-      }
-    }
-  ]
+  "result":         "$Result",
+  "manufacturer":   "$($script:AnalyticsManufacturer -replace '"','\"')",
+  "model":          "$($script:AnalyticsModel -replace '"','\"')",
+  "serial":         "$serialHash",
+  "os_version":     "$($script:AnalyticsOsVersion -replace '"','\"')",
+  "os_build":       $($script:AnalyticsOsBuild),
+  "inf_count":      $($script:AnalyticsInfCount),
+  "download_mb":    $($script:AnalyticsDownloadMB),
+  "duration_sec":   $durationSec,
+  "script_version": "$ScriptVersion"
 }
 "@
-
-    $url = "$GA4_ENDPOINT`?measurement_id=$GA4_MEASUREMENT_ID&api_secret=$GA4_API_SECRET"
 
     Log "Sending analytics (result=$Result, model=$($script:AnalyticsModel), infs=$($script:AnalyticsInfCount), dl=$($script:AnalyticsDownloadMB)MB, duration=${durationSec}s)..."
 
     try {
-        # Write payload to a temp file so curl can POST it cleanly
-        # Must use UTF-8 WITHOUT BOM — GA4 rejects the BOM character as invalid JSON
-        $payloadFile = Join-Path $env:TEMP "ga4_payload_$(Get-Date -Format 'HHmmss').json"
+        # Write payload WITHOUT BOM — required for valid JSON over HTTP
+        $payloadFile = Join-Path $env:TEMP "analytics_payload_$(Get-Date -Format 'HHmmss').json"
         $utf8NoBom   = New-Object System.Text.UTF8Encoding $false
         [System.IO.File]::WriteAllText($payloadFile, $payload, $utf8NoBom)
 
-        $curlArgs = "--silent --max-time 10 --connect-timeout 8 " +
+        $curlArgs = "--silent --max-time 15 --connect-timeout 10 " +
+                    "--location " +
                     "-H `"Content-Type: application/json`" " +
                     "--data `@`"$payloadFile`" " +
-                    "`"$url`""
+                    "`"$SHEETS_WEBHOOK`""
 
         $psi                        = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName               = "curl.exe"
@@ -524,16 +504,18 @@ function Send-GA4Event {
         $proc                       = New-Object System.Diagnostics.Process
         $proc.StartInfo             = $psi
         $proc.Start() | Out-Null
-        $stdout = $proc.StandardOutput.ReadToEnd()
-        $stderr = $proc.StandardError.ReadToEnd()
+        $stdout = $proc.StandardOutput.ReadToEnd().Trim()
+        $stderr = $proc.StandardError.ReadToEnd().Trim()
         $proc.WaitForExit()
 
         Remove-Item $payloadFile -EA SilentlyContinue
 
         if ($proc.ExitCode -ne 0) {
             Log "  Analytics warning: curl exit $($proc.ExitCode) — $stderr"
+        } elseif ($stdout -eq "OK") {
+            Log "  Analytics sent OK — row written to Google Sheet."
         } else {
-            Log "  Analytics sent OK."
+            Log "  Analytics unexpected response: $stdout"
         }
     } catch {
         Log "  Analytics error: $($_.Exception.Message)"
@@ -1600,21 +1582,21 @@ function Start-Install {
 
     if ($manufacturer -match "Dell") {
         if (-not (Assert-Curl)) {
-            Send-GA4Event -Result "failure"
+            Send-AnalyticsEvent -Result "failure"
             Set-ButtonIdle
             return
         }
         $success = Start-DellDriverInstall -DriverRoot $driverRoot -ModelName $model
     } elseif ($manufacturer -match "HP|Hewlett") {
         if (-not (Assert-Curl)) {
-            Send-GA4Event -Result "failure"
+            Send-AnalyticsEvent -Result "failure"
             Set-ButtonIdle
             return
         }
         $success = Start-HpDriverInstall -DriverRoot $driverRoot -ModelName $model
     } elseif ($manufacturer -match "Lenovo") {
         if (-not (Assert-Curl)) {
-            Send-GA4Event -Result "failure"
+            Send-AnalyticsEvent -Result "failure"
             Set-ButtonIdle
             return
         }
@@ -1622,7 +1604,7 @@ function Start-Install {
     } else {
         Log "Unsupported manufacturer: $manufacturer"
         Log "Supported OEMs: Dell, HP, Lenovo"
-        Send-GA4Event -Result "failure"
+        Send-AnalyticsEvent -Result "failure"
         [System.Windows.Forms.MessageBox]::Show(
             "Manufacturer '$manufacturer' is not supported.`nSupported: Dell, HP, Lenovo",
             "Unsupported Manufacturer", "OK", "Warning"
@@ -1633,7 +1615,7 @@ function Start-Install {
 
     # Check for cancel before deciding result
     if ($script:CancelRequested) {
-        Send-GA4Event -Result "cancelled"
+        Send-AnalyticsEvent -Result "cancelled"
     }
 
     Log "--------------------------------------------"
@@ -1643,7 +1625,7 @@ function Start-Install {
         SetExtract  -Pct 100 -Label "Complete"
         Log "Driver installation complete!"
         Log "Log saved to: $LogFile"
-        Send-GA4Event -Result "success"
+        Send-AnalyticsEvent -Result "success"
         Play-Sound -Event "Success"
 
         if (Test-Path $driverRoot) {
@@ -1664,7 +1646,7 @@ function Start-Install {
         else { Set-ButtonIdle }
     } else {
         if (-not $script:CancelRequested) {
-            Send-GA4Event -Result "failure"
+            Send-AnalyticsEvent -Result "failure"
         }
         SetDownload -Pct 0 -Label "Failed — see log"
         SetExtract  -Pct 0 -Label "Failed — see log"
