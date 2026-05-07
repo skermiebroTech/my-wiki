@@ -1459,7 +1459,7 @@ function Start-Install {
     if (-not $pri.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
         Log "Not running as admin — re-launching elevated..."
         Start-Process powershell `
-            "-ExecutionPolicy Bypass -Command `"irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto.ps1 | iex`"" `
+            "-WindowStyle Hidden -ExecutionPolicy Bypass -Command `"irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto.ps1 | iex`"" `
             -Verb RunAs
         $form.Close()
         exit
