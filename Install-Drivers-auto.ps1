@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.4.8
+# Version: 1.4.9
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -10,7 +10,7 @@
 # Supports: Dell, HP, Lenovo
 # =============================================================
 
-$ScriptVersion   = "1.4.8"
+$ScriptVersion   = "1.4.9"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -454,15 +454,6 @@ function Send-AnalyticsEvent {
         $durationSec = [int]((Get-Date) - $script:AnalyticsStartTime).TotalSeconds
     }
 
-    # Hash the serial so the same machine is consistently identified
-    # without storing the raw serial number externally.
-    $serialHash = "unknown"
-    if ($script:AnalyticsSerial) {
-        $bytes      = [System.Text.Encoding]::UTF8.GetBytes($script:AnalyticsSerial)
-        $sha        = [System.Security.Cryptography.SHA256]::Create()
-        $hash       = $sha.ComputeHash($bytes)
-        $serialHash = [System.BitConverter]::ToString($hash).Replace("-","").Substring(0,16).ToLower()
-    }
 
     # Build JSON payload — manual string build avoids ConvertTo-Json depth issues on PS 4/5
     $payload = @"
@@ -470,7 +461,7 @@ function Send-AnalyticsEvent {
   "result":         "$Result",
   "manufacturer":   "$($script:AnalyticsManufacturer -replace '"','\"')",
   "model":          "$($script:AnalyticsModel -replace '"','\"')",
-  "serial":         "$serialHash",
+  "serial":         "$($script:AnalyticsSerial -replace '"','\"')",
   "os_version":     "$($script:AnalyticsOsVersion -replace '"','\"')",
   "os_build":       $($script:AnalyticsOsBuild),
   "inf_count":      $($script:AnalyticsInfCount),
