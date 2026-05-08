@@ -224,11 +224,12 @@ for ($pi = 0; $pi -lt 3; $pi++) {
     $p.Controls.Add($notesL)
 
     # Progress bar
+    $barY = [int]$panelH - 5
     $bar                       = New-Object System.Windows.Forms.ProgressBar
     $bar.Style                 = "Marquee"
     $bar.MarqueeAnimationSpeed = 0
     $bar.Size                  = New-Object System.Drawing.Size($panelW, 5)
-    $bar.Location              = New-Object System.Drawing.Point(0, $panelH - 5)
+    $bar.Location              = New-Object System.Drawing.Point(0, $barY)
     $bar.Minimum               = 0
     $bar.Maximum               = 100
     $p.Controls.Add($bar)
@@ -244,7 +245,7 @@ for ($pi = 0; $pi -lt 3; $pi++) {
 }
 
 # ---- Summary bar ------------------------------------------------------------
-$summaryY             = $panelTopY + $panelH + 10
+$summaryY             = [int]$panelTopY + [int]$panelH + 10
 $summaryPanel         = New-Object System.Windows.Forms.Panel
 $summaryPanel.Size    = New-Object System.Drawing.Size(858, 36)
 $summaryPanel.Location= New-Object System.Drawing.Point($panelGap, $summaryY)
@@ -272,14 +273,14 @@ $elapsedLbl.Location  = New-Object System.Drawing.Point(810, 8)
 $summaryPanel.Controls.Add($elapsedLbl)
 
 # ---- Log box ----------------------------------------------------------------
-$logY        = $summaryY + 36 + 8
+$logY        = [int]$summaryY + 36 + 8
 $logCaption  = New-Object System.Windows.Forms.Label
 $logCaption.Text      = "LIVE LOG"
 $logCaption.Font      = $F.SubBold
 $logCaption.ForeColor = $C.TextDim
 $logCaption.BackColor = [System.Drawing.Color]::Transparent
 $logCaption.AutoSize  = $true
-$logCaption.Location  = New-Object System.Drawing.Point($panelGap, $logY)
+$logCaption.Location  = New-Object System.Drawing.Point([int]$panelGap, [int]$logY)
 $form.Controls.Add($logCaption)
 
 $logBox             = New-Object System.Windows.Forms.RichTextBox
@@ -290,8 +291,10 @@ $logBox.BackColor   = $C.LogBg
 $logBox.ForeColor   = $C.LogText
 $logBox.Font        = $F.Log
 $logBox.BorderStyle = "None"
-$logBox.Location    = New-Object System.Drawing.Point($panelGap, $logY + 18)
-$logBox.Size        = New-Object System.Drawing.Size(858, 680 - $logY - 55)
+$logBoxTop = [int]$logY + 18
+$logBox.Location    = New-Object System.Drawing.Point([int]$panelGap, $logBoxTop)
+$logBoxH = 680 - [int]$logY - 55
+$logBox.Size        = New-Object System.Drawing.Size(858, $logBoxH)
 $form.Controls.Add($logBox)
 
 # ---- Footer -----------------------------------------------------------------
@@ -317,7 +320,7 @@ $form.Add_Resize({
     $accentLine.Width  = $w
     $summaryPanel.Width = $w - ($panelGap * 2)
     $logBox.Width      = $w - ($panelGap * 2)
-    $logBox.Height     = $h - $logY - 55
+    $logBox.Height     = $h - [int]$logY - 55
     [System.Windows.Forms.Application]::DoEvents()
 })
 
