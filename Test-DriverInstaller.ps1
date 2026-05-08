@@ -1,6 +1,6 @@
 #Requires -RunAsAdministrator
 # =============================================================================
-# Test-DriverInstaller.ps1  v2.3.0
+# Test-DriverInstaller.ps1  v2.4.0
 # =============================================================================
 
 param(
@@ -12,7 +12,7 @@ param(
     [string]$LenovoMachineType = "20XX"
 )
 
-$ScriptVersion = "2.3.0"
+$ScriptVersion = "2.4.0"
 $RepoUrl       = "https://raw.githubusercontent.com/skermiebroTech/my-wiki/$Branch/Install-Drivers-auto-7z.ps1"
 $LogFile       = Join-Path ([Environment]::GetFolderPath("UserProfile")) `
                      ("Downloads\Test-DriverInstaller_" + (Get-Date -Format 'yyyyMMdd_HHmmss') + ".log")
@@ -587,33 +587,66 @@ $form.Add_Shown({
             $proc.Id | Set-Content $pidFile -Encoding UTF8
             $out = [System.Collections.Generic.List[string]]::new()
 
-            # Read stdout line by line and write EACH line to the pipeline immediately.
-            # Receive-Job -Keep in the UI loop will pick these up as they arrive.
-            while (-not $proc.HasExited) {
-                # ReadLine() blocks until a line is available or process exits
-                if ($proc.StandardOutput.Peek() -ge 0) {
-                    $l = $proc.StandardOutput.ReadLine()
-                    if ($null -ne $l) {
-                        $out.Add($l)
-                        JL $l | Out-Null
-                        Write-Output $l   # emits to pipeline immediately
+            # Use a concurrent queue + background runspace so ReadLine() never
+            # blocks the main loop. The reader runspace pushes lines into the queue;
+            # the main loop drains it every 700ms and writes to the pipeline so
+            # Receive-Job -Keep in the UI picks them up live.
+            $queue = [System.Collections.Concurrent.ConcurrentQueue[string]]::new()
+            $readerDone = [System.Threading.ManualResetEventSlim]::new($false)
+
+            $rs = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace()
+            $rs.Open()
+            $rs.SessionStateProxy.SetVariable("proc",      $proc)
+            $rs.SessionStateProxy.SetVariable("queue",     $queue)
+            $rs.SessionStateProxy.SetVariable("readerDone",$readerDone)
+
+            $ps = [System.Management.Automation.PowerShell]::Create()
+            $ps.Runspace = $rs
+            $ps.AddScript({
+                try {
+                    while (-not $proc.HasExited) {
+                        if ($proc.StandardOutput.Peek() -ge 0) {
+                            $l = $proc.StandardOutput.ReadLine()
+                            if ($null -ne $l) { $queue.Enqueue($l) }
+                        } else { Start-Sleep -Milliseconds 30 }
                     }
-                } else {
-                    Start-Sleep -Milliseconds 50
+                    # Drain remainder
+                    $tail = $proc.StandardOutput.ReadToEnd()
+                    if ($tail) {
+                        foreach ($tl in ($tail -split "`n")) {
+                            $tl = $tl.TrimEnd("`r")
+                            if ($tl) { $queue.Enqueue($tl) }
+                        }
+                    }
+                } finally { $readerDone.Set() }
+            }) | Out-Null
+            $ps.BeginInvoke() | Out-Null
+
+            # Main drain loop — every 700ms flush queue to pipeline
+            $lastActivity = Get-Date
+            $lastFileSeen  = ""
+            while (-not $readerDone.IsSet -or -not $queue.IsEmpty) {
+                Start-Sleep -Milliseconds 700
+                $flushed = 0
+                $l = $null
+                while ($queue.TryDequeue([ref]$l)) {
+                    $out.Add($l)
+                    JL $l | Out-Null
+                    Write-Output $l     # hits pipeline immediately
+                    $flushed++
+                    $lastActivity = Get-Date
+                }
+                # If nothing printed in last 700ms emit a heartbeat so UI knows we are alive
+                if ($flushed -eq 0 -and -not $readerDone.IsSet) {
+                    $elapsed = [int]((Get-Date) - $st).TotalSeconds
+                    $fc = if (Test-Path $ed) { @(Get-ChildItem $ed -Recurse -File -EA SilentlyContinue).Count } else { 0 }
+                    $pulse = "  ... [$n] running ${elapsed}s$(if ($fc -gt 0){" | $fc files extracted"})"
+                    Write-Output $pulse
                 }
             }
-            # Drain any remaining output after exit
-            $drain = $proc.StandardOutput.ReadToEnd()
-            if ($drain) {
-                foreach ($l in ($drain -split "`n")) {
-                    $l = $l.TrimEnd("`r")
-                    if ($l) {
-                        $out.Add($l)
-                        JL $l | Out-Null
-                        Write-Output $l
-                    }
-                }
-            }
+
+            $ps.Dispose(); $rs.Close(); $rs.Dispose()
+
             $err = $proc.StandardError.ReadToEnd().Trim()
             if ($err) {
                 $errLine = "ERR: $err"
