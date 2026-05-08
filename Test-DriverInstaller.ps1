@@ -1,6 +1,6 @@
 #Requires -RunAsAdministrator
 # =============================================================================
-# Test-DriverInstaller.ps1  v2.2.0
+# Test-DriverInstaller.ps1  v2.3.0
 # =============================================================================
 
 param(
@@ -12,7 +12,7 @@ param(
     [string]$LenovoMachineType = "20XX"
 )
 
-$ScriptVersion = "2.2.0"
+$ScriptVersion = "2.3.0"
 $RepoUrl       = "https://raw.githubusercontent.com/skermiebroTech/my-wiki/$Branch/Install-Drivers-auto-7z.ps1"
 $LogFile       = Join-Path ([Environment]::GetFolderPath("UserProfile")) `
                      ("Downloads\Test-DriverInstaller_" + (Get-Date -Format 'yyyyMMdd_HHmmss') + ".log")
@@ -586,14 +586,41 @@ $form.Add_Shown({
             $pidFile = "$env:TEMP\driver_test_pid_$n.txt"
             $proc.Id | Set-Content $pidFile -Encoding UTF8
             $out = [System.Collections.Generic.List[string]]::new()
+
+            # Read stdout line by line and write EACH line to the pipeline immediately.
+            # Receive-Job -Keep in the UI loop will pick these up as they arrive.
             while (-not $proc.HasExited) {
-                $l = $proc.StandardOutput.ReadLine()
-                if ($l -ne $null) { $out.Add($l); JL $l | Out-Null }
+                # ReadLine() blocks until a line is available or process exits
+                if ($proc.StandardOutput.Peek() -ge 0) {
+                    $l = $proc.StandardOutput.ReadLine()
+                    if ($null -ne $l) {
+                        $out.Add($l)
+                        JL $l | Out-Null
+                        Write-Output $l   # emits to pipeline immediately
+                    }
+                } else {
+                    Start-Sleep -Milliseconds 50
+                }
             }
-            ($proc.StandardOutput.ReadToEnd() -split "`n" | Where-Object { $_.Trim() }) |
-                ForEach-Object { $out.Add($_); JL $_ | Out-Null }
+            # Drain any remaining output after exit
+            $drain = $proc.StandardOutput.ReadToEnd()
+            if ($drain) {
+                foreach ($l in ($drain -split "`n")) {
+                    $l = $l.TrimEnd("`r")
+                    if ($l) {
+                        $out.Add($l)
+                        JL $l | Out-Null
+                        Write-Output $l
+                    }
+                }
+            }
             $err = $proc.StandardError.ReadToEnd().Trim()
-            if ($err) { JL "ERR: $err" | Out-Null }
+            if ($err) {
+                $errLine = "ERR: $err"
+                $out.Add($errLine)
+                JL $errLine | Out-Null
+                Write-Output $errLine
+            }
             Remove-Item $pidFile -Force -EA SilentlyContinue
 
             $exit = $proc.ExitCode
@@ -679,17 +706,24 @@ $form.Add_Shown({
 
     # -- Collect final results ------------------------------------------------
     foreach ($e in $jobs) {
-        $r = Receive-Job $e.Job -EA SilentlyContinue
-        # Receive-Job with -Keep gives us strings; the actual result hash is the last item
-        $resultObj = $null
-        if ($r) {
-            foreach ($item in @($r)) {
-                if ($item -is [System.Collections.Specialized.OrderedDictionary] -or
-                    ($item -is [hashtable])) {
-                    $resultObj = $item; break
+        # Drain all remaining pipeline output into log boxes first
+        # Drain any final lines not yet shown
+        $remaining = @(Receive-Job $e.Job -Keep -EA SilentlyContinue)
+        $startIdx  = $lastLine[$e.OEM]
+        if ($remaining.Count -gt $startIdx) {
+            for ($ri = $startIdx; $ri -lt $remaining.Count; $ri++) {
+                $item = $remaining[$ri]
+                if ($item -is [string] -and $item.Trim()) {
+                    $oemLogs[$e.OEM].Box.AppendText("$item`r`n")
+                    $oemLogs[$e.OEM].Box.ScrollToCaret()
                 }
             }
         }
+        # Now get the actual result - the last hashtable emitted by the job
+        $allOutput = @(Receive-Job $e.Job -EA SilentlyContinue)
+        $resultObj = $allOutput | Where-Object {
+            $_ -is [System.Collections.Specialized.OrderedDictionary] -or $_ -is [hashtable]
+        } | Select-Object -Last 1
         if (-not $resultObj) {
             $resultObj = [ordered]@{ OEM=$e.OEM; Status="FAIL"; Duration=0; Files=0; INFs=0; Notes="No result" }
         }
