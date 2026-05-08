@@ -393,19 +393,32 @@ function Assert-Curl {
     return $true
 }
 
+function Get-MissingDriverCount {
+    try {
+        $count = @(Get-CimInstance Win32_PnPEntity |
+            Where-Object { $_.ConfigManagerErrorCode -ne 0 }).Count
+        return $count
+    } catch {
+        Log "  WARNING: Could not query PnP device status — $($_.Exception.Message)"
+        return -1
+    }
+}
+
 # =========================
 # GOOGLE SHEETS ANALYTICS
 # =========================
 $SHEETS_WEBHOOK = "https://script.google.com/macros/s/AKfycbygEF0i6j_6rSstmfQ2sQPLn0KjkqxZwUwIRjyCsd911IP9kALucv2cImMFumGoUUs/exec"
 
-$script:AnalyticsManufacturer = ""
-$script:AnalyticsModel        = ""
-$script:AnalyticsSerial       = ""
-$script:AnalyticsOsVersion    = ""
-$script:AnalyticsOsBuild      = 0
-$script:AnalyticsInfCount     = 0
-$script:AnalyticsDownloadMB   = 0.0
-$script:AnalyticsStartTime    = $null
+$script:AnalyticsManufacturer    = ""
+$script:AnalyticsModel           = ""
+$script:AnalyticsSerial          = ""
+$script:AnalyticsOsVersion       = ""
+$script:AnalyticsOsBuild         = 0
+$script:AnalyticsInfCount        = 0
+$script:AnalyticsDownloadMB      = 0.0
+$script:AnalyticsStartTime       = $null
+$script:AnalyticsMissingBefore   = -1
+$script:AnalyticsMissingAfter    = -1
 
 function Send-AnalyticsEvent {
     param(
@@ -426,11 +439,13 @@ function Send-AnalyticsEvent {
   "os_build":       $($script:AnalyticsOsBuild),
   "inf_count":      $($script:AnalyticsInfCount),
   "download_mb":    $($script:AnalyticsDownloadMB),
+  "missing_before": $($script:AnalyticsMissingBefore),
+  "missing_after":  $($script:AnalyticsMissingAfter),
   "duration_sec":   $durationSec,
   "script_version": "$ScriptVersion"
 }
 "@
-    Log "Sending analytics (result=$Result, model=$($script:AnalyticsModel), infs=$($script:AnalyticsInfCount), dl=$($script:AnalyticsDownloadMB)MB, duration=${durationSec}s)..."
+    Log "Sending analytics (result=$Result, model=$($script:AnalyticsModel), infs=$($script:AnalyticsInfCount), dl=$($script:AnalyticsDownloadMB)MB, missing=$($script:AnalyticsMissingBefore)->$($script:AnalyticsMissingAfter), duration=${durationSec}s)..."
     try {
         $payloadFile = Join-Path $env:TEMP "analytics_payload_$(Get-Date -Format 'HHmmss').json"
         $utf8NoBom   = New-Object System.Text.UTF8Encoding $false
@@ -1654,15 +1669,17 @@ function Write-DeviceInfo {
 # =========================
 function Start-Install {
 
-    $script:CancelRequested       = $false
-    $script:AnalyticsInfCount     = 0
-    $script:AnalyticsDownloadMB   = 0.0
-    $script:AnalyticsSerial       = ""
-    $script:AnalyticsManufacturer = ""
-    $script:AnalyticsModel        = ""
-    $script:AnalyticsOsVersion    = ""
-    $script:AnalyticsOsBuild      = 0
-    $script:AnalyticsStartTime    = Get-Date
+    $script:CancelRequested          = $false
+    $script:AnalyticsInfCount        = 0
+    $script:AnalyticsDownloadMB      = 0.0
+    $script:AnalyticsSerial          = ""
+    $script:AnalyticsManufacturer    = ""
+    $script:AnalyticsModel           = ""
+    $script:AnalyticsOsVersion       = ""
+    $script:AnalyticsOsBuild         = 0
+    $script:AnalyticsMissingBefore   = -1
+    $script:AnalyticsMissingAfter    = -1
+    $script:AnalyticsStartTime       = Get-Date
 
     Set-ButtonRunning
     SetProgress 0
@@ -1712,6 +1729,11 @@ function Start-Install {
     Write-DeviceInfo
     SetProgress 5
 
+    # Snapshot missing drivers before install
+    Log "Checking for devices with missing drivers..."
+    $script:AnalyticsMissingBefore = Get-MissingDriverCount
+    Log "Missing drivers BEFORE install: $($script:AnalyticsMissingBefore)"
+
     $driverRoot = "C:\DRIVERS"
     $success    = $false
 
@@ -1739,6 +1761,14 @@ function Start-Install {
         return
     }
 
+    # Snapshot missing drivers after install
+    $script:AnalyticsMissingAfter = Get-MissingDriverCount
+    $missingDelta = if ($script:AnalyticsMissingBefore -ge 0 -and $script:AnalyticsMissingAfter -ge 0) {
+        $script:AnalyticsMissingBefore - $script:AnalyticsMissingAfter
+    } else { 0 }
+    Log "Missing drivers AFTER  install: $($script:AnalyticsMissingAfter)"
+    Log "Devices resolved by this install: $missingDelta"
+
     if ($script:CancelRequested) { Send-AnalyticsEvent -Result "cancelled" }
 
     Log "--------------------------------------------"
@@ -1759,8 +1789,12 @@ function Start-Install {
             } catch { Log "  WARNING: Could not remove $driverRoot — $($_.Exception.Message)" }
         }
 
+        $missingLine = if ($script:AnalyticsMissingBefore -ge 0 -and $script:AnalyticsMissingAfter -ge 0) {
+            "`n`nMissing drivers:  $($script:AnalyticsMissingBefore) → $($script:AnalyticsMissingAfter)  ($missingDelta resolved)"
+        } else { "" }
+
         $result = [System.Windows.Forms.MessageBox]::Show(
-            "Drivers installed successfully for:`n$model`n`nReboot now to complete installation?",
+            "Drivers installed successfully for:`n$model$missingLine`n`nReboot now to complete installation?",
             "Installation Complete", "YesNo", "Information"
         )
         if ($result -eq "Yes") { Restart-Computer -Force }
