@@ -1,6 +1,6 @@
 #Requires -RunAsAdministrator
 # =============================================================================
-# Test-DriverInstaller.ps1  v2.5.0
+# Test-DriverInstaller.ps1  v2.6.0
 # =============================================================================
 
 param(
@@ -12,7 +12,7 @@ param(
     [string]$LenovoMachineType = "20XX"
 )
 
-$ScriptVersion = "2.5.0"
+$ScriptVersion = "2.6.0"
 $RepoUrl       = "https://raw.githubusercontent.com/skermiebroTech/my-wiki/$Branch/Install-Drivers-auto-7z.ps1"
 $LogFile       = Join-Path ([Environment]::GetFolderPath("UserProfile")) `
                      ("Downloads\Test-DriverInstaller_" + (Get-Date -Format 'yyyyMMdd_HHmmss') + ".log")
@@ -501,6 +501,7 @@ $killBtn.Add_Click({
     foreach ($n in $OEMOrder) {
         $dr = "C:\DRIVERS\$n"
         if (Test-Path $dr) { Remove-Item $dr -Recurse -Force -EA SilentlyContinue }
+        Remove-Item "$env:TEMP\driver_stream_$n.txt" -Force -EA SilentlyContinue
     }
     Remove-Item $ScriptCache -Force -EA SilentlyContinue
     $ticker.Stop()
@@ -570,12 +571,23 @@ $form.Add_Shown({
         $jAl = $al; $jN = $oemName; $jDr = $driverRoot
         $jEd = $extractDir; $jLf = $LogFile; $jRi = $RunInstall
 
+        # Each job writes lines to a per-OEM temp file as they arrive.
+        # The UI polls those files directly — no pipeline buffering issues.
+        $jStreamFile = "$env:TEMP\driver_stream_$jN.txt"
+        Remove-Item $jStreamFile -Force -EA SilentlyContinue
+        New-Item -ItemType File -Path $jStreamFile -Force | Out-Null
+
         $job = Start-Job -ScriptBlock {
-            param($al, $n, $dr, $ed, $lf, $ri)
+            param($al, $n, $dr, $ed, $lf, $ri, $sf)
+
             function JL { param([string]$m)
-                Add-Content $lf "[$([datetime]::Now.ToString('HH:mm:ss'))][$n] $m" -Encoding UTF8
-                $m
+                $ts = Get-Date -Format 'HH:mm:ss'
+                $line = "[$ts] $m"
+                Add-Content $lf   $line -Encoding UTF8
+                Add-Content $sf   $line -Encoding UTF8  # stream file — UI polls this
+                $line
             }
+
             $st  = Get-Date
             $psi = New-Object System.Diagnostics.ProcessStartInfo
             $psi.FileName               = "powershell.exe"
@@ -587,77 +599,44 @@ $form.Add_Shown({
             $proc = New-Object System.Diagnostics.Process
             $proc.StartInfo = $psi
             $proc.Start() | Out-Null
-            # Write PID to temp file so kill button can terminate immediately
+
+            # Write PID so kill button can terminate immediately
             $pidFile = "$env:TEMP\driver_test_pid_$n.txt"
             $proc.Id | Set-Content $pidFile -Encoding UTF8
+
             $out = [System.Collections.Generic.List[string]]::new()
 
-            # Use a concurrent queue + background runspace so ReadLine() never
-            # blocks the main loop. The reader runspace pushes lines into the queue;
-            # the main loop drains it every 700ms and writes to the pipeline so
-            # Receive-Job -Keep in the UI picks them up live.
-            $queue = [System.Collections.Concurrent.ConcurrentQueue[string]]::new()
-            $readerDone = [System.Threading.ManualResetEventSlim]::new($false)
-
-            $rs = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace()
-            $rs.Open()
-            $rs.SessionStateProxy.SetVariable("proc",      $proc)
-            $rs.SessionStateProxy.SetVariable("queue",     $queue)
-            $rs.SessionStateProxy.SetVariable("readerDone",$readerDone)
-
-            $ps = [System.Management.Automation.PowerShell]::Create()
-            $ps.Runspace = $rs
-            $ps.AddScript({
-                try {
-                    while (-not $proc.HasExited) {
-                        if ($proc.StandardOutput.Peek() -ge 0) {
-                            $l = $proc.StandardOutput.ReadLine()
-                            if ($null -ne $l) { $queue.Enqueue($l) }
-                        } else { Start-Sleep -Milliseconds 30 }
+            # Read every line and append to stream file immediately
+            while (-not $proc.HasExited) {
+                if ($proc.StandardOutput.Peek() -ge 0) {
+                    $l = $proc.StandardOutput.ReadLine()
+                    if ($null -ne $l) {
+                        $out.Add($l)
+                        Add-Content $sf $l -Encoding UTF8
+                        Add-Content $lf "[$([datetime]::Now.ToString('HH:mm:ss'))][$n] $l" -Encoding UTF8
                     }
-                    # Drain remainder
-                    $tail = $proc.StandardOutput.ReadToEnd()
-                    if ($tail) {
-                        foreach ($tl in ($tail -split "`n")) {
-                            $tl = $tl.TrimEnd("`r")
-                            if ($tl) { $queue.Enqueue($tl) }
-                        }
-                    }
-                } finally { $readerDone.Set() }
-            }) | Out-Null
-            $ps.BeginInvoke() | Out-Null
-
-            # Main drain loop — every 700ms flush queue to pipeline
-            $lastActivity = Get-Date
-            $lastFileSeen  = ""
-            while (-not $readerDone.IsSet -or -not $queue.IsEmpty) {
-                Start-Sleep -Milliseconds 700
-                $flushed = 0
-                $l = $null
-                while ($queue.TryDequeue([ref]$l)) {
-                    $out.Add($l)
-                    JL $l | Out-Null
-                    Write-Output $l     # hits pipeline immediately
-                    $flushed++
-                    $lastActivity = Get-Date
-                }
-                # If nothing printed in last 700ms emit a heartbeat so UI knows we are alive
-                if ($flushed -eq 0 -and -not $readerDone.IsSet) {
+                } else {
+                    # Heartbeat every 700ms when no output
                     $elapsed = [int]((Get-Date) - $st).TotalSeconds
                     $fc = if (Test-Path $ed) { @(Get-ChildItem $ed -Recurse -File -EA SilentlyContinue).Count } else { 0 }
-                    $pulse = "  ... [$n] running ${elapsed}s$(if ($fc -gt 0){" | $fc files extracted"})"
-                    Write-Output $pulse
+                    $pulse = "  ... [$n] ${elapsed}s$(if ($fc -gt 0) {" | $fc files"})"
+                    Add-Content $sf $pulse -Encoding UTF8
+                    Start-Sleep -Milliseconds 700
                 }
             }
-
-            $ps.Dispose(); $rs.Close(); $rs.Dispose()
-
+            # Drain remainder
+            $tail = $proc.StandardOutput.ReadToEnd()
+            foreach ($l in ($tail -split "`n" | Where-Object { $_.Trim() })) {
+                $l = $l.TrimEnd("`r")
+                $out.Add($l)
+                Add-Content $sf $l -Encoding UTF8
+                Add-Content $lf "[$([datetime]::Now.ToString('HH:mm:ss'))][$n] $l" -Encoding UTF8
+            }
             $err = $proc.StandardError.ReadToEnd().Trim()
             if ($err) {
                 $errLine = "ERR: $err"
                 $out.Add($errLine)
-                JL $errLine | Out-Null
-                Write-Output $errLine
+                Add-Content $sf $errLine -Encoding UTF8
             }
             Remove-Item $pidFile -Force -EA SilentlyContinue
 
@@ -680,11 +659,11 @@ $form.Add_Shown({
             }
             $sl = $out | Where-Object { $_ -match "SUCCESS:|complete" } | Select-Object -First 1
             $fl = $out | Where-Object { $_ -match "FAILED:|did not"  } | Select-Object -First 1
-            if (-not $sl -and $fl)         { $notes.Add("Script fail");     $ok = $false }
-            if (-not $sl -and -not $fl)    { $notes.Add("Unclear outcome") }
+            if (-not $sl -and $fl)      { $notes.Add("Script fail");    $ok = $false }
+            if (-not $sl -and -not $fl) { $notes.Add("Unclear outcome") }
 
             if (Test-Path $dr) { Remove-Item $dr -Recurse -Force -EA SilentlyContinue }
-            JL "END $n $(if ($ok) {'PASS'} else {'FAIL'})" | Out-Null
+            Add-Content $sf "=== END $n $(if ($ok) {'PASS'} else {'FAIL'}) ===" -Encoding UTF8
 
             [ordered]@{
                 OEM      = $n
@@ -695,9 +674,9 @@ $form.Add_Shown({
                 Notes    = ($notes -join "; ")
                 Output   = ($out -join "`n")
             }
-        } -ArgumentList $jAl, $jN, $jDr, $jEd, $jLf, $jRi
+        } -ArgumentList $jAl, $jN, $jDr, $jEd, $jLf, $jRi, $jStreamFile
 
-        $jobs.Add([ordered]@{ OEM = $oemName; Job = $job; Start = (Get-Date) })
+        $jobs.Add([ordered]@{ OEM = $oemName; Job = $job; Start = (Get-Date); StreamFile = $jStreamFile })
         $script:ActiveJobs = $jobs
         UILog "[$oemName] Job $($job.Id) started" -OEM $oemName
     }
@@ -707,28 +686,30 @@ $form.Add_Shown({
     $lastLine = @{}
     foreach ($n in $OEMOrder) { $lastLine[$n] = 0 }
 
-    # Poll every 300ms for snappy live updates
+    # Poll stream files every 300ms — bypasses pipeline buffering entirely
     while ($done.Count -lt $jobs.Count) {
         foreach ($e in $jobs) {
-            $n = $e.OEM; $j = $e.Job
+            $n  = $e.OEM; $j = $e.Job
+            $sf = $e.StreamFile
             $sec = [int]((Get-Date) - $e.Start).TotalSeconds
             $oemPanels[$n].Stats["Sec"].Text = "$sec"
 
-            # Receive-Job -Keep returns ALL pipeline output so far each call.
-            # We track how many lines we've already shown with $lastLine.
-            $allOutput = @(Receive-Job $j -Keep -EA SilentlyContinue)
-            # Filter to strings only (ignore the final result hashtable)
-            $stringLines = @($allOutput | Where-Object { $_ -is [string] })
-            $newCount = $stringLines.Count
-            if ($newCount -gt $lastLine[$n]) {
-                for ($li = $lastLine[$n]; $li -lt $newCount; $li++) {
-                    $line = $stringLines[$li]
-                    if ($line -ne $null) {
-                        $oemLogs[$n].Box.AppendText("$line`r`n")
-                        $oemLogs[$n].Box.ScrollToCaret()
+            # Read new lines from stream file since last poll
+            if (Test-Path $sf) {
+                try {
+                    $allLines = [System.IO.File]::ReadAllLines($sf)
+                    $newCount = $allLines.Count
+                    if ($newCount -gt $lastLine[$n]) {
+                        for ($li = $lastLine[$n]; $li -lt $newCount; $li++) {
+                            $line = $allLines[$li]
+                            if ($line -ne $null -and $line.Trim()) {
+                                $oemLogs[$n].Box.AppendText("$line`r`n")
+                                $oemLogs[$n].Box.ScrollToCaret()
+                            }
+                        }
+                        $lastLine[$n] = $newCount
                     }
-                }
-                $lastLine[$n] = $newCount
+                } catch {}  # file may be locked briefly during write
             }
 
             if (-not $done.ContainsKey($n) -and $j.State -in @("Completed","Failed","Stopped")) {
@@ -750,19 +731,21 @@ $form.Add_Shown({
     # -- Collect final results ------------------------------------------------
     foreach ($e in $jobs) {
         # Drain all remaining pipeline output into log boxes first
-        # Drain any final lines not yet shown
-        $remaining = @(Receive-Job $e.Job -Keep -EA SilentlyContinue)
-        $startIdx  = $lastLine[$e.OEM]
-        if ($remaining.Count -gt $startIdx) {
-            for ($ri = $startIdx; $ri -lt $remaining.Count; $ri++) {
-                $item = $remaining[$ri]
-                if ($item -is [string] -and $item.Trim()) {
-                    $oemLogs[$e.OEM].Box.AppendText("$item`r`n")
-                    $oemLogs[$e.OEM].Box.ScrollToCaret()
+        # Drain any final stream file lines not yet shown
+        if (Test-Path $e.StreamFile) {
+            try {
+                $finalLines = [System.IO.File]::ReadAllLines($e.StreamFile)
+                for ($li = $lastLine[$e.OEM]; $li -lt $finalLines.Count; $li++) {
+                    $line = $finalLines[$li]
+                    if ($line -ne $null -and $line.Trim()) {
+                        $oemLogs[$e.OEM].Box.AppendText("$line`r`n")
+                        $oemLogs[$e.OEM].Box.ScrollToCaret()
+                    }
                 }
-            }
+            } catch {}
+            Remove-Item $e.StreamFile -Force -EA SilentlyContinue
         }
-        # Now get the actual result - the last hashtable emitted by the job
+        # Get result from job pipeline (hashtable is the only thing there now)
         $allOutput = @(Receive-Job $e.Job -EA SilentlyContinue)
         $resultObj = $allOutput | Where-Object {
             $_ -is [System.Collections.Specialized.OrderedDictionary] -or $_ -is [hashtable]
