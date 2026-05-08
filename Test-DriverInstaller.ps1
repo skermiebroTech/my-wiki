@@ -1,6 +1,6 @@
 #Requires -RunAsAdministrator
 # =============================================================================
-# Test-DriverInstaller.ps1  v2.6.0
+# Test-DriverInstaller.ps1  v2.8.0
 # =============================================================================
 
 param(
@@ -12,7 +12,7 @@ param(
     [string]$LenovoMachineType = "20XX"
 )
 
-$ScriptVersion = "2.6.0"
+$ScriptVersion = "2.8.0"
 $RepoUrl       = "https://raw.githubusercontent.com/skermiebroTech/my-wiki/$Branch/Install-Drivers-auto-7z.ps1"
 $LogFile       = Join-Path ([Environment]::GetFolderPath("UserProfile")) `
                      ("Downloads\Test-DriverInstaller_" + (Get-Date -Format 'yyyyMMdd_HHmmss') + ".log")
@@ -581,10 +581,11 @@ $form.Add_Shown({
             param($al, $n, $dr, $ed, $lf, $ri, $sf)
 
             function JL { param([string]$m)
+                # JL is only used pre-process; after process starts, WriteStream is used
                 $ts = Get-Date -Format 'HH:mm:ss'
                 $line = "[$ts] $m"
-                Add-Content $lf   $line -Encoding UTF8
-                Add-Content $sf   $line -Encoding UTF8  # stream file — UI polls this
+                Add-Content $lf $line -Encoding UTF8  # pre-process, no lock conflict yet
+                Add-Content $sf $line -Encoding UTF8
                 $line
             }
 
@@ -606,21 +607,35 @@ $form.Add_Shown({
 
             $out = [System.Collections.Generic.List[string]]::new()
 
-            # Read every line and append to stream file immediately
+            # Open both files with shared access and AutoFlush — no lock contention
+            $sfStream  = [System.IO.File]::Open($sf, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read)
+            $sfWriter  = New-Object System.IO.StreamWriter($sfStream, [System.Text.Encoding]::UTF8)
+            $sfWriter.AutoFlush = $true
+
+            $lfStream  = [System.IO.File]::Open($lf, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read)
+            $lfWriter  = New-Object System.IO.StreamWriter($lfStream, [System.Text.Encoding]::UTF8)
+            $lfWriter.AutoFlush = $true
+
+            function WriteStream { param([string]$line)
+                $sfWriter.WriteLine($line)
+                $ts = Get-Date -Format 'HH:mm:ss'
+                $lfWriter.WriteLine("[$ts][$n] $line")
+            }
+
+            # Read every line and write to stream file immediately
             while (-not $proc.HasExited) {
                 if ($proc.StandardOutput.Peek() -ge 0) {
                     $l = $proc.StandardOutput.ReadLine()
                     if ($null -ne $l) {
                         $out.Add($l)
-                        Add-Content $sf $l -Encoding UTF8
-                        Add-Content $lf "[$([datetime]::Now.ToString('HH:mm:ss'))][$n] $l" -Encoding UTF8
+                        WriteStream $l
                     }
                 } else {
                     # Heartbeat every 700ms when no output
                     $elapsed = [int]((Get-Date) - $st).TotalSeconds
                     $fc = if (Test-Path $ed) { @(Get-ChildItem $ed -Recurse -File -EA SilentlyContinue).Count } else { 0 }
                     $pulse = "  ... [$n] ${elapsed}s$(if ($fc -gt 0) {" | $fc files"})"
-                    Add-Content $sf $pulse -Encoding UTF8
+                    WriteStream $pulse
                     Start-Sleep -Milliseconds 700
                 }
             }
@@ -628,16 +643,16 @@ $form.Add_Shown({
             $tail = $proc.StandardOutput.ReadToEnd()
             foreach ($l in ($tail -split "`n" | Where-Object { $_.Trim() })) {
                 $l = $l.TrimEnd("`r")
-                $out.Add($l)
-                Add-Content $sf $l -Encoding UTF8
-                Add-Content $lf "[$([datetime]::Now.ToString('HH:mm:ss'))][$n] $l" -Encoding UTF8
+                if ($l) { $out.Add($l); WriteStream $l }
             }
             $err = $proc.StandardError.ReadToEnd().Trim()
             if ($err) {
                 $errLine = "ERR: $err"
                 $out.Add($errLine)
-                Add-Content $sf $errLine -Encoding UTF8
+                WriteStream $errLine
             }
+            $sfWriter.Close(); $sfStream.Close()
+            $lfWriter.Close(); $lfStream.Close()
             Remove-Item $pidFile -Force -EA SilentlyContinue
 
             $exit = $proc.ExitCode
@@ -663,7 +678,8 @@ $form.Add_Shown({
             if (-not $sl -and -not $fl) { $notes.Add("Unclear outcome") }
 
             if (Test-Path $dr) { Remove-Item $dr -Recurse -Force -EA SilentlyContinue }
-            Add-Content $sf "=== END $n $(if ($ok) {'PASS'} else {'FAIL'}) ===" -Encoding UTF8
+            $sfWriter.WriteLine("=== END $n $(if ($ok) {'PASS'} else {'FAIL'}) ===")
+            $lfWriter.WriteLine("[$([datetime]::Now.ToString('HH:mm:ss'))][$n] END $n $(if ($ok) {'PASS'} else {'FAIL'})")
 
             [ordered]@{
                 OEM      = $n
@@ -697,7 +713,12 @@ $form.Add_Shown({
             # Read new lines from stream file since last poll
             if (Test-Path $sf) {
                 try {
-                    $allLines = [System.IO.File]::ReadAllLines($sf)
+                    # Open with FileShare.ReadWrite so we don't block the writer
+                    $fs     = [System.IO.File]::Open($sf, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+                    $reader = New-Object System.IO.StreamReader($fs)
+                    $allLines = [System.Collections.Generic.List[string]]::new()
+                    while (-not $reader.EndOfStream) { $allLines.Add($reader.ReadLine()) }
+                    $reader.Close(); $fs.Close()
                     $newCount = $allLines.Count
                     if ($newCount -gt $lastLine[$n]) {
                         for ($li = $lastLine[$n]; $li -lt $newCount; $li++) {
@@ -734,7 +755,11 @@ $form.Add_Shown({
         # Drain any final stream file lines not yet shown
         if (Test-Path $e.StreamFile) {
             try {
-                $finalLines = [System.IO.File]::ReadAllLines($e.StreamFile)
+                $fs2     = [System.IO.File]::Open($e.StreamFile, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+                $reader2 = New-Object System.IO.StreamReader($fs2)
+                $finalLines = [System.Collections.Generic.List[string]]::new()
+                while (-not $reader2.EndOfStream) { $finalLines.Add($reader2.ReadLine()) }
+                $reader2.Close(); $fs2.Close()
                 for ($li = $lastLine[$e.OEM]; $li -lt $finalLines.Count; $li++) {
                     $line = $finalLines[$li]
                     if ($line -ne $null -and $line.Trim()) {
