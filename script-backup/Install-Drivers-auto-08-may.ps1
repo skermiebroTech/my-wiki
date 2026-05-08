@@ -1,16 +1,16 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.5.0
+# Version: 1.4.9
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
 # Run from Win+R in audit mode:
 #   powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto.ps1 | iex"
 #
-# Supports: Dell, HP, Lenovo, Microsoft (Surface)
+# Supports: Dell, HP, Lenovo
 # =============================================================
 
-$ScriptVersion   = "1.5.0"
+$ScriptVersion   = "1.4.9"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -51,6 +51,7 @@ $form.FormBorderStyle = "FixedSingle"
 $form.MaximizeBox     = $false
 $form.BackColor       = [System.Drawing.Color]::FromArgb(245, 245, 245)
 
+# Title label
 $title           = New-Object System.Windows.Forms.Label
 $title.AutoSize  = $true
 $title.Font      = $FontTitleBold
@@ -60,6 +61,7 @@ $title.Text      = "Driver Installer"
 $title.UseCompatibleTextRendering = $false
 $form.Controls.Add($title)
 
+# Version label
 $versionLabel           = New-Object System.Windows.Forms.Label
 $versionLabel.AutoSize  = $true
 $versionLabel.Font      = $FontUISmall
@@ -69,6 +71,7 @@ $versionLabel.Location  = New-Object System.Drawing.Point(510, 20)
 $versionLabel.UseCompatibleTextRendering = $false
 $form.Controls.Add($versionLabel)
 
+# Status box
 $statusBox             = New-Object System.Windows.Forms.RichTextBox
 $statusBox.Multiline   = $true
 $statusBox.ScrollBars  = "Vertical"
@@ -184,6 +187,7 @@ $progress.Minimum  = 0
 $progress.Maximum  = 100
 $overallGroupBox.Controls.Add($progress)
 
+# Log path label
 $logLabel           = New-Object System.Windows.Forms.Label
 $logLabel.AutoSize  = $false
 $logLabel.Size      = New-Object System.Drawing.Size(536, 16)
@@ -207,6 +211,7 @@ $soundCheckbox.Location          = New-Object System.Drawing.Point(20, 490)
 $soundCheckbox.UseCompatibleTextRendering = $false
 $form.Controls.Add($soundCheckbox)
 
+# Install button
 $button            = New-Object System.Windows.Forms.Button
 $button.Text       = "Install Drivers"
 $button.Size       = New-Object System.Drawing.Size(155, 36)
@@ -218,6 +223,7 @@ $button.FlatStyle  = "Flat"
 $button.FlatAppearance.BorderSize = 0
 $form.Controls.Add($button)
 
+# Cancel button
 $cancelButton            = New-Object System.Windows.Forms.Button
 $cancelButton.Text       = "Cancel"
 $cancelButton.Size       = New-Object System.Drawing.Size(100, 36)
@@ -239,7 +245,9 @@ function Play-Sound {
         [string]$Event
     )
     if (-not $soundCheckbox.Checked) { return }
+
     $mediaDir = "$env:SystemRoot\Media"
+
     $wavCandidates = switch ($Event) {
         "Start"            { @("Windows Notify.wav", "Windows Notify System Generic.wav", "chimes.wav") }
         "DownloadComplete" { @("Windows Print complete.wav", "Windows Notify.wav", "chimes.wav") }
@@ -249,13 +257,19 @@ function Play-Sound {
         "Failure"          { @("Windows Critical Stop.wav", "Windows Foreground.wav", "chord.wav") }
         "Cancel"           { @("Windows Critical Stop.wav", "Windows Foreground.wav", "chord.wav") }
     }
+
     $wavFile = $null
     foreach ($candidate in $wavCandidates) {
         $path = Join-Path $mediaDir $candidate
         if (Test-Path $path) { $wavFile = $path; break }
     }
+
     if (-not $wavFile) { return }
-    try { $player = New-Object System.Media.SoundPlayer $wavFile; $player.Play() } catch {}
+
+    try {
+        $player = New-Object System.Media.SoundPlayer $wavFile
+        $player.Play()
+    } catch {}
 }
 
 # =========================
@@ -333,7 +347,11 @@ function Step-DlSpinner {
 function Stop-DlSpinner {
     param([bool]$Success = $true)
     $dlSpinnerLabel.Text      = if ($Success) { " ✓" } else { " ✗" }
-    $dlSpinnerLabel.ForeColor = if ($Success) { [System.Drawing.Color]::FromArgb(0, 100, 180) } else { [System.Drawing.Color]::FromArgb(200, 40, 40) }
+    $dlSpinnerLabel.ForeColor = if ($Success) {
+        [System.Drawing.Color]::FromArgb(0, 100, 180)
+    } else {
+        [System.Drawing.Color]::FromArgb(200, 40, 40)
+    }
     [System.Windows.Forms.Application]::DoEvents()
 }
 
@@ -345,7 +363,11 @@ function Step-ExSpinner {
 function Stop-ExSpinner {
     param([bool]$Success = $true)
     $exSpinnerLabel.Text      = if ($Success) { " ✓" } else { " ✗" }
-    $exSpinnerLabel.ForeColor = if ($Success) { [System.Drawing.Color]::FromArgb(0, 140, 80) } else { [System.Drawing.Color]::FromArgb(200, 40, 40) }
+    $exSpinnerLabel.ForeColor = if ($Success) {
+        [System.Drawing.Color]::FromArgb(0, 140, 80)
+    } else {
+        [System.Drawing.Color]::FromArgb(200, 40, 40)
+    }
     [System.Windows.Forms.Application]::DoEvents()
 }
 
@@ -357,7 +379,11 @@ function Step-OverallSpinner {
 function Stop-OverallSpinner {
     param([bool]$Success = $true)
     $overallSpinnerLabel.Text      = if ($Success) { " ✓" } else { " ✗" }
-    $overallSpinnerLabel.ForeColor = if ($Success) { [System.Drawing.Color]::FromArgb(80, 80, 80) } else { [System.Drawing.Color]::FromArgb(200, 40, 40) }
+    $overallSpinnerLabel.ForeColor = if ($Success) {
+        [System.Drawing.Color]::FromArgb(80, 80, 80)
+    } else {
+        [System.Drawing.Color]::FromArgb(200, 40, 40)
+    }
     [System.Windows.Forms.Application]::DoEvents()
 }
 
@@ -395,9 +421,19 @@ function Assert-Curl {
 
 # =========================
 # GOOGLE SHEETS ANALYTICS
+# Sends a single row to a Google Sheet via Apps Script webhook.
+# Fires after install completes (success, failure, or cancel).
+#
+# Columns written:
+#   Timestamp, Result, Manufacturer, Model, Serial Hash,
+#   OS Version, OS Build, INF Count, Download MB, Duration Sec, Script Version
+#
+# Uses curl.exe (already required by the script) so no extra dependencies.
+# Fails gracefully — errors are logged but never block the main flow.
 # =========================
 $SHEETS_WEBHOOK = "https://script.google.com/macros/s/AKfycbygEF0i6j_6rSstmfQ2sQPLn0KjkqxZwUwIRjyCsd911IP9kALucv2cImMFumGoUUs/exec"
 
+# Analytics state — populated during the run, read by Send-AnalyticsEvent
 $script:AnalyticsManufacturer = ""
 $script:AnalyticsModel        = ""
 $script:AnalyticsSerial       = ""
@@ -412,10 +448,14 @@ function Send-AnalyticsEvent {
         [ValidateSet("success","failure","cancelled")]
         [string]$Result
     )
+
     $durationSec = 0
     if ($script:AnalyticsStartTime) {
         $durationSec = [int]((Get-Date) - $script:AnalyticsStartTime).TotalSeconds
     }
+
+
+    # Build JSON payload — manual string build avoids ConvertTo-Json depth issues on PS 4/5
     $payload = @"
 {
   "result":         "$Result",
@@ -430,16 +470,21 @@ function Send-AnalyticsEvent {
   "script_version": "$ScriptVersion"
 }
 "@
+
     Log "Sending analytics (result=$Result, model=$($script:AnalyticsModel), infs=$($script:AnalyticsInfCount), dl=$($script:AnalyticsDownloadMB)MB, duration=${durationSec}s)..."
+
     try {
+        # Write payload WITHOUT BOM — required for valid JSON over HTTP
         $payloadFile = Join-Path $env:TEMP "analytics_payload_$(Get-Date -Format 'HHmmss').json"
         $utf8NoBom   = New-Object System.Text.UTF8Encoding $false
         [System.IO.File]::WriteAllText($payloadFile, $payload, $utf8NoBom)
+
         $curlArgs = "--silent --max-time 15 --connect-timeout 10 " +
                     "--location " +
                     "-H `"Content-Type: application/json`" " +
                     "--data `@`"$payloadFile`" " +
                     "`"$SHEETS_WEBHOOK`""
+
         $psi                        = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName               = "curl.exe"
         $psi.Arguments              = $curlArgs
@@ -453,7 +498,9 @@ function Send-AnalyticsEvent {
         $stdout = $proc.StandardOutput.ReadToEnd().Trim()
         $stderr = $proc.StandardError.ReadToEnd().Trim()
         $proc.WaitForExit()
+
         Remove-Item $payloadFile -EA SilentlyContinue
+
         if ($proc.ExitCode -ne 0) {
             Log "  Analytics warning: curl exit $($proc.ExitCode) — $stderr"
         } elseif ($stdout -eq "OK") {
@@ -474,6 +521,7 @@ function Invoke-CurlDownload {
         [string]$Url,
         [string]$OutFile
     )
+
     $fileName = [System.IO.Path]::GetFileName($OutFile)
     Log "Downloading: $fileName"
     Log "  URL: $Url"
@@ -514,6 +562,7 @@ function Invoke-CurlDownload {
         $speedMbps = [math]::Round(($sz - $prevSize) * 8 / 1MB / 0.7, 1)
         $prevSize  = $sz
         $speedStr  = if ($speedMbps -gt 0) { "  $speedMbps Mbps" } else { "" }
+
         if ($totalMB -gt 0) {
             $pct = [math]::Min([int](($sz / $totalBytes) * 100), 99)
             SetDownload -Pct $pct -Label "$mbDone MB / $totalMB MB  ($pct%)$speedStr"
@@ -522,7 +571,9 @@ function Invoke-CurlDownload {
             SetDownload -Pct 0 -Label "$mbDone MB received...$speedStr"
             Log "  $mbDone MB received$speedStr"
         }
+
         Step-AllSpinners
+
         if ($stall -gt 300) {
             Log "  WARNING: download stalled 3.5 min — aborting."
             $proc.Kill()
@@ -546,7 +597,12 @@ function Invoke-CurlDownload {
     }
 
     $finalMB = [math]::Round((Get-Item $OutFile).Length / 1MB, 1)
-    if ($finalMB -gt $script:AnalyticsDownloadMB) { $script:AnalyticsDownloadMB = $finalMB }
+
+    # Track download size for analytics (keep the largest file — the driver pack)
+    if ($finalMB -gt $script:AnalyticsDownloadMB) {
+        $script:AnalyticsDownloadMB = $finalMB
+    }
+
     Log "  Download complete: $finalMB MB"
     SetDownload -Pct 100 -Label "Complete — $finalMB MB"
     Stop-DlSpinner -Success $true
@@ -564,6 +620,7 @@ function Watch-Extraction {
         [int]$TotalFiles    = 0,
         [int]$StallLimitSec = 300
     )
+
     $stall     = 0
     $lastCount = 0
     $script:SpinnerIndex      = 0
@@ -576,15 +633,19 @@ function Watch-Extraction {
         $count = if (Test-Path $DestPath) {
             (Get-ChildItem $DestPath -Recurse -ErrorAction SilentlyContinue).Count
         } else { 0 }
+
         if ($count -gt $lastCount) { $stall = 0; $lastCount = $count } else { $stall++ }
+
         if ($TotalFiles -gt 0) {
             $remaining = [math]::Max($TotalFiles - $count, 0)
             SetExtract -Pct -1 -Label "$count / $TotalFiles files  ($remaining remaining)"
         } else {
             SetExtract -Pct -1 -Label "$count files extracted..."
         }
+
         Step-ExSpinner
         [System.Windows.Forms.Application]::DoEvents()
+
         if ($script:CancelRequested) {
             Log "  Extraction cancelled by user."
             try { $ExtractProc.Kill() } catch {}
@@ -596,10 +657,12 @@ function Watch-Extraction {
             break
         }
     }
+
     Start-Sleep -Seconds 2
     $finalCount = if (Test-Path $DestPath) {
         (Get-ChildItem $DestPath -Recurse -EA SilentlyContinue).Count
     } else { 0 }
+
     SetExtract -Pct 100 -Label "Done — $finalCount files extracted"
     Stop-ExSpinner      -Success $true
     Stop-OverallSpinner -Success $true
@@ -612,11 +675,13 @@ function Watch-Extraction {
 # =========================
 function Install-DriversFromPath {
     param([string]$BasePath)
+
     $infs = Get-ChildItem $BasePath -Recurse -Filter *.inf -ErrorAction SilentlyContinue
     if (-not $infs -or $infs.Count -eq 0) {
         Log "No INF files found under: $BasePath"
         return $false
     }
+
     $total = $infs.Count; $i = 0
     Log "Found $total INF file(s) — installing via pnputil..."
     $exGroupBox.Text     = "Install INFs"
@@ -627,7 +692,8 @@ function Install-DriversFromPath {
 
     foreach ($inf in $infs) {
         $i++
-        SetProgress (60 + [int](($i / $total) * 38))
+        $overallPct = 60 + [int](($i / $total) * 38)
+        SetProgress $overallPct
         $infPct    = [int](($i / $total) * 100)
         $remaining = $total - $i
         SetExtract -Pct $infPct -Label "$i / $total INFs  ($remaining remaining)  —  $($inf.Name)"
@@ -640,11 +706,15 @@ function Install-DriversFromPath {
         [System.Windows.Forms.Application]::DoEvents()
         if ($script:CancelRequested) {
             Log "INF installation cancelled at $i / $total"
+            # Record how many were installed before cancel
             $script:AnalyticsInfCount = $i
             break
         }
     }
+
+    # Record final INF count for analytics
     $script:AnalyticsInfCount = $i
+
     SetProgress 100
     SetExtract -Pct 100 -Label "All $total INFs installed."
     Stop-ExSpinner      -Success $true
@@ -665,9 +735,11 @@ function Start-PackExtraction {
         [ValidateSet("Dell","HP","Lenovo","")]
         [string]$Vendor = ""
     )
+
     if (-not (Test-Path $DestPath)) {
         New-Item -Path $DestPath -ItemType Directory -Force | Out-Null
     }
+
     $ext = [System.IO.Path]::GetExtension($PackFile).ToLower()
 
     switch ($ext) {
@@ -723,6 +795,7 @@ function Start-PackExtraction {
 
         default {
             Log "Extracting EXE pack (Vendor=$Vendor)..."
+
             $CountFiles = {
                 if (Test-Path $DestPath) {
                     (Get-ChildItem $DestPath -Recurse -EA SilentlyContinue).Count
@@ -746,7 +819,10 @@ function Start-PackExtraction {
                     Step-ExSpinner
                     Step-OverallSpinner
                     [System.Windows.Forms.Application]::DoEvents()
-                    if ($script:CancelRequested) { try { $proc.Kill() } catch {}; break }
+                    if ($script:CancelRequested) {
+                        try { $proc.Kill() } catch {}
+                        break
+                    }
                 }
                 Start-Sleep -Seconds 2
                 return (& $CountFiles)
@@ -779,8 +855,9 @@ function Start-PackExtraction {
             }
 
             $attempts = [System.Collections.Generic.List[object]]::new()
+
             switch ($Vendor) {
-                "Dell"   {
+                "Dell" {
                     $attempts.Add(@{ Label = "Dell (/s /e=dest)";           Action = { TrySync "/s /e=`"$DestPath`"" } })
                     $attempts.Add(@{ Label = "Lenovo (Inno /VERYSILENT)";   Action = { TrySync "/VERYSILENT /DIR=`"$DestPath`" /EXTRACT=YES" } })
                     $attempts.Add(@{ Label = "HP (/s /e /f dest)";          Action = { TryAsyncHP } })
@@ -790,12 +867,12 @@ function Start-PackExtraction {
                     $attempts.Add(@{ Label = "Dell (/s /e=dest)";           Action = { TrySync "/s /e=`"$DestPath`"" } })
                     $attempts.Add(@{ Label = "HP (/s /e /f dest)";          Action = { TryAsyncHP } })
                 }
-                "HP"     {
+                "HP" {
                     $attempts.Add(@{ Label = "HP (/s /e /f dest)";          Action = { TryAsyncHP } })
                     $attempts.Add(@{ Label = "Dell (/s /e=dest)";           Action = { TrySync "/s /e=`"$DestPath`"" } })
                     $attempts.Add(@{ Label = "Lenovo (Inno /VERYSILENT)";   Action = { TrySync "/VERYSILENT /DIR=`"$DestPath`" /EXTRACT=YES" } })
                 }
-                default  {
+                default {
                     $attempts.Add(@{ Label = "Dell (/s /e=dest)";           Action = { TrySync "/s /e=`"$DestPath`"" } })
                     $attempts.Add(@{ Label = "Lenovo (Inno /VERYSILENT)";   Action = { TrySync "/VERYSILENT /DIR=`"$DestPath`" /EXTRACT=YES" } })
                     $attempts.Add(@{ Label = "HP (/s /e /f dest)";          Action = { TryAsyncHP } })
@@ -852,7 +929,10 @@ function Start-DellDriverInstall {
         Log "Could not read Service Tag: $($_.Exception.Message)"
         return $false
     }
-    if (-not $serviceTag -or $serviceTag.Length -lt 4) { Log "Invalid Service Tag."; return $false }
+    if (-not $serviceTag -or $serviceTag.Length -lt 4) {
+        Log "Invalid Service Tag."
+        return $false
+    }
 
     $isWin11 = $false
     try {
@@ -908,23 +988,33 @@ function Start-DellDriverInstall {
         foreach ($modelNode in $pkg.SelectNodes(".//*[local-name()='Model']")) {
             $nameAttr = $modelNode.GetAttribute("name")
             foreach ($tok in $searchNames) {
-                if ($nameAttr -ieq $tok) { $modelMatched = $true; break }
+                if ($nameAttr -ieq $tok) {
+                    $modelMatched = $true; break
+                }
             }
             if ($modelMatched) { break }
         }
         if (-not $modelMatched) { continue }
 
-        $supportsWin11 = $false; $supportsWin10 = $false
+        $supportsWin11 = $false
+        $supportsWin10 = $false
         foreach ($osNode in $pkg.SelectNodes(".//*[local-name()='OperatingSystem']")) {
             $osDisp = ""
             try { $osDisp = $osNode.SelectSingleNode("*[local-name()='Display']").InnerText } catch {}
             if ($osDisp -match "(?i)windows 11") { $supportsWin11 = $true }
             if ($osDisp -match "(?i)windows 10") { $supportsWin10 = $true }
         }
+
         $pkgName = ""
         try { $pkgName = $pkg.SelectSingleNode("*[local-name()='Name']/*[local-name()='Display']").InnerText } catch {}
         $pkgPath = $pkg.GetAttribute("path")
-        $candidates += [PSCustomObject]@{ Path = $pkgPath; DisplayName = $pkgName; Win11 = $supportsWin11; Win10 = $supportsWin10 }
+
+        $candidates += [PSCustomObject]@{
+            Path        = $pkgPath
+            DisplayName = $pkgName
+            Win11       = $supportsWin11
+            Win10       = $supportsWin10
+        }
         Log "  Candidate: $pkgName  [W11=$supportsWin11 W10=$supportsWin10]"
     }
 
@@ -946,7 +1036,10 @@ function Start-DellDriverInstall {
 
     Log "Selected: $($chosen.DisplayName)"
     $packPath = $chosen.Path
-    if (-not $packPath) { Log "Driver pack entry has no path — unexpected catalog format."; return $false }
+    if (-not $packPath) {
+        Log "Driver pack entry has no path — unexpected catalog format."
+        return $false
+    }
 
     $packUrl  = "https://downloads.dell.com/$packPath"
     $packFile = Join-Path $DriverRoot ([System.IO.Path]::GetFileName($packPath))
@@ -954,9 +1047,14 @@ function Start-DellDriverInstall {
     Log "Pack URL:  $packUrl"
     SetProgress 25
 
-    if (-not (Test-Path $DriverRoot)) { New-Item -Path $DriverRoot -ItemType Directory -Force | Out-Null }
+    if (-not (Test-Path $DriverRoot)) {
+        New-Item -Path $DriverRoot -ItemType Directory -Force | Out-Null
+    }
     SetProgress 30
-    if (-not (Invoke-CurlDownload -Url $packUrl -OutFile $packFile)) { Log "Dell driver pack download failed."; return $false }
+    if (-not (Invoke-CurlDownload -Url $packUrl -OutFile $packFile)) {
+        Log "Dell driver pack download failed."
+        return $false
+    }
     if (Test-Cancelled) { return $false }
     SetProgress 55
 
@@ -964,6 +1062,7 @@ function Start-DellDriverInstall {
     Log "Extracting Dell pack..."
     Start-PackExtraction -PackFile $packFile -DestPath $extractPath -StallLimitSec 300 -Vendor "Dell"
     SetProgress 60
+
     return (Install-DriversFromPath -BasePath $extractPath)
 }
 
@@ -977,14 +1076,20 @@ function Start-HpDriverInstall {
     SetDownload -Pct 0 -Label "Waiting..."
     SetExtract  -Pct 0 -Label "Waiting..."
 
-    try { $script:AnalyticsSerial = (Get-CimInstance Win32_BIOS).SerialNumber.Trim() } catch {}
+    # Capture serial for analytics
+    try {
+        $script:AnalyticsSerial = (Get-CimInstance Win32_BIOS).SerialNumber.Trim()
+    } catch {}
 
-    $osBuild = $null; $isWin11 = $false
+    $osBuild = $null
+    $isWin11 = $false
     try {
         $osBuild = [int](Get-CimInstance Win32_OperatingSystem).BuildNumber
         $isWin11 = $osBuild -ge 22000
         Log "OS Build: $osBuild  ($(if ($isWin11) {'Win11'} else {'Win10'}))"
-    } catch { Log "Could not read OS build: $($_.Exception.Message)" }
+    } catch {
+        Log "Could not read OS build: $($_.Exception.Message)"
+    }
 
     $matrixUrl  = "https://ftp.hp.com/pub/caps-softpaq/cmit/HP_Driverpack_Matrix_x64.html"
     $matrixFile = Join-Path $env:TEMP "HP_DPMatrix.html"
@@ -1014,35 +1119,48 @@ function Start-HpDriverInstall {
     }
     Log "Search tokens: $($searchTokens -join ' | ')"
 
-    $packUrl = $null; $packSpNum = $null
-    $flat    = $matrixHtml -replace "`r`n|`r|`n", " " -replace "\s{2,}", " "
-    $rows    = [regex]::Matches($flat, '(?i)<tr[^>]*>(.*?)</tr>')
+    $packUrl   = $null
+    $packSpNum = $null
+    $flat      = $matrixHtml -replace "`r`n|`r|`n", " " -replace "\s{2,}", " "
+    $rows      = [regex]::Matches($flat, '(?i)<tr[^>]*>(.*?)</tr>')
 
     foreach ($row in $rows) {
         $rowHtml = $row.Groups[1].Value
         $cells   = [regex]::Matches($rowHtml, '(?i)<t[dh][^>]*>(.*?)</t[dh]>')
         if ($cells.Count -lt 2) { continue }
+
         $modelCell = [regex]::Replace($cells[0].Groups[1].Value, '<[^>]+>', ' ')
         $modelCell = [System.Net.WebUtility]::HtmlDecode($modelCell) -replace '\s+', ' '
+
         $matched = $false
         foreach ($tok in $searchTokens) {
             if ($modelCell -match [regex]::Escape($tok)) { $matched = $true; break }
         }
         if (-not $matched) { continue }
+
         Log "  Matched matrix row: $($modelCell.Trim() -replace '\s+',' ')"
+
         $allLinks = [regex]::Matches($rowHtml, '(?i)href="([^"]*sp\d+\.exe)"')
-        if ($allLinks.Count -eq 0) { Log "  Row matched but contains no .exe links — skipping."; continue }
+        if ($allLinks.Count -eq 0) {
+            Log "  Row matched but contains no .exe links — skipping."
+            continue
+        }
+
         $bestUrl = $allLinks[0].Groups[1].Value
         if (-not $bestUrl.StartsWith("http")) { $bestUrl = "https://ftp.hp.com$bestUrl" }
+
         if (-not $isWin11) {
             foreach ($lm in $allLinks) {
                 $href = $lm.Groups[1].Value
                 if (-not $href.StartsWith("http")) { $href = "https://ftp.hp.com$href" }
                 $aTag  = [regex]::Match($rowHtml, "(?i)<a[^>]+href=""[^""]*$([regex]::Escape([System.IO.Path]::GetFileName($href)))[^""]*""[^>]*>")
                 $title = if ($aTag.Success) { $aTag.Value } else { "" }
-                if ($title -eq "" -or $title -match "(?i)windows 10") { $bestUrl = $href; break }
+                if ($title -eq "" -or $title -match "(?i)windows 10") {
+                    $bestUrl = $href; break
+                }
             }
         }
+
         $packUrl   = $bestUrl
         $packSpNum = [regex]::Match($packUrl, '(?i)(sp\d+)\.exe').Groups[1].Value
         Log "  Selected SoftPaq: $packSpNum"
@@ -1051,6 +1169,7 @@ function Start-HpDriverInstall {
     }
 
     if (Test-Cancelled) { return $false }
+
     if (-not $packUrl) {
         Log "Model '$ModelName' not found in HP Driver Pack Matrix."
         Log "Opening HP Driver Pack Matrix for manual selection..."
@@ -1060,10 +1179,18 @@ function Start-HpDriverInstall {
 
     SetExtract  -Pct 40 -Label "Matrix OK — $packSpNum"
     SetProgress 25
-    if (-not (Test-Path $DriverRoot)) { New-Item -Path $DriverRoot -ItemType Directory -Force | Out-Null }
+
+    if (-not (Test-Path $DriverRoot)) {
+        New-Item -Path $DriverRoot -ItemType Directory -Force | Out-Null
+    }
+
     $packFile = Join-Path $DriverRoot "$packSpNum.exe"
     SetProgress 30
-    if (-not (Invoke-CurlDownload -Url $packUrl -OutFile $packFile)) { Log "HP driver pack download failed."; return $false }
+
+    if (-not (Invoke-CurlDownload -Url $packUrl -OutFile $packFile)) {
+        Log "HP driver pack download failed."
+        return $false
+    }
     if (Test-Cancelled) { return $false }
     SetProgress 55
 
@@ -1071,6 +1198,7 @@ function Start-HpDriverInstall {
     Log "Extracting HP SoftPaq..."
     Start-PackExtraction -PackFile $packFile -DestPath $extractPath -StallLimitSec 300 -Vendor "HP"
     SetProgress 60
+
     return (Install-DriversFromPath -BasePath $extractPath)
 }
 
@@ -1091,10 +1219,18 @@ function Start-LenovoDriverInstall {
             $machineType = $sku.Substring(0, 4).ToUpper()
             Log "Machine type: $sku  ->  prefix: $machineType"
         }
-    } catch { Log "Could not read machine type: $($_.Exception.Message)" }
-    if (-not $machineType) { Log "Cannot determine Lenovo machine type."; return $false }
+    } catch {
+        Log "Could not read machine type: $($_.Exception.Message)"
+    }
+    if (-not $machineType) {
+        Log "Cannot determine Lenovo machine type."
+        return $false
+    }
 
-    try { $script:AnalyticsSerial = (Get-CimInstance Win32_BIOS).SerialNumber.Trim() } catch {}
+    # Capture serial for analytics
+    try {
+        $script:AnalyticsSerial = (Get-CimInstance Win32_BIOS).SerialNumber.Trim()
+    } catch {}
 
     $winVer     = (Get-CimInstance Win32_OperatingSystem).Version
     $osAttr     = if ($winVer -match "^10\.0\.2") { "win11" } else { "win10" }
@@ -1117,7 +1253,10 @@ function Start-LenovoDriverInstall {
         $rawText  = [System.Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0xFEFF)
         [xml]$cat = $rawText
         Log "Catalog parsed OK."
-    } catch { Log "Failed to parse Lenovo catalog: $($_.Exception.Message)"; return $false }
+    } catch {
+        Log "Failed to parse Lenovo catalog: $($_.Exception.Message)"
+        return $false
+    }
     SetExtract -Pct 30 -Label "Catalog parsed"
     SetProgress 25
 
@@ -1130,7 +1269,11 @@ function Start-LenovoDriverInstall {
             $nodes = @($model.SCCM | Where-Object { $_.os -eq $os })
             if ($nodes.Count -gt 0) {
                 $url = ($nodes | Select-Object -Last 1)."#text"
-                if ($url -match "^https?://") { $packUrl = $url; Log "Driver pack URL [$os]: $packUrl"; break }
+                if ($url -match "^https?://") {
+                    $packUrl = $url
+                    Log "Driver pack URL [$os]: $packUrl"
+                    break
+                }
             }
         }
         break
@@ -1142,10 +1285,17 @@ function Start-LenovoDriverInstall {
         return $false
     }
     SetProgress 28
-    if (-not (Test-Path $DriverRoot)) { New-Item -Path $DriverRoot -ItemType Directory -Force | Out-Null }
+
+    if (-not (Test-Path $DriverRoot)) {
+        New-Item -Path $DriverRoot -ItemType Directory -Force | Out-Null
+    }
     $packFile = Join-Path $DriverRoot ([System.IO.Path]::GetFileName(([System.Uri]$packUrl).LocalPath))
     SetProgress 30
-    if (-not (Invoke-CurlDownload -Url $packUrl -OutFile $packFile)) { Log "Lenovo driver pack download failed."; return $false }
+
+    if (-not (Invoke-CurlDownload -Url $packUrl -OutFile $packFile)) {
+        Log "Lenovo driver pack download failed."
+        return $false
+    }
     if (Test-Cancelled) { return $false }
     SetProgress 55
 
@@ -1153,308 +1303,8 @@ function Start-LenovoDriverInstall {
     Log "Extracting Lenovo pack..."
     Start-PackExtraction -PackFile $packFile -DestPath $extractPath -StallLimitSec 300 -Vendor "Lenovo"
     SetProgress 60
+
     return (Install-DriversFromPath -BasePath $extractPath)
-}
-
-# =========================
-# MICROSOFT (SURFACE)
-#
-# No machine-readable catalog exists — uses a hardcoded lookup table
-# mapping WMI model names to Microsoft Download Center page IDs.
-#
-# Flow:
-#   1. Match WMI model to a Download Center page ID.
-#   2. Fetch the details page and scrape the direct .msi href from HTML.
-#   3. When multiple MSIs exist for different OS builds, pick the one
-#      whose embedded build number is <= the device OS build (per
-#      Microsoft's own documented guidance).
-#   4. Download the MSI, then run: msiexec /i <file> /quiet /norestart
-#      No extraction step — the MSI installs drivers directly.
-#   5. Analytics InfCount stays 0 (MSI-based install, no pnputil).
-#
-# To add new Surface models: add an entry to $SurfaceDownloadIds below.
-# Source: https://support.microsoft.com/en-us/surface/drivers-firmware/
-# =========================
-
-# WMI model substring -> Download Center page ID (ordered, longest match first)
-$SurfaceDownloadIds = [ordered]@{
-    # Surface Pro
-    "Surface Pro 12"                          = "108199"
-    "Surface Pro for Business (11th Edition)" = "108013"
-    "Surface Pro (11th Edition)"              = "106119"
-    "Surface Pro 10 with 5G"                  = "106292"
-    "Surface Pro 10"                          = "105947"
-    "Surface Pro 9 with 5G"                   = "105941"
-    "Surface Pro 9"                           = "104680"
-    "Surface Pro 8"                           = "103503"
-    "Surface Pro 7+"                          = "102633"
-    "Surface Pro 7"                           = "100419"
-    "Surface Pro 6"                           = "57514"
-    "Surface Pro with LTE"                    = "56278"
-    "Surface Pro (5th Gen)"                   = "55484"
-    "Surface Pro 5"                           = "55484"
-    "Surface Pro 4"                           = "49498"
-    "Surface Pro 3"                           = "38826"
-    "Surface Pro 2"                           = "49042"
-    # Surface Laptop
-    "Surface Laptop 7"                        = "106123"
-    "Surface Laptop 6"                        = "105950"
-    "Surface Laptop 5"                        = "104220"
-    "Surface Laptop 4"                        = "102924"
-    "Surface Laptop 3"                        = "100429"
-    "Surface Laptop 2"                        = "57515"
-    "Surface Laptop Studio 2"                 = "105386"
-    "Surface Laptop Studio"                   = "103505"
-    "Surface Laptop Go 3"                     = "105941"
-    "Surface Laptop Go 2"                     = "103739"
-    "Surface Laptop Go"                       = "101304"
-    # Surface Book
-    "Surface Book 3"                          = "101315"
-    "Surface Book 2"                          = "56261"
-    "Surface Book"                            = "49497"
-    # Surface Go
-    "Surface Go 4"                            = "105386"
-    "Surface Go 3"                            = "103504"
-    "Surface Go 2"                            = "101304"
-    "Surface Go"                              = "100145"
-    # Surface Studio
-    "Surface Studio 2+"                       = "104679"
-    "Surface Studio 2"                        = "57593"
-    "Surface Studio"                          = "54311"
-}
-
-function Start-MicrosoftSurfaceDriverInstall {
-    param([string]$DriverRoot, [string]$ModelName)
-
-    Log "=== MICROSOFT SURFACE: Starting automated driver install ==="
-    SetDownload -Pct 0 -Label "Waiting..."
-    SetExtract  -Pct 0 -Label "Waiting..."
-
-    try { $script:AnalyticsSerial = (Get-CimInstance Win32_BIOS).SerialNumber.Trim() } catch {}
-
-    $osBuild = 0
-    try {
-        $osBuild = [int](Get-CimInstance Win32_OperatingSystem).BuildNumber
-        Log "OS Build: $osBuild"
-    } catch { Log "Could not read OS build: $($_.Exception.Message)" }
-
-    # --------------------------------------------------
-    # Step 1: Match model to Download Center page ID
-    # --------------------------------------------------
-    $pageId = $null
-    foreach ($entry in $SurfaceDownloadIds.GetEnumerator()) {
-        if ($ModelName -match [regex]::Escape($entry.Key)) {
-            $pageId = $entry.Value
-            Log "Matched model '$($entry.Key)' -> Download Center ID: $pageId"
-            break
-        }
-    }
-    # Fuzzy fallback
-    if (-not $pageId) {
-        foreach ($entry in $SurfaceDownloadIds.GetEnumerator()) {
-            if ($ModelName -ilike "*$($entry.Key)*") {
-                $pageId = $entry.Value
-                Log "Fuzzy-matched '$($entry.Key)' -> Download Center ID: $pageId"
-                break
-            }
-        }
-    }
-
-    if (-not $pageId) {
-        Log "No Download Center entry found for: '$ModelName'"
-        Log "Note: Surface Pro X uses Windows Update only (ARM — no MSI available)."
-        Log "Opening Surface driver downloads page for manual selection..."
-        Start-Process "https://support.microsoft.com/en-us/surface/drivers-firmware/download-drivers-and-firmware-for-surface-pro"
-        return $false
-    }
-
-    # --------------------------------------------------
-    # Step 2: Fetch the Download Center page and scrape .msi link(s)
-    # --------------------------------------------------
-    $detailsUrl  = "https://www.microsoft.com/en-us/download/details.aspx?id=$pageId"
-    $detailsFile = Join-Path $env:TEMP "surface_dl_page_$pageId.html"
-    Remove-Item $detailsFile -EA SilentlyContinue
-
-    Log "Fetching download details page (ID=$pageId)..."
-    SetExtract -Pct 5 -Label "Fetching download page..."
-    SetProgress 15
-
-    $psi                        = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName               = "curl.exe"
-    $psi.Arguments              = "--silent --location --max-time 30 --connect-timeout 15 " +
-                                  "--user-agent `"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36`" " +
-                                  "--output `"$detailsFile`" `"$detailsUrl`""
-    $psi.UseShellExecute        = $false
-    $psi.CreateNoWindow         = $true
-    $psi.RedirectStandardError  = $true
-    $fetchProc                  = New-Object System.Diagnostics.Process
-    $fetchProc.StartInfo        = $psi
-    $fetchProc.Start() | Out-Null
-
-    $start = Get-Date
-    while (-not $fetchProc.HasExited) {
-        Start-Sleep -Milliseconds 400
-        Step-AllSpinners
-        if (((Get-Date) - $start).TotalSeconds -gt 35) {
-            Log "  Timeout fetching download page."
-            try { $fetchProc.Kill() } catch {}
-            break
-        }
-    }
-    $fetchProc.WaitForExit()
-
-    if (-not (Test-Path $detailsFile) -or (Get-Item $detailsFile).Length -lt 1000) {
-        Log "Failed to fetch download details page for ID=$pageId"
-        Log "Opening page manually: $detailsUrl"
-        Start-Process $detailsUrl
-        return $false
-    }
-    if (Test-Cancelled) { return $false }
-
-    Log "Parsing download page for MSI links..."
-    SetExtract -Pct 20 -Label "Parsing download page..."
-    $pageHtml = [System.IO.File]::ReadAllText($detailsFile)
-
-    # Primary: look for hrefs pointing directly to download.microsoft.com .msi files
-    $msiMatches = [regex]::Matches($pageHtml, 'href="(https://download\.microsoft\.com/[^"]+\.msi)"')
-    # Fallback: bare URL reference (no surrounding quotes)
-    if ($msiMatches.Count -eq 0) {
-        $msiMatches = [regex]::Matches($pageHtml, '(https://download\.microsoft\.com/[^\s"<>]+\.msi)')
-    }
-
-    if ($msiMatches.Count -eq 0) {
-        Log "No MSI links found on page ID=$pageId — page may require JavaScript."
-        Log "Opening page for manual download: $detailsUrl"
-        Start-Process $detailsUrl
-        return $false
-    }
-    Log "  Found $($msiMatches.Count) MSI link(s)."
-
-    # Deduplicate and parse embedded OS build from filename
-    # Convention: SurfaceModel_WinXX_BBBBB_version.msi  (BBBBB = 5-digit OS build)
-    $msiCandidates = [System.Collections.Generic.List[object]]::new()
-    $seen          = @{}
-    foreach ($m in $msiMatches) {
-        $url = $m.Groups[1].Value
-        if ($seen.ContainsKey($url)) { continue }
-        $seen[$url] = $true
-        $fileName   = [System.IO.Path]::GetFileName(([System.Uri]$url).LocalPath)
-        $buildMatch = [regex]::Match($fileName, '_Win\d+_(\d{5})_')
-        $msiOsBuild = if ($buildMatch.Success) { [int]$buildMatch.Groups[1].Value } else { 0 }
-        Log "  MSI: $fileName  (target build: $(if ($msiOsBuild -gt 0) { $msiOsBuild } else { 'unknown' }))"
-        $msiCandidates.Add([PSCustomObject]@{ Url = $url; FileName = $fileName; OsBuild = $msiOsBuild })
-    }
-
-    # --------------------------------------------------
-    # Step 3: Select best MSI for this device's OS build
-    # Rule: highest build number that is still <= device build.
-    # If none qualify, fall back to lowest available.
-    # --------------------------------------------------
-    $chosen = $null
-    if ($osBuild -gt 0) {
-        $eligible = $msiCandidates |
-            Where-Object { $_.OsBuild -gt 0 -and $_.OsBuild -le $osBuild } |
-            Sort-Object OsBuild -Descending
-        if ($eligible) {
-            $chosen = $eligible[0]
-            Log "Selected MSI (best build match): $($chosen.FileName)  [target=$($chosen.OsBuild) <= device=$osBuild]"
-        } else {
-            $chosen = $msiCandidates | Where-Object { $_.OsBuild -gt 0 } | Sort-Object OsBuild | Select-Object -First 1
-            if (-not $chosen) { $chosen = $msiCandidates[0] }
-            Log "No MSI at/below build $osBuild — using lowest available: $($chosen.FileName)"
-        }
-    } else {
-        $chosen = $msiCandidates[0]
-        Log "OS build unknown — using first MSI on page: $($chosen.FileName)"
-    }
-
-    Log "MSI URL: $($chosen.Url)"
-    SetExtract -Pct 40 -Label "MSI selected: $($chosen.FileName)"
-    SetProgress 25
-
-    # --------------------------------------------------
-    # Step 4: Download the MSI
-    # --------------------------------------------------
-    if (-not (Test-Path $DriverRoot)) { New-Item -Path $DriverRoot -ItemType Directory -Force | Out-Null }
-    $msiFile = Join-Path $DriverRoot $chosen.FileName
-    SetProgress 30
-
-    if (-not (Invoke-CurlDownload -Url $chosen.Url -OutFile $msiFile)) {
-        Log "Surface MSI download failed."
-        return $false
-    }
-    if (Test-Cancelled) { return $false }
-    SetProgress 55
-
-    # --------------------------------------------------
-    # Step 5: Install silently via msiexec
-    # Exit 0 = success, 3010 = success + reboot required
-    # --------------------------------------------------
-    Log "Installing Surface MSI: $($chosen.FileName)"
-    Log "  msiexec /i `"$msiFile`" /quiet /norestart"
-    $exGroupBox.Text     = "Install MSI"
-    $exSpinnerLabel.Text = " " + $SpinnerFrames[0]
-    $script:SpinnerIndex = 0
-    $exBar.Style                 = "Marquee"
-    $exBar.MarqueeAnimationSpeed = 30
-    SetExtract -Pct -1 -Label "Installing MSI — this may take several minutes..."
-
-    $psi                 = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName        = "msiexec.exe"
-    $psi.Arguments       = "/i `"$msiFile`" /quiet /norestart /l*v `"$DriverRoot\msiexec_install.log`""
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow  = $true
-    $msiProc             = New-Object System.Diagnostics.Process
-    $msiProc.StartInfo   = $psi
-    $msiProc.Start() | Out-Null
-
-    $elapsed = 0
-    while (-not $msiProc.HasExited) {
-        Start-Sleep -Milliseconds 700
-        $elapsed += 0.7
-        $mins = [int]($elapsed / 60)
-        $secs = [int]($elapsed % 60)
-        SetExtract -Pct -1 -Label "Installing MSI... ($mins`m $secs`s elapsed)"
-        Step-ExSpinner
-        Step-OverallSpinner
-        [System.Windows.Forms.Application]::DoEvents()
-
-        if ($script:CancelRequested) {
-            Log "  MSI install cancelled by user."
-            try { $msiProc.Kill() } catch {}
-            break
-        }
-        # Safety timeout: 30 minutes
-        if ($elapsed -gt 1800) {
-            Log "  WARNING: MSI install exceeded 30 minutes — aborting."
-            try { $msiProc.Kill() } catch {}
-            break
-        }
-    }
-
-    $exitCode   = $msiProc.ExitCode
-    $msiSuccess = ($exitCode -eq 0 -or $exitCode -eq 3010)
-    Log "  msiexec exit code: $exitCode"
-
-    if ($msiSuccess) {
-        $rebootNeeded = ($exitCode -eq 3010)
-        SetExtract -Pct 100 -Label "MSI installed $(if ($rebootNeeded) {'— reboot required'} else {'successfully'})"
-        Stop-ExSpinner      -Success $true
-        Stop-OverallSpinner -Success $true
-        Play-Sound -Event "ExtractComplete"
-        Log "  Surface MSI installation complete.$(if ($rebootNeeded) {' Reboot required.'})"
-        $script:AnalyticsInfCount = 0   # MSI install — pnputil not used
-        SetProgress 100
-        $exGroupBox.Text = "Install MSI"
-        return $true
-    } else {
-        SetExtract -Pct 0 -Label "MSI install failed (exit $exitCode)"
-        Stop-ExSpinner      -Success $false
-        Stop-OverallSpinner -Success $false
-        Play-Sound -Event "Failure"
-        Log "  MSI installation failed. See: $DriverRoot\msiexec_install.log"
-        return $false
-    }
 }
 
 # =========================
@@ -1607,7 +1457,9 @@ function Write-DeviceInfo {
                 Log "  DesignCapacity     : $($b.DesignCapacity) mWh"
                 Log "  FullChargeCapacity : $($b.FullChargeCapacity) mWh"
             }
-        } else { Log "  (no battery detected — desktop?)" }
+        } else {
+            Log "  (no battery detected — desktop?)"
+        }
     } catch { Log "  [Win32_Battery ERROR] $($_.Exception.Message)" }
 
     Log "-- PnP Devices (problem state / no driver) --"
@@ -1620,7 +1472,9 @@ function Write-DeviceInfo {
                 Log "  [ERR $($p.ConfigManagerErrorCode)] $($p.Name)"
                 Log "    DeviceID: $($p.DeviceID)"
             }
-        } else { Log "  (none — all PnP devices have drivers)" }
+        } else {
+            Log "  (none — all PnP devices have drivers)"
+        }
     } catch { Log "  [Win32_PnPEntity ERROR] $($_.Exception.Message)" }
 
     Log "-- pnputil driver store (first 20 OEM INFs) --"
@@ -1695,6 +1549,7 @@ function Start-Install {
     $manufacturer = $cs.Manufacturer.Trim()
     $model        = $cs.Model.Trim()
 
+    # Populate analytics state
     $script:AnalyticsManufacturer = $manufacturer
     $script:AnalyticsModel        = $model
     try {
@@ -1710,36 +1565,49 @@ function Start-Install {
     $title.Text = "Driver Installer - $model"
 
     Write-DeviceInfo
+
     SetProgress 5
 
     $driverRoot = "C:\DRIVERS"
     $success    = $false
 
     if ($manufacturer -match "Dell") {
-        if (-not (Assert-Curl)) { Send-AnalyticsEvent -Result "failure"; Set-ButtonIdle; return }
+        if (-not (Assert-Curl)) {
+            Send-AnalyticsEvent -Result "failure"
+            Set-ButtonIdle
+            return
+        }
         $success = Start-DellDriverInstall -DriverRoot $driverRoot -ModelName $model
     } elseif ($manufacturer -match "HP|Hewlett") {
-        if (-not (Assert-Curl)) { Send-AnalyticsEvent -Result "failure"; Set-ButtonIdle; return }
+        if (-not (Assert-Curl)) {
+            Send-AnalyticsEvent -Result "failure"
+            Set-ButtonIdle
+            return
+        }
         $success = Start-HpDriverInstall -DriverRoot $driverRoot -ModelName $model
     } elseif ($manufacturer -match "Lenovo") {
-        if (-not (Assert-Curl)) { Send-AnalyticsEvent -Result "failure"; Set-ButtonIdle; return }
+        if (-not (Assert-Curl)) {
+            Send-AnalyticsEvent -Result "failure"
+            Set-ButtonIdle
+            return
+        }
         $success = Start-LenovoDriverInstall -DriverRoot $driverRoot
-    } elseif ($manufacturer -match "Microsoft") {
-        if (-not (Assert-Curl)) { Send-AnalyticsEvent -Result "failure"; Set-ButtonIdle; return }
-        $success = Start-MicrosoftSurfaceDriverInstall -DriverRoot $driverRoot -ModelName $model
     } else {
         Log "Unsupported manufacturer: $manufacturer"
-        Log "Supported OEMs: Dell, HP, Lenovo, Microsoft (Surface)"
+        Log "Supported OEMs: Dell, HP, Lenovo"
         Send-AnalyticsEvent -Result "failure"
         [System.Windows.Forms.MessageBox]::Show(
-            "Manufacturer '$manufacturer' is not supported.`nSupported: Dell, HP, Lenovo, Microsoft (Surface)",
+            "Manufacturer '$manufacturer' is not supported.`nSupported: Dell, HP, Lenovo",
             "Unsupported Manufacturer", "OK", "Warning"
         )
         Set-ButtonIdle
         return
     }
 
-    if ($script:CancelRequested) { Send-AnalyticsEvent -Result "cancelled" }
+    # Check for cancel before deciding result
+    if ($script:CancelRequested) {
+        Send-AnalyticsEvent -Result "cancelled"
+    }
 
     Log "--------------------------------------------"
     if ($success) {
@@ -1756,7 +1624,9 @@ function Start-Install {
             try {
                 Remove-Item $driverRoot -Recurse -Force -ErrorAction Stop
                 Log "  $driverRoot removed."
-            } catch { Log "  WARNING: Could not remove $driverRoot — $($_.Exception.Message)" }
+            } catch {
+                Log "  WARNING: Could not remove $driverRoot — $($_.Exception.Message)"
+            }
         }
 
         $result = [System.Windows.Forms.MessageBox]::Show(
@@ -1766,7 +1636,9 @@ function Start-Install {
         if ($result -eq "Yes") { Restart-Computer -Force }
         else { Set-ButtonIdle }
     } else {
-        if (-not $script:CancelRequested) { Send-AnalyticsEvent -Result "failure" }
+        if (-not $script:CancelRequested) {
+            Send-AnalyticsEvent -Result "failure"
+        }
         SetDownload -Pct 0 -Label "Failed — see log"
         SetExtract  -Pct 0 -Label "Failed — see log"
         Stop-DlSpinner      -Success $false
