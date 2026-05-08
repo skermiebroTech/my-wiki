@@ -1,14 +1,28 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.5.4
+# Version: 1.5.6
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
-# Run from Win+R in audit mode:
+# Run from Win+R in audit mode (GUI):
 #   powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto.ps1 | iex"
+#
+# Run headlessly with arguments:
+#   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -Manufacturer Dell
+#   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -Manufacturer HP -Model "EliteBook x360 1030 G8 Notebook PC"
+#   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -Manufacturer Lenovo -MachineType 20XX -SkipInstall -SkipCleanup
+#
+# Parameters:
+#   -Manufacturer  Override WMI manufacturer detection (Dell, HP, Lenovo, Microsoft)
+#   -Model         Override WMI model detection
+#   -Headless      Skip GUI, write to console only (auto-set when any param is passed)
+#   -SkipInstall   Download and extract only, skip pnputil driver installation
+#   -SkipCleanup   Keep C:\DRIVERS after run for inspection
 #
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
 #
+# v1.5.6 - Added -MachineType param for Lenovo machine type override
+# v1.5.5 - Added headless/parameter mode for testing and automation
 # v1.5.4 - 7-Zip integration for Dell and HP extraction
 #   Dell: 7-Zip pass-1 replaces /s /e= (verified identical output, 1.1x faster)
 #   HP:   7-Zip pass-1 replaces /s /e /f (verified identical output, 4.7x faster)
@@ -16,7 +30,19 @@
 #   7-Zip is installed silently at start and removed before cleanup
 # =============================================================
 
-$ScriptVersion   = "1.5.4"
+param(
+    [string]$Manufacturer = "",
+    [string]$Model        = "",
+    [string]$MachineType  = "",   # Lenovo only: override 4-char machine type prefix (e.g. 20XX)
+    [switch]$Headless,
+    [switch]$SkipInstall,
+    [switch]$SkipCleanup
+)
+
+# Auto-enable headless when any override param is passed
+if ($Manufacturer -or $Model -or $MachineType -or $SkipInstall -or $SkipCleanup) { $Headless = $true }
+
+$ScriptVersion   = "1.5.6"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -274,6 +300,7 @@ function Play-Sound {
 # BUTTON STATE HELPERS
 # =========================
 function Set-ButtonRunning {
+    if ($script:Headless) { return }
     $button.Enabled         = $false
     $button.BackColor       = [System.Drawing.Color]::FromArgb(120, 120, 120)
     $cancelButton.Enabled   = $true
@@ -282,6 +309,7 @@ function Set-ButtonRunning {
 }
 
 function Set-ButtonIdle {
+    if ($script:Headless) { return }
     $button.Enabled         = $true
     $button.BackColor       = [System.Drawing.Color]::FromArgb(0, 120, 215)
     $cancelButton.Enabled   = $false
@@ -295,19 +323,25 @@ function Set-ButtonIdle {
 function Log($msg) {
     $ts   = Get-Date -Format 'HH:mm:ss'
     $line = "[$ts] $msg"
-    $statusBox.AppendText("$line`r`n")
-    $statusBox.ScrollToCaret()
+    if ($script:Headless) {
+        Write-Host $line
+    } else {
+        $statusBox.AppendText("$line`r`n")
+        $statusBox.ScrollToCaret()
+        [System.Windows.Forms.Application]::DoEvents()
+    }
     Add-Content -Path $LogFile -Value $line -Encoding UTF8
-    [System.Windows.Forms.Application]::DoEvents()
 }
 
 function SetProgress($val) {
+    if ($script:Headless) { return }
     $progress.Value = [math]::Min([math]::Max([int]$val, 0), 100)
     [System.Windows.Forms.Application]::DoEvents()
 }
 
 function SetDownload {
     param([int]$Pct, [string]$Label)
+    if ($script:Headless) { return }
     if ($Pct -ge 100) {
         $dlBar.Style = "Continuous"
         $dlBar.Value = 100
@@ -321,6 +355,7 @@ function SetDownload {
 
 function SetExtract {
     param([int]$Pct, [string]$Label)
+    if ($script:Headless) { return }
     if ($Pct -ge 100) {
         $exBar.Style = "Continuous"
         $exBar.Value = 100
@@ -338,11 +373,13 @@ function SetExtract {
 }
 
 function Step-DlSpinner {
+    if ($script:Headless) { return }
     $script:SpinnerIndex = ($script:SpinnerIndex + 1) % $SpinnerFrames.Count
     $dlSpinnerLabel.Text = " " + $SpinnerFrames[$script:SpinnerIndex]
     [System.Windows.Forms.Application]::DoEvents()
 }
 function Stop-DlSpinner {
+    if ($script:Headless) { return }
     param([bool]$Success = $true)
     $dlSpinnerLabel.Text      = if ($Success) { " ✓" } else { " ✗" }
     $dlSpinnerLabel.ForeColor = if ($Success) { [System.Drawing.Color]::FromArgb(0, 100, 180) } else { [System.Drawing.Color]::FromArgb(200, 40, 40) }
@@ -350,11 +387,13 @@ function Stop-DlSpinner {
 }
 
 function Step-ExSpinner {
+    if ($script:Headless) { return }
     $script:SpinnerIndex  = ($script:SpinnerIndex + 1) % $SpinnerFrames.Count
     $exSpinnerLabel.Text  = " " + $SpinnerFrames[$script:SpinnerIndex]
     [System.Windows.Forms.Application]::DoEvents()
 }
 function Stop-ExSpinner {
+    if ($script:Headless) { return }
     param([bool]$Success = $true)
     $exSpinnerLabel.Text      = if ($Success) { " ✓" } else { " ✗" }
     $exSpinnerLabel.ForeColor = if ($Success) { [System.Drawing.Color]::FromArgb(0, 140, 80) } else { [System.Drawing.Color]::FromArgb(200, 40, 40) }
@@ -362,11 +401,13 @@ function Stop-ExSpinner {
 }
 
 function Step-OverallSpinner {
+    if ($script:Headless) { return }
     $script:SpinnerIndex      = ($script:SpinnerIndex + 1) % $SpinnerFrames.Count
     $overallSpinnerLabel.Text = " " + $SpinnerFrames[$script:SpinnerIndex]
     [System.Windows.Forms.Application]::DoEvents()
 }
 function Stop-OverallSpinner {
+    if ($script:Headless) { return }
     param([bool]$Success = $true)
     $overallSpinnerLabel.Text      = if ($Success) { " ✓" } else { " ✗" }
     $overallSpinnerLabel.ForeColor = if ($Success) { [System.Drawing.Color]::FromArgb(80, 80, 80) } else { [System.Drawing.Color]::FromArgb(200, 40, 40) }
@@ -374,6 +415,7 @@ function Stop-OverallSpinner {
 }
 
 function Step-AllSpinners {
+    if ($script:Headless) { return }
     $script:SpinnerIndex      = ($script:SpinnerIndex + 1) % $SpinnerFrames.Count
     $f                        = $SpinnerFrames[$script:SpinnerIndex]
     $dlSpinnerLabel.Text      = " " + $f
@@ -719,7 +761,17 @@ function Install-DriversFromPath {
         return $false
     }
     $total = $infs.Count; $i = 0
-    Log "Found $total INF file(s) — installing via pnputil..."
+    Log "Found $total INF file(s)."
+    if ($SkipInstall) {
+        Log "  SkipInstall flag set — skipping pnputil. Extraction verified OK."
+        $script:AnalyticsInfCount = 0
+        SetProgress 100
+        SetExtract -Pct 100 -Label "Extract complete ($total INFs found, install skipped)"
+        Stop-ExSpinner      -Success $true
+        Stop-OverallSpinner -Success $true
+        return $true
+    }
+    Log "Installing via pnputil..."
     $exGroupBox.Text     = "Install INFs"
     $exSpinnerLabel.Text = " " + $SpinnerFrames[0]
     $script:SpinnerIndex = 0
@@ -1238,13 +1290,19 @@ function Start-LenovoDriverInstall {
     SetExtract  -Pct 0 -Label "Waiting..."
 
     $machineType = $null
-    try {
-        $sku = (Get-CimInstance Win32_ComputerSystemProduct).Name.Trim()
-        if ($sku.Length -ge 4) {
-            $machineType = $sku.Substring(0, 4).ToUpper()
-            Log "Machine type: $sku  ->  prefix: $machineType"
-        }
-    } catch { Log "Could not read machine type: $($_.Exception.Message)" }
+    if ($MachineType) {
+        # Use override from -MachineType param — take first 4 chars uppercased
+        $machineType = $MachineType.Substring(0, [math]::Min(4, $MachineType.Length)).ToUpper()
+        Log "Machine type: $MachineType  ->  prefix: $machineType  [overridden via param]"
+    } else {
+        try {
+            $sku = (Get-CimInstance Win32_ComputerSystemProduct).Name.Trim()
+            if ($sku.Length -ge 4) {
+                $machineType = $sku.Substring(0, 4).ToUpper()
+                Log "Machine type: $sku  ->  prefix: $machineType"
+            }
+        } catch { Log "Could not read machine type: $($_.Exception.Message)" }
+    }
     if (-not $machineType) { Log "Cannot determine Lenovo machine type."; return $false }
 
     try { $script:AnalyticsSerial = (Get-CimInstance Win32_BIOS).SerialNumber.Trim() } catch {}
@@ -1793,6 +1851,7 @@ function Start-Install {
     $script:AnalyticsMissingAfter    = -1
     $script:AnalyticsStartTime       = Get-Date
     $script:7zInstalled              = $false
+    $script:Headless                 = [bool]$Headless
 
     Set-ButtonRunning
     SetProgress 0
@@ -1807,6 +1866,10 @@ function Start-Install {
     $id  = [Security.Principal.WindowsIdentity]::GetCurrent()
     $pri = New-Object Security.Principal.WindowsPrincipal($id)
     if (-not $pri.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        if ($script:Headless) {
+            Write-Error "ERROR: Script must be run as Administrator."
+            exit 1
+        }
         Log "Not running as admin — re-launching elevated..."
         Start-Process powershell `
             "-WindowStyle Hidden -ExecutionPolicy Bypass -Command `"irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto.ps1 | iex`"" `
@@ -1821,9 +1884,11 @@ function Start-Install {
 
     Play-Sound -Event "Start"
 
-    $cs           = Get-CimInstance Win32_ComputerSystem
-    $manufacturer = $cs.Manufacturer.Trim()
-    $model        = $cs.Model.Trim()
+    $cs = Get-CimInstance Win32_ComputerSystem
+
+    # Use param overrides if provided, otherwise read from WMI
+    $manufacturer = if ($Manufacturer) { $Manufacturer } else { $cs.Manufacturer.Trim() }
+    $model        = if ($Model)        { $Model }        else { $cs.Model.Trim() }
 
     $script:AnalyticsManufacturer = $manufacturer
     $script:AnalyticsModel        = $model
@@ -1833,11 +1898,14 @@ function Start-Install {
         $script:AnalyticsOsBuild   = [int]$osObj.BuildNumber
     } catch {}
 
-    try { [System.Windows.Forms.Clipboard]::SetText($model) } catch {}
+    if (-not $script:Headless) {
+        try { [System.Windows.Forms.Clipboard]::SetText($model) } catch {}
+        $title.Text = "Driver Installer - $model"
+    }
 
-    Log "Manufacturer : $manufacturer"
-    Log "Model        : $model  (copied to clipboard)"
-    $title.Text = "Driver Installer - $model"
+    $overrideNote = if ($Manufacturer -or $Model) { "  [OVERRIDDEN via param]" } else { "  (from WMI)" }
+    Log "Manufacturer : $manufacturer$overrideNote"
+    Log "Model        : $model$overrideNote"
 
     Write-DeviceInfo
     SetProgress 5
@@ -1874,10 +1942,15 @@ function Start-Install {
         Log "Unsupported manufacturer: $manufacturer"
         Log "Supported OEMs: Dell, HP, Lenovo, Microsoft (Surface)"
         Send-AnalyticsEvent -Result "failure"
-        [System.Windows.Forms.MessageBox]::Show(
-            "Manufacturer '$manufacturer' is not supported.`nSupported: Dell, HP, Lenovo, Microsoft (Surface)",
-            "Unsupported Manufacturer", "OK", "Warning"
-        )
+        if ($script:Headless) {
+            Write-Host "UNSUPPORTED: Manufacturer '$manufacturer' is not supported."
+            Write-Host "Supported: Dell, HP, Lenovo, Microsoft (Surface)"
+        } else {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Manufacturer '$manufacturer' is not supported.`nSupported: Dell, HP, Lenovo, Microsoft (Surface)",
+                "Unsupported Manufacturer", "OK", "Warning"
+            )
+        }
         # Remove 7-Zip before returning on unsupported manufacturer
         if ($script:7zInstalled) { Remove-7Zip }
         Set-ButtonIdle
@@ -1907,7 +1980,9 @@ function Start-Install {
         Send-AnalyticsEvent -Result "success"
         Play-Sound -Event "Success"
 
-        if (Test-Path $driverRoot) {
+        if ($SkipCleanup) {
+            Log "SkipCleanup flag set — keeping $driverRoot for inspection."
+        } elseif (Test-Path $driverRoot) {
             Log "Cleaning up $driverRoot..."
             try {
                 Remove-Item $driverRoot -Recurse -Force -ErrorAction Stop
@@ -1919,12 +1994,17 @@ function Start-Install {
             "`n`nMissing drivers:  $($script:AnalyticsMissingBefore) -> $($script:AnalyticsMissingAfter)  ($missingDelta resolved)"
         } else { "" }
 
-        $result = [System.Windows.Forms.MessageBox]::Show(
-            "Drivers installed successfully for:`n$model$missingLine`n`nReboot now to complete installation?",
-            "Installation Complete", "YesNo", "Information"
-        )
-        if ($result -eq "Yes") { Restart-Computer -Force }
-        else { Set-ButtonIdle }
+        if ($script:Headless) {
+            Write-Host "SUCCESS: Drivers installed for $model.$missingLine"
+            Write-Host "Run complete. Reboot when ready."
+        } else {
+            $result = [System.Windows.Forms.MessageBox]::Show(
+                "Drivers installed successfully for:`n$model$missingLine`n`nReboot now to complete installation?",
+                "Installation Complete", "YesNo", "Information"
+            )
+            if ($result -eq "Yes") { Restart-Computer -Force }
+            else { Set-ButtonIdle }
+        }
     } else {
         if (-not $script:CancelRequested) { Send-AnalyticsEvent -Result "failure" }
         SetDownload -Pct 0 -Label "Failed — see log"
@@ -1934,35 +2014,45 @@ function Start-Install {
         Stop-OverallSpinner -Success $false
         Play-Sound -Event "Failure"
         Log "Driver installation did not complete. Check log: $LogFile"
-        [System.Windows.Forms.MessageBox]::Show(
-            "Driver installation failed or no pack was found.`nCheck the log:`n`n$LogFile",
-            "Installation Failed", "OK", "Error"
-        )
-        Set-ButtonIdle
+        if ($script:Headless) {
+            Write-Host "FAILED: Driver installation did not complete. Check log: $LogFile"
+        } else {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Driver installation failed or no pack was found.`nCheck the log:`n`n$LogFile",
+                "Installation Failed", "OK", "Error"
+            )
+            Set-ButtonIdle
+        }
     }
 }
 
 # =========================
 # WIRE UP + LAUNCH
 # =========================
-$button.Add_Click({ Start-Install })
-
-$cancelButton.Add_Click({
-    if ($cancelButton.Enabled) {
-        $script:CancelRequested = $true
-        Log "--- Cancel requested by user ---"
-        Play-Sound -Event "Cancel"
-        $cancelButton.Enabled   = $false
-        $cancelButton.BackColor = [System.Drawing.Color]::FromArgb(160, 160, 160)
-        [System.Windows.Forms.Application]::DoEvents()
-    }
-})
-
-$form.Add_Shown({
-    $form.Activate()
-    Start-Sleep -Milliseconds 300
-    Log "Running startup checks..."
+if ($Headless) {
+    # Headless mode — run directly, no GUI
     Start-Install
-})
+} else {
+    # GUI mode — wire up form and show
+    $button.Add_Click({ Start-Install })
 
-[void]$form.ShowDialog()
+    $cancelButton.Add_Click({
+        if ($cancelButton.Enabled) {
+            $script:CancelRequested = $true
+            Log "--- Cancel requested by user ---"
+            Play-Sound -Event "Cancel"
+            $cancelButton.Enabled   = $false
+            $cancelButton.BackColor = [System.Drawing.Color]::FromArgb(160, 160, 160)
+            [System.Windows.Forms.Application]::DoEvents()
+        }
+    })
+
+    $form.Add_Shown({
+        $form.Activate()
+        Start-Sleep -Milliseconds 300
+        Log "Running startup checks..."
+        Start-Install
+    })
+
+    [void]$form.ShowDialog()
+}
