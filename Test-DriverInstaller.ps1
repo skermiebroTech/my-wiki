@@ -1,6 +1,6 @@
 #Requires -RunAsAdministrator
 # =============================================================================
-# Test-DriverInstaller.ps1  v2.8.0
+# Test-DriverInstaller.ps1  v2.9.0
 # =============================================================================
 
 param(
@@ -12,7 +12,7 @@ param(
     [string]$LenovoMachineType = "20XX"
 )
 
-$ScriptVersion = "2.8.0"
+$ScriptVersion = "2.9.0"
 $RepoUrl       = "https://raw.githubusercontent.com/skermiebroTech/my-wiki/$Branch/Install-Drivers-auto-7z.ps1"
 $LogFile       = Join-Path ([Environment]::GetFolderPath("UserProfile")) `
                      ("Downloads\Test-DriverInstaller_" + (Get-Date -Format 'yyyyMMdd_HHmmss') + ".log")
@@ -622,29 +622,27 @@ $form.Add_Shown({
                 $lfWriter.WriteLine("[$ts][$n] $line")
             }
 
-            # Read every line and write to stream file immediately
-            while (-not $proc.HasExited) {
-                if ($proc.StandardOutput.Peek() -ge 0) {
-                    $l = $proc.StandardOutput.ReadLine()
-                    if ($null -ne $l) {
-                        $out.Add($l)
-                        WriteStream $l
-                    }
-                } else {
-                    # Heartbeat every 700ms when no output
-                    $elapsed = [int]((Get-Date) - $st).TotalSeconds
-                    $fc = if (Test-Path $ed) { @(Get-ChildItem $ed -Recurse -File -EA SilentlyContinue).Count } else { 0 }
-                    $pulse = "  ... [$n] ${elapsed}s$(if ($fc -gt 0) {" | $fc files"})"
-                    WriteStream $pulse
-                    Start-Sleep -Milliseconds 700
+            # Read lines on a background thread so ReadLine() blocking
+            # doesn't prevent the heartbeat from firing.
+            # OutputDataReceived event + BeginOutputReadLine is the reliable cross-platform approach.
+            $proc.add_OutputDataReceived({
+                param($sender, $e)
+                if ($null -ne $e.Data) {
+                    $out.Add($e.Data)
+                    WriteStream $e.Data
                 }
+            })
+            $proc.BeginOutputReadLine()
+
+            # Heartbeat loop — fires every 700ms while process runs
+            while (-not $proc.HasExited) {
+                Start-Sleep -Milliseconds 700
+                $elapsed = [int]((Get-Date) - $st).TotalSeconds
+                $fc = if (Test-Path $ed) { @(Get-ChildItem $ed -Recurse -File -EA SilentlyContinue).Count } else { 0 }
+                $pulse = "  ... [$n] ${elapsed}s$(if ($fc -gt 0) {" | $fc files"})"
+                WriteStream $pulse
             }
-            # Drain remainder
-            $tail = $proc.StandardOutput.ReadToEnd()
-            foreach ($l in ($tail -split "`n" | Where-Object { $_.Trim() })) {
-                $l = $l.TrimEnd("`r")
-                if ($l) { $out.Add($l); WriteStream $l }
-            }
+            $proc.WaitForExit()
             $err = $proc.StandardError.ReadToEnd().Trim()
             if ($err) {
                 $errLine = "ERR: $err"
