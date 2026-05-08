@@ -1,6 +1,6 @@
 #Requires -RunAsAdministrator
 # =============================================================================
-# Test-DriverInstaller.ps1  v2.4.0
+# Test-DriverInstaller.ps1  v2.5.0
 # =============================================================================
 
 param(
@@ -12,7 +12,7 @@ param(
     [string]$LenovoMachineType = "20XX"
 )
 
-$ScriptVersion = "2.4.0"
+$ScriptVersion = "2.5.0"
 $RepoUrl       = "https://raw.githubusercontent.com/skermiebroTech/my-wiki/$Branch/Install-Drivers-auto-7z.ps1"
 $LogFile       = Join-Path ([Environment]::GetFolderPath("UserProfile")) `
                      ("Downloads\Test-DriverInstaller_" + (Get-Date -Format 'yyyyMMdd_HHmmss') + ".log")
@@ -552,6 +552,9 @@ $form.Add_Shown({
         $driverRoot = "C:\DRIVERS\$oemName"
         $extractDir = "$driverRoot\$($oemName)_Extracted"
 
+        # Unique log file per OEM so parallel instances don't collide
+        $oemLogFile = Join-Path ([Environment]::GetFolderPath("UserProfile")) `
+                          ("Downloads\DriverInstaller_${oemName}_" + (Get-Date -Format 'yyyyMMdd_HHmmss') + ".log")
         $al  = "-ExecutionPolicy Bypass -File `"$ScriptCache`""
         $al += " -Manufacturer `"$($cfg.Manufacturer)`""
         if ($cfg.Model)       { $al += " -Model `"$($cfg.Model)`"" }
@@ -559,6 +562,8 @@ $form.Add_Shown({
         $al += " -DriverRoot `"$driverRoot`" -SkipCleanup"
         if (-not $RunInstall) { $al += " -SkipInstall" }
 
+        # Stagger launches by 1.1s so log filenames don't collide (timestamp-based)
+        if ($jobs.Count -gt 0) { Start-Sleep -Milliseconds 1100 }
         Set-OEMStatus -OEM $oemName -Status "RUNNING"
         UILog "[$oemName] Launching job..." -OEM $oemName
 
@@ -702,23 +707,28 @@ $form.Add_Shown({
     $lastLine = @{}
     foreach ($n in $OEMOrder) { $lastLine[$n] = 0 }
 
+    # Poll every 300ms for snappy live updates
     while ($done.Count -lt $jobs.Count) {
         foreach ($e in $jobs) {
             $n = $e.OEM; $j = $e.Job
             $sec = [int]((Get-Date) - $e.Start).TotalSeconds
             $oemPanels[$n].Stats["Sec"].Text = "$sec"
 
-            # Stream all new output lines from the job unfiltered
-            $newLines = Receive-Job $j -Keep -EA SilentlyContinue
-            if ($newLines) {
-                $allLines = @($newLines | Where-Object { $_ -is [string] })
-                $start    = $lastLine[$n]
-                for ($li = $start; $li -lt $allLines.Count; $li++) {
-                    $line = $allLines[$li].ToString()
-                    $oemLogs[$n].Box.AppendText("$line`r`n")
-                    $oemLogs[$n].Box.ScrollToCaret()
+            # Receive-Job -Keep returns ALL pipeline output so far each call.
+            # We track how many lines we've already shown with $lastLine.
+            $allOutput = @(Receive-Job $j -Keep -EA SilentlyContinue)
+            # Filter to strings only (ignore the final result hashtable)
+            $stringLines = @($allOutput | Where-Object { $_ -is [string] })
+            $newCount = $stringLines.Count
+            if ($newCount -gt $lastLine[$n]) {
+                for ($li = $lastLine[$n]; $li -lt $newCount; $li++) {
+                    $line = $stringLines[$li]
+                    if ($line -ne $null) {
+                        $oemLogs[$n].Box.AppendText("$line`r`n")
+                        $oemLogs[$n].Box.ScrollToCaret()
+                    }
                 }
-                $lastLine[$n] = $allLines.Count
+                $lastLine[$n] = $newCount
             }
 
             if (-not $done.ContainsKey($n) -and $j.State -in @("Completed","Failed","Stopped")) {
@@ -734,7 +744,7 @@ $form.Add_Shown({
         }
         [System.Windows.Forms.Application]::DoEvents()
         if ($script:KillRequested) { break }
-        if ($done.Count -lt $jobs.Count) { Start-Sleep -Milliseconds 600 }
+        if ($done.Count -lt $jobs.Count) { Start-Sleep -Milliseconds 300 }
     }
 
     # -- Collect final results ------------------------------------------------
