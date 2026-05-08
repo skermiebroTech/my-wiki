@@ -1,6 +1,6 @@
 #Requires -RunAsAdministrator
 # =============================================================================
-# Test-DriverInstaller.ps1  v3.0.0
+# Test-DriverInstaller.ps1  v3.1.0
 # =============================================================================
 
 param(
@@ -12,7 +12,7 @@ param(
     [string]$LenovoMachineType = "20XX"
 )
 
-$ScriptVersion = "3.0.0"
+$ScriptVersion = "3.1.0"
 $RepoUrl       = "https://raw.githubusercontent.com/skermiebroTech/my-wiki/$Branch/Install-Drivers-auto-7z.ps1"
 $LogFile       = Join-Path ([Environment]::GetFolderPath("UserProfile")) `
                      ("Downloads\Test-DriverInstaller_" + (Get-Date -Format 'yyyyMMdd_HHmmss') + ".log")
@@ -501,7 +501,8 @@ $killBtn.Add_Click({
     foreach ($n in $OEMOrder) {
         $dr = "C:\DRIVERS\$n"
         if (Test-Path $dr) { Remove-Item $dr -Recurse -Force -EA SilentlyContinue }
-        Remove-Item "$env:TEMP\driver_stream_$n.txt" -Force -EA SilentlyContinue
+        Remove-Item "$env:TEMP\driver_stream_$n.txt"  -Force -EA SilentlyContinue
+        Remove-Item "$env:TEMP\driver_result_$n.json" -Force -EA SilentlyContinue
     }
     Remove-Item $ScriptCache -Force -EA SilentlyContinue
     $ticker.Stop()
@@ -692,15 +693,11 @@ $form.Add_Shown({
 
             if (Test-Path $dr) { Remove-Item $dr -Recurse -Force -EA SilentlyContinue }
 
-            [ordered]@{
-                OEM      = $n
-                Status   = if ($ok) { "PASS" } else { "FAIL" }
-                Duration = $dur
-                Files    = $fc
-                INFs     = $ic
-                Notes    = ($notes -join "; ")
-                Output   = ($out -join "`n")
-            }
+            # Write result to JSON file — pipeline is unreliable with threaded jobs
+            $status = if ($ok) { "PASS" } else { "FAIL" }
+            $resultJson = "{`"OEM`":`"$n`",`"Status`":`"$status`",`"Duration`":$dur,`"Files`":$fc,`"INFs`":$ic,`"Notes`":`"$($notes -join '; ' -replace '"','"')`"}"
+            $rf = "$env:TEMP\driver_result_$n.json"
+            [System.IO.File]::WriteAllText($rf, $resultJson, [System.Text.Encoding]::UTF8)
         } -ArgumentList $jAl, $jN, $jDr, $jEd, $jLf, $jRi, $jStreamFile
 
         $jobs.Add([ordered]@{ OEM = $oemName; Job = $job; Start = (Get-Date); StreamFile = $jStreamFile })
@@ -781,13 +778,27 @@ $form.Add_Shown({
             } catch {}
             Remove-Item $e.StreamFile -Force -EA SilentlyContinue
         }
-        # Get result from job pipeline (hashtable is the only thing there now)
-        $allOutput = @(Receive-Job $e.Job -EA SilentlyContinue)
-        $resultObj = $allOutput | Where-Object {
-            $_ -is [System.Collections.Specialized.OrderedDictionary] -or $_ -is [hashtable]
-        } | Select-Object -Last 1
+        # Read result from JSON file written by job (pipeline unreliable with threads)
+        $resultObj = $null
+        $rf = "$env:TEMP\driver_result_$($e.OEM).json"
+        if (Test-Path $rf) {
+            try {
+                $json = [System.IO.File]::ReadAllText($rf)
+                # Parse manually — no ConvertFrom-Json needed
+                $resultObj = [ordered]@{
+                    OEM      = [regex]::Match($json, '"OEM"\s*:\s*"([^"]*)"').Groups[1].Value
+                    Status   = [regex]::Match($json, '"Status"\s*:\s*"([^"]*)"').Groups[1].Value
+                    Duration = [double]([regex]::Match($json, '"Duration"\s*:\s*([\d.]+)').Groups[1].Value)
+                    Files    = [int]([regex]::Match($json, '"Files"\s*:\s*(\d+)').Groups[1].Value)
+                    INFs     = [int]([regex]::Match($json, '"INFs"\s*:\s*(\d+)').Groups[1].Value)
+                    Notes    = [regex]::Match($json, '"Notes"\s*:\s*"([^"]*)"').Groups[1].Value
+                }
+                Remove-Item $rf -Force -EA SilentlyContinue
+            } catch { $resultObj = $null }
+        }
+        Receive-Job $e.Job -EA SilentlyContinue | Out-Null  # drain pipeline
         if (-not $resultObj) {
-            $resultObj = [ordered]@{ OEM=$e.OEM; Status="FAIL"; Duration=0; Files=0; INFs=0; Notes="No result" }
+            $resultObj = [ordered]@{ OEM=$e.OEM; Status="FAIL"; Duration=0; Files=0; INFs=0; Notes="No result - job may have crashed" }
         }
         $results.Add($resultObj)
         Set-OEMStatus -OEM $resultObj.OEM -Status $resultObj.Status
