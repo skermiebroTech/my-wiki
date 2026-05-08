@@ -1,6 +1,6 @@
 #Requires -RunAsAdministrator
 # =============================================================================
-# Test-DriverInstaller.ps1  v2.1.0
+# Test-DriverInstaller.ps1  v2.2.0
 # =============================================================================
 
 param(
@@ -12,7 +12,7 @@ param(
     [string]$LenovoMachineType = "20XX"
 )
 
-$ScriptVersion = "2.1.0"
+$ScriptVersion = "2.2.0"
 $RepoUrl       = "https://raw.githubusercontent.com/skermiebroTech/my-wiki/$Branch/Install-Drivers-auto-7z.ps1"
 $LogFile       = Join-Path ([Environment]::GetFolderPath("UserProfile")) `
                      ("Downloads\Test-DriverInstaller_" + (Get-Date -Format 'yyyyMMdd_HHmmss') + ".log")
@@ -470,22 +470,33 @@ $killBtn.Add_Click({
     $summaryLbl.ForeColor      = $C.Red
     UILog "=== KILL REQUESTED BY USER ==="
 
+    # Hard kill — read PID files written by each job and terminate immediately
+    foreach ($n in $OEMOrder) {
+        $pidFile = "$env:TEMP\driver_test_pid_$n.txt"
+        if (Test-Path $pidFile) {
+            try {
+                $childPid = [int](Get-Content $pidFile -Raw)
+                $proc = Get-Process -Id $childPid -EA SilentlyContinue
+                if ($proc) {
+                    $proc.Kill()
+                    UILog "[$n] Hard killed PID $childPid" -OEM $n
+                }
+                Remove-Item $pidFile -Force -EA SilentlyContinue
+            } catch { UILog "[$n] Kill error: $_" -OEM $n }
+        }
+    }
+
+    # Also stop the PowerShell job wrappers
     if ($script:ActiveJobs) {
         foreach ($e in $script:ActiveJobs) {
             try {
                 Stop-Job   $e.Job -EA SilentlyContinue
                 Remove-Job $e.Job -Force -EA SilentlyContinue
-                UILog "[$($e.OEM)] Job stopped" -OEM $e.OEM
+                UILog "[$($e.OEM)] Job wrapper stopped" -OEM $e.OEM
                 Set-OEMStatus -OEM $e.OEM -Status "FAIL"
             } catch {}
         }
     }
-
-    try {
-        Get-Process powershell -EA SilentlyContinue |
-            Where-Object { $_.MainWindowTitle -eq "" -and $_.Id -ne $PID } |
-            ForEach-Object { $_.Kill(); UILog "Killed PID $($_.Id)" }
-    } catch {}
 
     foreach ($n in $OEMOrder) {
         $dr = "C:\DRIVERS\$n"
@@ -571,15 +582,19 @@ $form.Add_Shown({
             $proc = New-Object System.Diagnostics.Process
             $proc.StartInfo = $psi
             $proc.Start() | Out-Null
+            # Write PID to temp file so kill button can terminate immediately
+            $pidFile = "$env:TEMP\driver_test_pid_$n.txt"
+            $proc.Id | Set-Content $pidFile -Encoding UTF8
             $out = [System.Collections.Generic.List[string]]::new()
             while (-not $proc.HasExited) {
                 $l = $proc.StandardOutput.ReadLine()
-                if ($l -ne $null) { $out.Add($l); JL "OUT: $l" | Out-Null }
+                if ($l -ne $null) { $out.Add($l); JL $l | Out-Null }
             }
             ($proc.StandardOutput.ReadToEnd() -split "`n" | Where-Object { $_.Trim() }) |
-                ForEach-Object { $out.Add($_); JL "OUT: $_" | Out-Null }
+                ForEach-Object { $out.Add($_); JL $_ | Out-Null }
             $err = $proc.StandardError.ReadToEnd().Trim()
             if ($err) { JL "ERR: $err" | Out-Null }
+            Remove-Item $pidFile -Force -EA SilentlyContinue
 
             $exit = $proc.ExitCode
             $dur  = [math]::Round(((Get-Date) - $st).TotalSeconds, 1)
@@ -633,19 +648,15 @@ $form.Add_Shown({
             $sec = [int]((Get-Date) - $e.Start).TotalSeconds
             $oemPanels[$n].Stats["Sec"].Text = "$sec"
 
-            # Stream any new output lines from the job
+            # Stream all new output lines from the job unfiltered
             $newLines = Receive-Job $j -Keep -EA SilentlyContinue
             if ($newLines) {
-                $allLines = @($newLines | Where-Object { $_ -is [string] -and $_.Trim() })
+                $allLines = @($newLines | Where-Object { $_ -is [string] })
                 $start    = $lastLine[$n]
                 for ($li = $start; $li -lt $allLines.Count; $li++) {
-                    $line = $allLines[$li].ToString().Trim()
-                    if ($line) {
-                        # Strip the OUT: prefix for cleaner display
-                        $display = $line -replace '^\[\d{2}:\d{2}:\d{2}\]\s*(OUT:\s*)?(\[\d{2}:\d{2}:\d{2}\]\s*)?', ''
-                        $oemLogs[$n].Box.AppendText("$display`r`n")
-                        $oemLogs[$n].Box.ScrollToCaret()
-                    }
+                    $line = $allLines[$li].ToString()
+                    $oemLogs[$n].Box.AppendText("$line`r`n")
+                    $oemLogs[$n].Box.ScrollToCaret()
                 }
                 $lastLine[$n] = $allLines.Count
             }
@@ -689,6 +700,7 @@ $form.Add_Shown({
         $noteStr = if ($resultObj.Notes) { " | $($resultObj.Notes)" } else { "" }
         UILog "$($resultObj.OEM): $($resultObj.Status)  Files:$($resultObj.Files) INFs:$($resultObj.INFs) Time:$($resultObj.Duration)s$noteStr" -OEM $resultObj.OEM
         Remove-Job $e.Job -Force -EA SilentlyContinue
+        Remove-Item "$env:TEMP\driver_test_pid_$($e.OEM).txt" -Force -EA SilentlyContinue
     }
     Remove-Item $ScriptCache -Force -EA SilentlyContinue
 
