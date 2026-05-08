@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.5.1
+# Version: 1.5.3
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -10,7 +10,7 @@
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
 # =============================================================
 
-$ScriptVersion   = "1.5.1"
+$ScriptVersion   = "1.5.3"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -21,6 +21,12 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 powercfg /change standby-timeout-ac 0
 powercfg /change monitor-timeout-ac 0
+
+# Set timezone to Brisbane (UTC+10, no DST) and sync clock
+# Runs before log file creation so the filename timestamp is correct
+tzutil /s "E. Australia Standard Time"
+Start-Service w32tm -ErrorAction SilentlyContinue
+w32tm /resync /force | Out-Null
 
 # =========================
 # LOG FILE SETUP
