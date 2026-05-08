@@ -1,6 +1,6 @@
 #Requires -RunAsAdministrator
 # =============================================================================
-# Test-DriverInstaller.ps1  v2.9.0
+# Test-DriverInstaller.ps1  v3.0.0
 # =============================================================================
 
 param(
@@ -12,7 +12,7 @@ param(
     [string]$LenovoMachineType = "20XX"
 )
 
-$ScriptVersion = "2.9.0"
+$ScriptVersion = "3.0.0"
 $RepoUrl       = "https://raw.githubusercontent.com/skermiebroTech/my-wiki/$Branch/Install-Drivers-auto-7z.ps1"
 $LogFile       = Join-Path ([Environment]::GetFolderPath("UserProfile")) `
                      ("Downloads\Test-DriverInstaller_" + (Get-Date -Format 'yyyyMMdd_HHmmss') + ".log")
@@ -622,26 +622,40 @@ $form.Add_Shown({
                 $lfWriter.WriteLine("[$ts][$n] $line")
             }
 
-            # Read lines on a background thread so ReadLine() blocking
-            # doesn't prevent the heartbeat from firing.
-            # OutputDataReceived event + BeginOutputReadLine is the reliable cross-platform approach.
-            $proc.add_OutputDataReceived({
-                param($sender, $e)
-                if ($null -ne $e.Data) {
-                    $out.Add($e.Data)
-                    WriteStream $e.Data
-                }
-            })
-            $proc.BeginOutputReadLine()
+            # Use a .NET Thread to read stdout lines without blocking the heartbeat.
+            # Thread pushes lines into a ConcurrentQueue; main loop drains + writes every 700ms.
+            $lineQueue  = [System.Collections.Concurrent.ConcurrentQueue[string]]::new()
+            $readerDone = [System.Threading.ManualResetEventSlim]::new($false)
+            $stdoutRef  = $proc.StandardOutput
 
-            # Heartbeat loop — fires every 700ms while process runs
-            while (-not $proc.HasExited) {
+            $readerThread = [System.Threading.Thread]::new([System.Threading.ThreadStart]{
+                try {
+                    while ($true) {
+                        $l = $stdoutRef.ReadLine()
+                        if ($null -eq $l) { break }
+                        $lineQueue.Enqueue($l)
+                    }
+                } finally { $readerDone.Set() }
+            })
+            $readerThread.IsBackground = $true
+            $readerThread.Start()
+
+            # Main loop: drain queue every 700ms and write to stream file
+            while (-not $proc.HasExited -or -not $lineQueue.IsEmpty) {
                 Start-Sleep -Milliseconds 700
-                $elapsed = [int]((Get-Date) - $st).TotalSeconds
-                $fc = if (Test-Path $ed) { @(Get-ChildItem $ed -Recurse -File -EA SilentlyContinue).Count } else { 0 }
-                $pulse = "  ... [$n] ${elapsed}s$(if ($fc -gt 0) {" | $fc files"})"
-                WriteStream $pulse
+                $l = $null
+                while ($lineQueue.TryDequeue([ref]$l)) {
+                    $out.Add($l)
+                    WriteStream $l
+                }
+                # Heartbeat when queue was empty this tick
+                if ($lineQueue.IsEmpty -and -not $proc.HasExited) {
+                    $elapsed = [int]((Get-Date) - $st).TotalSeconds
+                    $fc = if (Test-Path $ed) { @(Get-ChildItem $ed -Recurse -File -EA SilentlyContinue).Count } else { 0 }
+                    WriteStream "  ... [$n] ${elapsed}s$(if ($fc -gt 0) {" | $fc files"})"
+                }
             }
+            $readerDone.Wait(5000) | Out-Null
             $proc.WaitForExit()
             $err = $proc.StandardError.ReadToEnd().Trim()
             if ($err) {
@@ -649,8 +663,9 @@ $form.Add_Shown({
                 $out.Add($errLine)
                 WriteStream $errLine
             }
-            $sfWriter.Close(); $sfStream.Close()
-            $lfWriter.Close(); $lfStream.Close()
+            # Flush and close writers before evaluating results
+            $sfWriter.Flush(); $sfWriter.Close(); $sfStream.Dispose()
+            $lfWriter.Flush(); $lfWriter.Close(); $lfStream.Dispose()
             Remove-Item $pidFile -Force -EA SilentlyContinue
 
             $exit = $proc.ExitCode
@@ -676,8 +691,6 @@ $form.Add_Shown({
             if (-not $sl -and -not $fl) { $notes.Add("Unclear outcome") }
 
             if (Test-Path $dr) { Remove-Item $dr -Recurse -Force -EA SilentlyContinue }
-            $sfWriter.WriteLine("=== END $n $(if ($ok) {'PASS'} else {'FAIL'}) ===")
-            $lfWriter.WriteLine("[$([datetime]::Now.ToString('HH:mm:ss'))][$n] END $n $(if ($ok) {'PASS'} else {'FAIL'})")
 
             [ordered]@{
                 OEM      = $n
