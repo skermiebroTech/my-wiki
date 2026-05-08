@@ -29,7 +29,7 @@ param(
     [string]$LenovoMachineType    = ""
 )
 
-$ScriptVersion = "1.0.2"
+$ScriptVersion = "1.0.3"
 $RepoUrl       = "https://raw.githubusercontent.com/skermiebroTech/my-wiki/$Branch/Install-Drivers-auto-7z.ps1"
 $LogFile       = Join-Path ([Environment]::GetFolderPath("UserProfile")) `
                      ("Downloads\Test-DriverInstaller_" + (Get-Date -Format 'yyyyMMdd_HHmmss') + ".log")
@@ -97,192 +97,189 @@ try {
 # -----------------------------------------------------------------------------
 $results = [System.Collections.Generic.List[object]]::new()
 
+# Run all OEMs in parallel using PowerShell jobs
+$jobs = [System.Collections.Generic.List[object]]::new()
+
 foreach ($oemName in $OEM) {
     if (-not $OEMConfig.ContainsKey($oemName)) {
-        Write-Warn "Unknown OEM '$oemName' — skipping. Valid: $($OEMConfig.Keys -join ', ')"
+        Write-Warn "Unknown OEM '$oemName' - skipping. Valid: $($OEMConfig.Keys -join ', ')"
         continue
     }
 
-    $cfg = $OEMConfig[$oemName]
-    Write-Header "Testing: $oemName"
-    Add-Log "=== START $oemName ==="
+    $cfg        = $OEMConfig[$oemName]
+    $driverRoot = "C:\DRIVERS\$oemName"   # separate folder per OEM so parallel runs don't collide
+    $extractDir = "$driverRoot\$($oemName)_Extracted"
 
-    $testStart  = Get-Date
-    $driverRoot = "C:\DRIVERS"
-    $extractDir = switch ($oemName) {
-        "Dell"   { "$driverRoot\Dell_Extracted" }
-        "HP"     { "$driverRoot\HP_Extracted" }
-        "Lenovo" { "$driverRoot\Lenovo_Extracted" }
-    }
-
-    # Build argument list
-    # Build args — values with spaces must be wrapped in escaped quotes
+    # Build arg string — pass DriverRoot so each OEM uses its own folder
     $argList  = "-ExecutionPolicy Bypass"
     $argList += " -File `"$ScriptCache`""
     $argList += " -Manufacturer `"$($cfg.Manufacturer)`""
     if ($cfg.Model)       { $argList += " -Model `"$($cfg.Model)`"" }
     if ($cfg.MachineType) { $argList += " -MachineType `"$($cfg.MachineType)`"" }
+    $argList += " -DriverRoot `"$driverRoot`""
     $argList += " -SkipCleanup"
     if (-not $RunInstall) { $argList += " -SkipInstall" }
 
-    Write-Step "Running headless install..."
+    Write-Header "Starting: $oemName"
     Write-Info "Manufacturer: $($cfg.Manufacturer)"
     if ($cfg.Model)       { Write-Info "Model:        $($cfg.Model)" }
     if ($cfg.MachineType) { Write-Info "MachineType:  $($cfg.MachineType)" }
     Write-Info "SkipInstall:  $(-not $RunInstall)"
-    Write-Info "Args: $argList"
+    Add-Log "=== START $oemName ==="
     Add-Log "Running: powershell $argList"
 
-    # Run the script and capture output
-    $outputLines = [System.Collections.Generic.List[string]]::new()
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName               = "powershell.exe"
-    $psi.Arguments              = $argList
-    $psi.UseShellExecute        = $false
-    $psi.CreateNoWindow         = $true
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError  = $true
-    $proc = New-Object System.Diagnostics.Process
-    $proc.StartInfo = $psi
-    $proc.Start() | Out-Null
+    # Capture vars needed inside the job scriptblock
+    $jobArgList    = $argList
+    $jobOemName    = $oemName
+    $jobDriverRoot = $driverRoot
+    $jobExtractDir = $extractDir
+    $jobLogFile    = $LogFile
+    $jobRunInstall = $RunInstall
 
-    # Stream output live while also capturing it
-    $lastDot = Get-Date
-    while (-not $proc.HasExited) {
-        $line = $proc.StandardOutput.ReadLine()
-        if ($line -ne $null) {
-            $outputLines.Add($line)
-            Add-Log "  OUT: $line"
-            # Show progress dots so we know it's alive
-            if (((Get-Date) - $lastDot).TotalSeconds -ge 10) {
-                Write-Host "  ." -NoNewline -ForegroundColor DarkGray
-                $lastDot = Get-Date
+    $job = Start-Job -ScriptBlock {
+        param($argList, $oemName, $driverRoot, $extractDir, $logFile, $runInstall)
+
+        function JobLog { param([string]$m)
+            $ts = Get-Date -Format 'HH:mm:ss'
+            $line = "[$ts][$oemName] $m"
+            Add-Content -Path $logFile -Value $line -Encoding UTF8
+            $line  # also output so we can capture it
+        }
+
+        $startTime = Get-Date
+
+        # Run the installer script
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName               = "powershell.exe"
+        $psi.Arguments              = $argList
+        $psi.UseShellExecute        = $false
+        $psi.CreateNoWindow         = $true
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError  = $true
+        $proc = New-Object System.Diagnostics.Process
+        $proc.StartInfo = $psi
+        $proc.Start() | Out-Null
+
+        $outputLines = [System.Collections.Generic.List[string]]::new()
+        while (-not $proc.HasExited) {
+            $line = $proc.StandardOutput.ReadLine()
+            if ($line -ne $null) { $outputLines.Add($line); JobLog "OUT: $line" | Out-Null }
+        }
+        $remaining = $proc.StandardOutput.ReadToEnd()
+        foreach ($line in ($remaining -split "`n" | Where-Object { $_.Trim() })) {
+            $outputLines.Add($line); JobLog "OUT: $line" | Out-Null
+        }
+        $stderr = $proc.StandardError.ReadToEnd().Trim()
+        if ($stderr) { JobLog "ERR: $stderr" | Out-Null }
+
+        $exitCode    = $proc.ExitCode
+        $durationSec = [math]::Round(((Get-Date) - $startTime).TotalSeconds, 1)
+
+        # Evaluate results
+        $testPassed = $true
+        $testNotes  = [System.Collections.Generic.List[string]]::new()
+        $fileCount  = 0
+        $infCount   = 0
+
+        if ($exitCode -ne 0) {
+            $testNotes.Add("Exit code: $exitCode")
+            $testPassed = $false
+        }
+
+        if (Test-Path $extractDir) {
+            $infFiles  = @(Get-ChildItem $extractDir -Recurse -Filter "*.inf" -EA SilentlyContinue)
+            $allFiles  = @(Get-ChildItem $extractDir -Recurse -File -EA SilentlyContinue)
+            $fileCount = $allFiles.Count
+            $infCount  = $infFiles.Count
+            if ($fileCount -eq 0) { $testNotes.Add("Extraction produced 0 files"); $testPassed = $false }
+            if ($infCount  -eq 0) { $testNotes.Add("No INF files found");          $testPassed = $false }
+        } else {
+            $testNotes.Add("Extract directory missing"); $testPassed = $false
+        }
+
+        if ($oemName -in @("Dell","HP")) {
+            if (Test-Path "C:\Program Files\7-Zip\7z.exe") {
+                $testNotes.Add("7-Zip not removed"); $testPassed = $false
             }
         }
-    }
-    Write-Host ""
-    # Drain remaining output
-    $remaining = $proc.StandardOutput.ReadToEnd()
-    foreach ($line in ($remaining -split "`n" | Where-Object { $_.Trim() })) {
-        $outputLines.Add($line)
-        Add-Log "  OUT: $line"
-    }
-    $stderr = $proc.StandardError.ReadToEnd().Trim()
-    if ($stderr) { Add-Log "  ERR: $stderr" }
 
-    $exitCode   = $proc.ExitCode
-    $durationSec = [math]::Round(((Get-Date) - $testStart).TotalSeconds, 1)
-    Add-Log "$oemName exit code: $exitCode  duration: ${durationSec}s"
-
-    # ----- Evaluate results -----
-    $testPassed   = $true
-    $testNotes    = [System.Collections.Generic.List[string]]::new()
-
-    # Check 1: process exit code
-    if ($exitCode -ne 0) {
-        Write-Fail "Process exited with code $exitCode"
-        $testNotes.Add("Exit code: $exitCode")
-        $testPassed = $false
-    } else {
-        Write-OK "Process exited cleanly"
-    }
-
-    # Check 2: extraction directory exists and has files
-    if (Test-Path $extractDir) {
-        $infFiles  = @(Get-ChildItem $extractDir -Recurse -Filter "*.inf" -EA SilentlyContinue)
-        $allFiles  = @(Get-ChildItem $extractDir -Recurse -File -EA SilentlyContinue)
-        $fileCount = $allFiles.Count
-        $infCount  = $infFiles.Count
-
-        if ($fileCount -gt 0) {
-            Write-OK "Extraction: $fileCount files found"
-        } else {
-            Write-Fail "Extraction: 0 files found in $extractDir"
-            $testNotes.Add("Extraction produced 0 files")
-            $testPassed = $false
+        $successLine = $outputLines | Where-Object { $_ -match "SUCCESS:|Driver installation complete" } | Select-Object -First 1
+        $failLine    = $outputLines | Where-Object { $_ -match "FAILED:|did not complete" } | Select-Object -First 1
+        if (-not $successLine -and $failLine) {
+            $testNotes.Add("Script reported failure"); $testPassed = $false
+        }
+        if (-not $successLine -and -not $failLine) {
+            $testNotes.Add("Outcome unclear from output")
         }
 
-        if ($infCount -gt 0) {
-            Write-OK "INF files:  $infCount found"
-        } else {
-            Write-Fail "INF files:  0 .inf files found — pnputil would have nothing to install"
-            $testNotes.Add("No INF files found")
-            $testPassed = $false
+        if ($runInstall) {
+            $pnpLines = $outputLines | Where-Object { $_ -match "pnputil|Driver package added|INFs installed" }
+            if (-not $pnpLines) { $testNotes.Add("No pnputil output found") }
         }
-        $testNotes.Add("Files: $fileCount  INFs: $infCount")
-    } else {
-        Write-Fail "Extract dir not found: $extractDir"
-        $testNotes.Add("Extract directory missing")
-        $testPassed = $false
-        $fileCount = 0
-        $infCount  = 0
-    }
 
-    # Check 3: 7-Zip was removed (Dell/HP only)
-    if ($oemName -in @("Dell", "HP")) {
-        $7zExe = "C:\Program Files\7-Zip\7z.exe"
-        if (-not (Test-Path $7zExe)) {
-            Write-OK "7-Zip removed cleanly"
-        } else {
-            Write-Fail "7-Zip still present after run — not safe to sysprep"
-            $testNotes.Add("7-Zip not removed")
-            $testPassed = $false
+        # Cleanup extracted files
+        if (Test-Path $driverRoot) {
+            Remove-Item $driverRoot -Recurse -Force -EA SilentlyContinue
         }
-    }
 
-    # Check 4: look for SUCCESS/FAILED in output
-    $successLine = $outputLines | Where-Object { $_ -match "SUCCESS:|Driver installation complete" } | Select-Object -First 1
-    $failLine    = $outputLines | Where-Object { $_ -match "FAILED:|did not complete" } | Select-Object -First 1
-    if ($successLine) {
-        Write-OK "Script reported success"
-    } elseif ($failLine) {
-        Write-Fail "Script reported failure: $failLine"
-        $testNotes.Add("Script reported failure")
-        $testPassed = $false
-    } else {
-        Write-Warn "Could not determine script outcome from output"
-        $testNotes.Add("Outcome unclear from output")
-    }
+        JobLog "=== END $oemName - $( if ($testPassed) {'PASS'} else {'FAIL'} ) ===" | Out-Null
 
-    # Check 5: if RunInstall, look for pnputil output
-    if ($RunInstall) {
-        $pnpLines = $outputLines | Where-Object { $_ -match "pnputil|Driver package added|INFs installed" }
-        if ($pnpLines) {
-            Write-OK "pnputil ran ($($pnpLines.Count) relevant log lines)"
-        } else {
-            Write-Warn "No pnputil output detected — check log"
-            $testNotes.Add("No pnputil output found")
+        # Return result object
+        [ordered]@{
+            OEM      = $oemName
+            Status   = if ($testPassed) { "PASS" } else { "FAIL" }
+            Duration = $durationSec
+            Files    = $fileCount
+            INFs     = $infCount
+            Notes    = $testNotes -join "; "
         }
-    }
+    } -ArgumentList $jobArgList, $jobOemName, $jobDriverRoot, $jobExtractDir, $LogFile, $jobRunInstall
 
-    # Summary for this OEM
-    $status = if ($testPassed) { "PASS" } else { "FAIL" }
-    $colour = if ($testPassed) { "Green" } else { "Red" }
-    Write-Host ""
-    Write-Host "  $oemName result: $status  ($durationSec sec)" -ForegroundColor $colour
-    Add-Log "$oemName result: $status  duration: ${durationSec}s"
-
-    $results.Add([ordered]@{
-        OEM      = $oemName
-        Status   = $status
-        Duration = $durationSec
-        Files    = if ($null -ne $fileCount) { $fileCount } else { 0 }
-        INFs     = if ($null -ne $infCount)  { $infCount  } else { 0 }
-        Notes    = $testNotes -join "; "
-    })
-
-    # Clean up extracted files unless -SkipCleanup was passed to THIS test runner
-    # (we always pass -SkipCleanup to the main script so we can inspect here,
-    #  then we clean up ourselves)
-    if (Test-Path $driverRoot) {
-        Write-Info "Cleaning up $driverRoot..."
-        try { Remove-Item $driverRoot -Recurse -Force -EA Stop; Write-Info "  Removed." }
-        catch { Write-Warn "Could not remove $driverRoot`: $_" }
-    }
-
-    Add-Log "=== END $oemName ==="
+    $jobs.Add([ordered]@{ OEM = $oemName; Job = $job; StartTime = (Get-Date) })
+    Write-OK "$oemName job started (PID tracking via job ID $($job.Id))"
 }
 
+# Wait for all jobs and stream status updates
+Write-Header "Waiting for all OEM jobs to complete..."
+$completed = @{}
+
+while ($completed.Count -lt $jobs.Count) {
+    foreach ($entry in $jobs) {
+        $oemName = $entry.OEM
+        $job     = $entry.Job
+        if ($completed.ContainsKey($oemName)) { continue }
+
+        $elapsed = [math]::Round(((Get-Date) - $entry.StartTime).TotalSeconds, 0)
+
+        if ($job.State -in @("Completed","Failed","Stopped")) {
+            $completed[$oemName] = $true
+            $colour = if ($job.State -eq "Completed") { "Cyan" } else { "Red" }
+            Write-Host "  [$oemName] Job finished ($elapsed sec) - state: $($job.State)" -ForegroundColor $colour
+        } else {
+            Write-Host "`r  Waiting... $oemName`: ${elapsed}s  " -NoNewline -ForegroundColor DarkGray
+        }
+    }
+    if ($completed.Count -lt $jobs.Count) { Start-Sleep -Milliseconds 2000 }
+}
+Write-Host ""
+
+# Collect results
+foreach ($entry in $jobs) {
+    $result = Receive-Job $entry.Job -EA SilentlyContinue
+    if ($result) { $results.Add($result) }
+    else {
+        # Job failed to return a result
+        $results.Add([ordered]@{
+            OEM      = $entry.OEM
+            Status   = "FAIL"
+            Duration = [math]::Round(((Get-Date) - $entry.StartTime).TotalSeconds, 1)
+            Files    = 0
+            INFs     = 0
+            Notes    = "Job failed to return result (state: $($entry.Job.State))"
+        })
+    }
+    Remove-Job $entry.Job -Force -EA SilentlyContinue
+}
 # Remove cached script
 Remove-Item $ScriptCache -Force -EA SilentlyContinue
 

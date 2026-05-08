@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.5.6
+# Version: 1.5.7
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -21,6 +21,7 @@
 #
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
 #
+# v1.5.7 - Added -DriverRoot param for parallel testing
 # v1.5.6 - Added -MachineType param for Lenovo machine type override
 # v1.5.5 - Added headless/parameter mode for testing and automation
 # v1.5.4 - 7-Zip integration for Dell and HP extraction
@@ -34,15 +35,16 @@ param(
     [string]$Manufacturer = "",
     [string]$Model        = "",
     [string]$MachineType  = "",   # Lenovo only: override 4-char machine type prefix (e.g. 20XX)
+    [string]$DriverRoot   = "C:\DRIVERS",  # Override default driver root (useful for parallel testing)
     [switch]$Headless,
     [switch]$SkipInstall,
     [switch]$SkipCleanup
 )
 
 # Auto-enable headless when any override param is passed
-if ($Manufacturer -or $Model -or $MachineType -or $SkipInstall -or $SkipCleanup) { $Headless = $true }
+if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" -or $SkipInstall -or $SkipCleanup) { $Headless = $true }
 
-$ScriptVersion   = "1.5.6"
+$ScriptVersion   = "1.5.7"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -1923,7 +1925,7 @@ function Start-Install {
     $script:AnalyticsMissingBefore = Get-MissingDriverCount
     Log "Missing drivers BEFORE install: $($script:AnalyticsMissingBefore)"
 
-    $driverRoot = "C:\DRIVERS"
+    $driverRoot = $DriverRoot
     $success    = $false
 
     if ($manufacturer -match "Dell") {
