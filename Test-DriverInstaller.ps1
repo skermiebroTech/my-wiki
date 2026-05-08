@@ -1,7 +1,7 @@
 #Requires -RunAsAdministrator
 # =============================================================================
 # Test-DriverInstaller.ps1  v1.0.0
-# Pulls Install-Drivers-auto.ps1 from the repo and runs it headlessly
+# Pulls Install-Drivers-auto-7z.ps1 from the repo and runs it headlessly
 # for Dell, HP, and Lenovo with SkipInstall + SkipCleanup so you can
 # verify extraction without touching the driver store.
 #
@@ -29,8 +29,8 @@ param(
     [string]$LenovoMachineType    = ""
 )
 
-$ScriptVersion = "1.0.1"
-$RepoUrl       = "https://raw.githubusercontent.com/skermiebroTech/my-wiki/$Branch/Install-Drivers-auto.ps1"
+$ScriptVersion = "1.0.2"
+$RepoUrl       = "https://raw.githubusercontent.com/skermiebroTech/my-wiki/$Branch/Install-Drivers-auto-7z.ps1"
 $LogFile       = Join-Path ([Environment]::GetFolderPath("UserProfile")) `
                      ("Downloads\Test-DriverInstaller_" + (Get-Date -Format 'yyyyMMdd_HHmmss') + ".log")
 $ScriptCache   = "$env:TEMP\Install-Drivers-auto-test.ps1"
@@ -72,11 +72,13 @@ Write-Info "Log:         $LogFile"
 New-Item -ItemType File -Path $LogFile -Force | Out-Null
 
 # -----------------------------------------------------------------------------
-Write-Step "Downloading Install-Drivers-auto.ps1 from repo..."
+Write-Step "Downloading Install-Drivers-auto-7z.ps1 from repo..."
 Add-Log "Downloading script from: $RepoUrl"
 try {
     $ProgressPreference = 'SilentlyContinue'
-    Invoke-WebRequest -Uri $RepoUrl -OutFile $ScriptCache -UseBasicParsing -ErrorAction Stop
+    # Use curl.exe to preserve UTF-8 encoding — Invoke-WebRequest mangles special chars
+    $curlExit = (Start-Process curl.exe -ArgumentList "--silent --location --output `"$ScriptCache`" `"$RepoUrl`"" -Wait -PassThru).ExitCode
+    if ($curlExit -ne 0) { throw "curl.exe failed with exit code $curlExit" }
     $sizeMB = [math]::Round((Get-Item $ScriptCache).Length / 1KB, 1)
     Write-OK "Downloaded ($sizeMB KB)"
     Add-Log "Download OK: $sizeMB KB"
@@ -114,28 +116,28 @@ foreach ($oemName in $OEM) {
     }
 
     # Build argument list
-    $args = @(
-        "-ExecutionPolicy", "Bypass",
-        "-File", $ScriptCache,
-        "-Manufacturer", $cfg.Manufacturer,
-        "-SkipCleanup"   # always keep files so we can inspect
-    )
-    if ($cfg.Model)        { $args += @("-Model",       $cfg.Model) }
-    if ($cfg.MachineType)  { $args += @("-MachineType", $cfg.MachineType) }
-    if (-not $RunInstall)  { $args += "-SkipInstall" }
+    # Build args — values with spaces must be wrapped in escaped quotes
+    $argList  = "-ExecutionPolicy Bypass"
+    $argList += " -File `"$ScriptCache`""
+    $argList += " -Manufacturer `"$($cfg.Manufacturer)`""
+    if ($cfg.Model)       { $argList += " -Model `"$($cfg.Model)`"" }
+    if ($cfg.MachineType) { $argList += " -MachineType `"$($cfg.MachineType)`"" }
+    $argList += " -SkipCleanup"
+    if (-not $RunInstall) { $argList += " -SkipInstall" }
 
     Write-Step "Running headless install..."
     Write-Info "Manufacturer: $($cfg.Manufacturer)"
     if ($cfg.Model)       { Write-Info "Model:        $($cfg.Model)" }
     if ($cfg.MachineType) { Write-Info "MachineType:  $($cfg.MachineType)" }
     Write-Info "SkipInstall:  $(-not $RunInstall)"
-    Add-Log "Running: powershell $($args -join ' ')"
+    Write-Info "Args: $argList"
+    Add-Log "Running: powershell $argList"
 
     # Run the script and capture output
     $outputLines = [System.Collections.Generic.List[string]]::new()
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName               = "powershell.exe"
-    $psi.Arguments              = $args -join " "
+    $psi.Arguments              = $argList
     $psi.UseShellExecute        = $false
     $psi.CreateNoWindow         = $true
     $psi.RedirectStandardOutput = $true
