@@ -296,6 +296,8 @@ $logBox.Location    = New-Object System.Drawing.Point([int]$panelGap, $logBoxTop
 $logBoxH = 680 - [int]$logY - 55
 $logBox.Size        = New-Object System.Drawing.Size(858, $logBoxH)
 $form.Controls.Add($logBox)
+$logBox.BringToFront()
+$logCaption.BringToFront()
 
 # ---- Footer -----------------------------------------------------------------
 $footer           = New-Object System.Windows.Forms.Panel
@@ -312,6 +314,17 @@ $logPathLbl.BackColor = [System.Drawing.Color]::Transparent
 $logPathLbl.AutoSize  = $true
 $logPathLbl.Location  = New-Object System.Drawing.Point(12, 7)
 $footer.Controls.Add($logPathLbl)
+
+$killBtn                            = New-Object System.Windows.Forms.Button
+$killBtn.Text                       = "KILL ALL JOBS"
+$killBtn.Font                       = $F.SubBold
+$killBtn.ForeColor                  = $C.White
+$killBtn.BackColor                  = [System.Drawing.Color]::FromArgb(130, 20, 20)
+$killBtn.FlatStyle                  = "Flat"
+$killBtn.FlatAppearance.BorderSize  = 0
+$killBtn.Size                       = New-Object System.Drawing.Size(120, 22)
+$killBtn.Location                   = New-Object System.Drawing.Point(762, 3)
+$footer.Controls.Add($killBtn)
 
 # Resize handler
 $form.Add_Resize({
@@ -408,6 +421,55 @@ $ticker.Start()
 # =============================================================================
 # MAIN LOGIC
 # =============================================================================
+$script:KillRequested = $false
+$script:ActiveJobs    = $null   # will be set once jobs are launched
+
+$killBtn.Add_Click({
+    if ($script:KillRequested) { return }
+    $script:KillRequested = $true
+    $killBtn.Text      = "KILLING..."
+    $killBtn.BackColor = [System.Drawing.Color]::FromArgb(80, 10, 10)
+    $killBtn.Enabled   = $false
+    $summaryLbl.Text      = "Kill requested - stopping all jobs..."
+    $summaryLbl.ForeColor = $C.Red
+    UILog "=== KILL REQUESTED BY USER ==="
+
+    # Stop all tracked jobs
+    if ($script:ActiveJobs) {
+        foreach ($e in $script:ActiveJobs) {
+            try {
+                Stop-Job  $e.Job -EA SilentlyContinue
+                Remove-Job $e.Job -Force -EA SilentlyContinue
+                UILog "[$($e.OEM)] Job stopped"
+                Set-OEMStatus -OEM $e.OEM -Status "FAIL"
+            } catch {}
+        }
+    }
+
+    # Kill any powershell child processes running the installer
+    try {
+        Get-Process powershell -EA SilentlyContinue |
+            Where-Object { $_.MainWindowTitle -eq "" -and $_.Id -ne $PID } |
+            ForEach-Object { $_.Kill(); UILog "Killed PID $($_.Id)" }
+    } catch {}
+
+    # Clean up driver folders
+    foreach ($n in $OEMOrder) {
+        $dr = "C:\DRIVERS\$n"
+        if (Test-Path $dr) {
+            Remove-Item $dr -Recurse -Force -EA SilentlyContinue
+            UILog "[$n] Cleaned up $dr"
+        }
+    }
+    Remove-Item $ScriptCache -Force -EA SilentlyContinue
+    $ticker.Stop()
+    $summaryLbl.Text = "All jobs killed. Cleaned up."
+    UILog "=== KILL COMPLETE ==="
+    $killBtn.Text      = "KILLED"
+    $killBtn.BackColor = [System.Drawing.Color]::FromArgb(50, 10, 10)
+    [System.Windows.Forms.Application]::DoEvents()
+})
+
 $form.Add_Shown({
     $form.Activate()
     [System.Windows.Forms.Application]::DoEvents()
@@ -493,6 +555,7 @@ $form.Add_Shown({
         } -ArgumentList $jAl,$jN,$jDr,$jEd,$jLf,$jRi
 
         $jobs.Add([ordered]@{ OEM=$oemName; Job=$job; Start=(Get-Date) })
+        $script:ActiveJobs = $jobs
         UILog "[$oemName] Job $($job.Id) started"
     }
 
@@ -515,6 +578,7 @@ $form.Add_Shown({
             $summaryLbl.ForeColor = $C.Yellow
         }
         [System.Windows.Forms.Application]::DoEvents()
+        if ($script:KillRequested) { break }
         if ($done.Count -lt $jobs.Count) { Start-Sleep -Milliseconds 800 }
     }
 
