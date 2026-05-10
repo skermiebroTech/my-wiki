@@ -960,10 +960,6 @@ code can be found here: https://github.com/skermiebroTech/my-wiki/raw/refs/heads
 <p>Downloads <code>DriverPackCatalog.cab</code> from Dell's CDN and extracts it:</p>
 <div class="highlight"><pre><span></span><code>https://downloads.dell.com/catalog/DriverPackCatalog.cab
 </code></pre></div>
-<div class="admonition info">
-<p class="admonition-title">Driver Pack Catalog vs CatalogPC</p>
-<p>The script uses <code>DriverPackCatalog.cab</code> — not <code>CatalogPC.cab</code>. The driver pack catalog contains only full SCCM-style driver packs, which is what this tool requires. <code>CatalogPC.cab</code> lists individual drivers and firmware and is not used.</p>
-</div>
 <p>The catalog is searched for a <code>DriverPackage</code> entry whose <code>&lt;Model name="..."&gt;</code> attribute exactly matches the WMI model string (case-insensitive). Substring matching is intentionally avoided — for example, "Latitude 7330" will not match a "Latitude 7330 Rugged Extreme" pack.</p>
 <p>The Service Tag is read from <code>Win32_BIOS.SerialNumber</code> for logging. If no matching pack is found in the catalog, the script opens the Dell support page for that Service Tag automatically.</p>
 <h4 id="hp">HP<a class="headerlink" href="#hp" title="Permanent link">&para;</a></h4>
