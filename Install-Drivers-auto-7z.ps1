@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.5.7
+# Version: 1.5.8
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -21,6 +21,7 @@
 #
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
 #
+# v1.5.8 - Prompt to skip install if no missing drivers detected (GUI); continues in headless
 # v1.5.7 - Added -DriverRoot param for parallel testing
 # v1.5.6 - Added -MachineType param for Lenovo machine type override
 # v1.5.5 - Added headless/parameter mode for testing and automation
@@ -44,7 +45,7 @@ param(
 # Auto-enable headless when any override param is passed
 if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" -or $SkipInstall -or $SkipCleanup) { $Headless = $true }
 
-$ScriptVersion   = "1.5.7"
+$ScriptVersion   = "1.5.8"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -1924,6 +1925,30 @@ function Start-Install {
     Log "Checking for devices with missing drivers..."
     $script:AnalyticsMissingBefore = Get-MissingDriverCount
     Log "Missing drivers BEFORE install: $($script:AnalyticsMissingBefore)"
+
+    # Offer to skip if no missing drivers detected
+    if ($script:AnalyticsMissingBefore -eq 0) {
+        if ($script:Headless) {
+            Log "No missing drivers detected - continuing anyway (headless mode)."
+        } else {
+            $skipResult = [System.Windows.Forms.MessageBox]::Show(
+                "No missing drivers were detected on this device.`n`nRun driver installation anyway?",
+                "No Missing Drivers", "YesNo", "Question"
+            )
+            if ($skipResult -eq "No") {
+                Log "User chose to skip - no missing drivers detected."
+                SetProgress 100
+                SetDownload -Pct 100 -Label "Skipped - no missing drivers"
+                SetExtract  -Pct 100 -Label "Skipped - no missing drivers"
+                $script:AnalyticsMissingAfter = 0
+                Send-AnalyticsEvent -Result "success"
+                Play-Sound -Event "Success"
+                Set-ButtonIdle
+                return
+            }
+            Log "User chose to run anyway despite no missing drivers."
+        }
+    }
 
     $driverRoot = $DriverRoot
     $success    = $false
