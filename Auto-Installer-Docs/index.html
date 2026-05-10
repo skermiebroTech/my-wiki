@@ -447,17 +447,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#user-interface" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        User Interface
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#sound-events" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -859,17 +848,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#user-interface" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        User Interface
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#sound-events" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -942,7 +920,7 @@
 
 
 <h1 id="auto-driver-installer">Auto Driver Installer<a class="headerlink" href="#auto-driver-installer" title="Permanent link">&para;</a></h1>
-<p>A fully automated PowerShell driver installer for <strong>Dell</strong>, <strong>HP</strong>, and <strong>Lenovo</strong> machines. Designed to run in Windows audit mode with a single command — no manual downloads, no clicking through wizards.</p>
+<p>A fully automated PowerShell driver installer for <strong>Dell</strong>, <strong>HP</strong>, and <strong>Lenovo</strong> machines. Designed to run in Windows audit mode with a single command</p>
 <hr />
 <h2 id="quick-start">Quick Start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
 <p>Run this from the <strong>Win+R</strong> box on any supported machine:</p>
@@ -950,7 +928,7 @@
 </code></pre></div>
 <div class="admonition tip">
 <p class="admonition-title">Audit Mode</p>
-<p>This command works without any prior software installation. <code>irm</code> (Invoke-RestMethod) fetches the script directly from GitHub and <code>iex</code> runs it in memory — no file is saved to disk first.</p>
+<p>This command works without any prior software installation. <code>irm</code> (Invoke-RestMethod) fetches the script directly from GitHub and <code>iex</code> runs it in memory — no file is saved to disk.</p>
 </div>
 <hr />
 <h2 id="how-it-works">How It Works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h2>
@@ -964,6 +942,7 @@
 <li><strong>Model / Machine Type</strong> — from <code>Win32_ComputerSystemProduct</code> (Lenovo) or <code>Win32_ComputerSystem</code> (Dell/HP)</li>
 <li>The model name is automatically <strong>copied to clipboard</strong> for convenience</li>
 <li>A full <strong>device information dump</strong> is written to the log at startup, covering CPU, GPU, RAM, disks, NICs, battery, PnP problem devices, and driver store contents</li>
+<li>Log is stored in the current users downloads folder</li>
 </ul>
 <p>If the script is not running as Administrator it re-launches itself elevated automatically.</p>
 <hr />
@@ -992,17 +971,13 @@
 <p>Downloads the HP Driver Pack Matrix HTML page from HP's FTP server:</p>
 <div class="highlight"><pre><span></span><code>https://ftp.hp.com/pub/caps-softpaq/cmit/HP_Driverpack_Matrix_x64.html
 </code></pre></div>
-<p>The page is parsed for a table row matching the detected model name. The script extracts a direct SoftPaq <code>.exe</code> download URL from the matched row, preferring a <strong>Win10</strong> pack when running on Windows 10. If no match is found the matrix page is opened in the browser for manual selection.</p>
+<p>The page is parsed for a table row matching the detected model name. The script extracts a direct SoftPaq <code>.exe</code> download URL from the matched row, preferring a <strong>Win11</strong> pack and falls back to <strong>Win10</strong> automatically if one isn't available.</p>
 <hr />
 <h3 id="3-download">3. Download<a class="headerlink" href="#3-download" title="Permanent link">&para;</a></h3>
 <p>The driver pack is downloaded using <code>curl.exe</code> (available on Windows 10 1803+).</p>
 <p>The download bar shows live progress including speed:</p>
-<div class="highlight"><pre><span></span><code>1234.5 MB / 2100.0 MB  (58%)  376.2 Mbps
+<div class="highlight"><pre><span></span><code>[Time] 500 MB received 376.2 Mbps
 </code></pre></div>
-<div class="admonition info">
-<p class="admonition-title">Large packs</p>
-<p>SCCM packs are typically 1.5–3 GB. Downloads retry automatically up to 10 times on failure, resume interrupted transfers with <code>--continue-at -</code>, and abort if the connection stalls for more than 3.5 minutes.</p>
-</div>
 <hr />
 <h3 id="4-extract">4. Extract<a class="headerlink" href="#4-extract" title="Permanent link">&para;</a></h3>
 <p>The pack is extracted to <code>C:\DRIVERS\{OEM}_Extracted</code> using the appropriate method per format:</p>
@@ -1043,54 +1018,11 @@
 </tbody>
 </table>
 <p>The vendor-specific extraction format is always tried first. If it produces zero files, the remaining formats are tried as fallbacks in order. A final legacy fallback of <code>-s -f"&lt;dest&gt;"</code> is attempted for older Lenovo packs if all other formats fail.</p>
-<p>The extract bar shows a live file count as files land in the destination folder.</p>
-<div class="admonition note">
-<p class="admonition-title">HP async extraction</p>
-<p>HP SoftPaqs extract asynchronously — the installer process exits before extraction is complete. The script polls the destination folder for up to 30 seconds after the process exits before falling back to the next format.</p>
-</div>
 <hr />
 <h3 id="5-install-infs">5. Install INFs<a class="headerlink" href="#5-install-infs" title="Permanent link">&para;</a></h3>
 <p>All <code>.inf</code> files found recursively under the extraction path are installed using:</p>
 <div class="highlight"><pre><span></span><code><span class="n">pnputil</span> <span class="p">/</span><span class="nb">add-driver</span> <span class="s2">&quot;path\to\driver.inf&quot;</span> <span class="p">/</span><span class="n">install</span>
 </code></pre></div>
-<p>The install bar tracks progress through each INF. Each is processed whether it results in a new install, an update, or is already current — pnputil handles all cases gracefully.</p>
-<hr />
-<h2 id="user-interface">User Interface<a class="headerlink" href="#user-interface" title="Permanent link">&para;</a></h2>
-<p>The tool has a simple GUI built with Windows Forms:</p>
-<table>
-<thead>
-<tr>
-<th>Section</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><strong>Status box</strong></td>
-<td>Dark terminal-style log with timestamped entries (also saved to <code>Downloads\</code>)</td>
-</tr>
-<tr>
-<td><strong>Download bar</strong></td>
-<td>Marquee while connecting, shows MB received + speed once underway</td>
-</tr>
-<tr>
-<td><strong>Extract bar</strong></td>
-<td>Marquee with live file count during extraction; switches to proportional bar during INF install</td>
-</tr>
-<tr>
-<td><strong>Overall bar</strong></td>
-<td>End-to-end progress across all stages</td>
-</tr>
-<tr>
-<td><strong>Spinners</strong></td>
-<td>Braille dot spinners on each group box title animate during active work, show ✓ or ✗ on completion</td>
-</tr>
-<tr>
-<td><strong>Sound FX</strong></td>
-<td>Sound effects tied to key events (on by default, toggle via checkbox)</td>
-</tr>
-</tbody>
-</table>
 <hr />
 <h2 id="sound-events">Sound Events<a class="headerlink" href="#sound-events" title="Permanent link">&para;</a></h2>
 <table>
@@ -1133,10 +1065,7 @@
 <p>Clicking <strong>Cancel</strong> during any stage will:</p>
 <ol>
 <li>Set a cancellation flag checked between all major operations</li>
-<li>Kill the active <code>curl.exe</code> download process immediately</li>
-<li>Kill any running extractor process</li>
-<li>Reset all bars and spinners to a failed state</li>
-<li>Re-enable the Install button</li>
+<li>Re enable the Install Drivers button</li>
 </ol>
 <div class="admonition warning">
 <p class="admonition-title">Warning</p>
@@ -1192,7 +1121,7 @@
 <p class="admonition-title">Use outside of audit mode is currently untested</p>
 </div>
 <hr />
-<p>Author: Joel Skerman | Date: 07 May 2026</p>
+<p>Author: Joel Skerman | Date: 07 May 2026 | Modified: 11 May 2026</p>
 
 
 
