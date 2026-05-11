@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.6.1
+# Version: 1.6.2
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -21,6 +21,7 @@
 #
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
 #
+# v1.6.2 - Fixed: MessageBox DialogResult compared to enum not string (prompt was always falling through)
 # v1.6.1 - Fixed: prompt blocks correctly before UI locks; auto-run restored when drivers missing
 # v1.6.0 - GUI no longer auto-runs on launch; waits for user to click Install Drivers
 # v1.5.9 - Fixed: missing driver prompt now shows before 7-Zip install and download
@@ -48,7 +49,7 @@ param(
 # Auto-enable headless when any override param is passed
 if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" -or $SkipInstall -or $SkipCleanup) { $Headless = $true }
 
-$ScriptVersion   = "1.6.1"
+$ScriptVersion   = "1.6.2"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -1920,7 +1921,7 @@ function Start-Install {
                 "No missing drivers were detected on this device.`n`nRun driver installation anyway?",
                 "No Missing Drivers", "YesNo", "Question"
             )
-            if ($skipResult -eq "No") {
+            if ($skipResult -eq [System.Windows.Forms.DialogResult]::No) {
                 Log "User chose to skip - no missing drivers detected."
                 SetProgress 100
                 SetDownload -Pct 100 -Label "Skipped - no missing drivers"
@@ -2033,7 +2034,7 @@ function Start-Install {
                 "Drivers installed successfully for:`n$model$missingLine`n`nReboot now to complete installation?",
                 "Installation Complete", "YesNo", "Information"
             )
-            if ($result -eq "Yes") { Restart-Computer -Force }
+            if ($result -eq [System.Windows.Forms.DialogResult]::Yes) { Restart-Computer -Force }
             else { Set-ButtonIdle }
         }
     } else {
