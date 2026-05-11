@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.6.5
+# Version: 1.6.6
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -21,6 +21,7 @@
 #
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
 #
+# v1.6.6 - Fixed INTELAUDIO bus HW ID parsing (CTLR_DEV_xxxx) for HDA audio devices
 # v1.6.5 - Fixed param() position in Stop-DlSpinner/Stop-ExSpinner/Stop-OverallSpinner causing PS error
 # v1.6.4 - Fixed CatalogPC parsing: UTF-16 encoding, PCIInfo VEN+DEV matching, osCode Win11 detection, systemID model filter
 # v1.6.3 - Dell: individual driver lookup via CatalogPC when 1-3 devices missing; falls back to full pack
@@ -52,7 +53,7 @@ param(
 # Auto-enable headless when any override param is passed
 if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" -or $SkipInstall -or $SkipCleanup) { $Headless = $true }
 
-$ScriptVersion   = "1.6.5"
+$ScriptVersion   = "1.6.6"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -1141,16 +1142,34 @@ function Start-DellIndividualDriverInstall {
     $allMatched = $true
 
     foreach ($dev in $missingDevices) {
-        # Parse VEN and DEV from each hardware ID string
+        # Parse VEN and DEV from each hardware ID string.
+        # Handles both standard PCI IDs (PCI\VEN_xxx&DEV_xxx) and
+        # INTELAUDIO bus IDs (INTELAUDIO\CTLR_DEV_xxx&...VEN_xxx&DEV_xxx)
+        # where CTLR_DEV is the HDA controller and DEV is the codec endpoint.
         $devVenDev = @()
-        foreach ($hwId in @($dev.HardwareIDs) | Where-Object { $_ -match 'VEN_([0-9A-Fa-f]+)&DEV_([0-9A-Fa-f]+)' }) {
-            if ($hwId -match 'VEN_([0-9A-Fa-f]+)&DEV_([0-9A-Fa-f]+)') {
-                $devVenDev += [PSCustomObject]@{ VEN = $Matches[1].ToUpper(); DEV = $Matches[2].ToUpper() }
+        $seen = @{}
+        foreach ($hwId in @($dev.HardwareIDs) | Where-Object { $_ }) {
+            $ven = $null; $dev2 = $null
+            if ($hwId -match 'VEN_([0-9A-Fa-f]+)') { $ven = $Matches[1].ToUpper() }
+            # For INTELAUDIO, use CTLR_DEV as the primary device ID (matches catalog PCIInfo)
+            if ($hwId -match 'CTLR_DEV_([0-9A-Fa-f]+)') {
+                $dev2 = $Matches[1].ToUpper()
+            } elseif ($hwId -match '(?:^|&)DEV_([0-9A-Fa-f]+)') {
+                $dev2 = $Matches[1].ToUpper()
+            }
+            if ($ven -and $dev2) {
+                $key = "$ven|$dev2"
+                if (-not $seen[$key]) {
+                    $seen[$key] = $true
+                    $devVenDev += [PSCustomObject]@{ VEN = $ven; DEV = $dev2 }
+                    Log "    Parsed VEN=$ven DEV=$dev2 from: $hwId"
+                }
             }
         }
         if ($devVenDev.Count -eq 0) {
-            Log "  No PCI VEN/DEV found for '$($dev.Name)' - skipping (non-PCI device?)"
-            continue
+            Log "  No PCI VEN/DEV found for '$($dev.Name)' - falling back to full pack."
+            $allMatched = $false
+            break
         }
 
         $matched = $false
