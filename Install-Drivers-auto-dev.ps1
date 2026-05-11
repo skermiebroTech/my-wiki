@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.6.6
+# Version: 1.6.7
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -21,6 +21,7 @@
 #
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
 #
+# v1.6.7 - Pre-screen missing devices for parseable VEN/DEV before downloading CatalogPC
 # v1.6.6 - Fixed INTELAUDIO bus HW ID parsing (CTLR_DEV_xxxx) for HDA audio devices
 # v1.6.5 - Fixed param() position in Stop-DlSpinner/Stop-ExSpinner/Stop-OverallSpinner causing PS error
 # v1.6.4 - Fixed CatalogPC parsing: UTF-16 encoding, PCIInfo VEN+DEV matching, osCode Win11 detection, systemID model filter
@@ -53,7 +54,7 @@ param(
 # Auto-enable headless when any override param is passed
 if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" -or $SkipInstall -or $SkipCleanup) { $Headless = $true }
 
-$ScriptVersion   = "1.6.6"
+$ScriptVersion   = "1.6.7"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -1295,20 +1296,49 @@ function Start-DellDriverInstall {
         Log "OS: $(if ($isWin11) {'Windows 11'} else {'Windows 10'})"
     } catch {}
 
-    # Threshold check: if 1-3 missing devices, try individual driver lookup first
+    # Threshold check: if 1-3 missing devices, try individual driver lookup first.
+    # Pre-screen: skip individual lookup if any missing device has no parseable VEN/DEV
+    # (e.g. proprietary bus devices like Qualcomm QMUX that will never be in CatalogPC).
     $missingCount = $script:AnalyticsMissingBefore
     if ($missingCount -ge 1 -and $missingCount -le 3) {
-        Log "Missing devices ($missingCount) within threshold - attempting individual driver lookup..."
-        $individualResult = Start-DellIndividualDriverInstall -DriverRoot $DriverRoot -ServiceTag $serviceTag -IsWin11 $isWin11
-        if ($individualResult -eq $true) {
-            Log "Individual driver install complete."
-            return $true
-        } elseif ($individualResult -eq $false) {
-            # Cancelled or hard failure
-            return $false
+        $allHaveVenDev = $true
+        $missingEntities = @(Get-CimInstance Win32_PnPEntity | Where-Object { $_.ConfigManagerErrorCode -ne 0 })
+        foreach ($ent in $missingEntities) {
+            try {
+                $hwIds = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Enum\$($ent.DeviceID)" -EA Stop).HardwareID
+                $hasVenDev = $false
+                foreach ($id in @($hwIds) | Where-Object { $_ }) {
+                    $ven = $null; $dev2 = $null
+                    if ($id -match 'VEN_([0-9A-Fa-f]+)') { $ven = $Matches[1] }
+                    if ($id -match 'CTLR_DEV_([0-9A-Fa-f]+)') { $dev2 = $Matches[1] }
+                    elseif ($id -match '(?:^|&)DEV_([0-9A-Fa-f]+)') { $dev2 = $Matches[1] }
+                    if ($ven -and $dev2) { $hasVenDev = $true; break }
+                }
+                if (-not $hasVenDev) {
+                    Log "Device '$($ent.Name)' has no parseable VEN/DEV (proprietary bus) - skipping individual lookup, using full pack."
+                    $allHaveVenDev = $false
+                    break
+                }
+            } catch {
+                Log "Could not read HW IDs for '$($ent.Name)' - skipping individual lookup."
+                $allHaveVenDev = $false
+                break
+            }
         }
-        # $null = no catalog match found, fall through to full pack
-        Log "Falling back to full driver pack install..."
+
+        if ($allHaveVenDev) {
+            Log "Missing devices ($missingCount) within threshold - attempting individual driver lookup..."
+            $individualResult = Start-DellIndividualDriverInstall -DriverRoot $DriverRoot -ServiceTag $serviceTag -IsWin11 $isWin11
+            if ($individualResult -eq $true) {
+                Log "Individual driver install complete."
+                return $true
+            } elseif ($individualResult -eq $false) {
+                # Cancelled or hard failure
+                return $false
+            }
+            # $null = no catalog match found, fall through to full pack
+            Log "Falling back to full driver pack install..."
+        }
     }
 
     Log "Downloading Dell DriverPackCatalog.cab..."
