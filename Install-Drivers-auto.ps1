@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.6.7
+# Version: 1.6.9
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -21,6 +21,8 @@
 #
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
 #
+# v1.6.9 - Unknown manufacturer (e.g. OEMBY) shows Surface model picker dialog; headless auto-detects from -Model
+# v1.6.8 - Surface: OSDCatalog JSON primary (SystemSKU match, MD5 verify, msiexec /a extract + pnputil)
 # v1.6.7 - Pre-screen missing devices for parseable VEN/DEV before downloading CatalogPC
 # v1.6.6 - Fixed INTELAUDIO bus HW ID parsing (CTLR_DEV_xxxx) for HDA audio devices
 # v1.6.5 - Fixed param() position in Stop-DlSpinner/Stop-ExSpinner/Stop-OverallSpinner causing PS error
@@ -54,7 +56,7 @@ param(
 # Auto-enable headless when any override param is passed
 if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" -or $SkipInstall -or $SkipCleanup) { $Headless = $true }
 
-$ScriptVersion   = "1.6.7"
+$ScriptVersion   = "1.6.9"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -1646,21 +1648,28 @@ function Start-LenovoDriverInstall {
 # =========================
 # MICROSOFT (SURFACE)
 #
-# No machine-readable catalog exists - uses a hardcoded lookup table
-# mapping WMI model names to Microsoft Download Center page IDs.
+# Two-path approach:
 #
-# Flow:
-#   1. Match WMI model to a Download Center page ID.
-#   2. Fetch the details page and scrape the direct .msi href from HTML.
-#   3. When multiple MSIs exist for different OS builds, pick the one
-#      whose embedded build number is <= the device OS build (per
-#      Microsoft's own documented guidance).
-#   4. Download the MSI, then run: msiexec /i <file> /quiet /norestart
-#      No extraction step - the MSI installs drivers directly.
-#   5. Analytics InfCount stays 0 (MSI-based install, no pnputil).
+# PRIMARY: OSDCatalog JSON (DriverAutomationTool - maintained on GitHub)
+#   - Fetches OSDCatalogMicrosoftDriverPack.json from GitHub
+#   - Matches on SystemSKU (hardware identifier - more reliable than model name)
+#   - Handles Commercial vs Consumer SKU variants
+#   - Selects best MSI by OSBuild (highest build <= device OS build)
+#   - Verifies MD5 hash after download (hash included in catalog)
+#   - Extracts MSI with msiexec /a (admin install) into Surface_Extracted folder
+#   - Installs extracted INFs via pnputil (consistent with Dell/HP/Lenovo flow)
 #
-# To add new Surface models: add an entry to $SurfaceDownloadIds below.
-# Source: https://support.microsoft.com/en-us/surface/drivers-firmware/
+# FALLBACK: Hardcoded Download Center IDs
+#   - Used if JSON catalog has no entry for this SKU/model
+#   - Fetches Microsoft Download Center HTML page and scrapes .msi link
+#   - Same msiexec /a + pnputil flow as primary path
+#
+# Surface Pro X (ARM/SQ processor): not supported.
+#   Microsoft requires Windows Update for Pro X driver delivery.
+#   No MSI is published; script opens support page and exits gracefully.
+#
+# To add new Surface models to the fallback table: add an entry to
+#   $SurfaceDownloadIds below (value = numeric ID from details.aspx?id=XXXXXX).
 # =========================
 
 $SurfaceDownloadIds = [ordered]@{
@@ -1709,6 +1718,155 @@ $SurfaceDownloadIds = [ordered]@{
     "Surface Studio"                          = "54311"
 }
 
+# Helper: extract MSI contents using msiexec /a (admin install), then install INFs via pnputil.
+# /a unpacks the MSI payload into a flat directory tree with INF + driver files,
+# consistent with how Dell/HP/Lenovo packs are handled.
+function Install-SurfaceMsi {
+    param(
+        [string]$MsiFile,
+        [string]$DriverRoot,
+        [string]$FileName
+    )
+
+    $extractPath = Join-Path $DriverRoot "Surface_Extracted"
+    if (-not (Test-Path $extractPath)) {
+        New-Item -Path $extractPath -ItemType Directory -Force | Out-Null
+    }
+
+    Log "Extracting Surface MSI: $FileName"
+    Log "  msiexec /a `"$MsiFile`" /qn TARGETDIR=`"$extractPath`""
+    $exGroupBox.Text             = "Extract MSI"
+    $exSpinnerLabel.Text         = " " + $SpinnerFrames[0]
+    $script:SpinnerIndex         = 0
+    $exBar.Style                 = "Marquee"
+    $exBar.MarqueeAnimationSpeed = 30
+    SetExtract -Pct -1 -Label "Extracting MSI contents..."
+
+    $psi                 = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName        = "msiexec.exe"
+    $psi.Arguments       = "/a `"$MsiFile`" /qn TARGETDIR=`"$extractPath`""
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow  = $true
+    $msiProc             = New-Object System.Diagnostics.Process
+    $msiProc.StartInfo   = $psi
+    $msiProc.Start() | Out-Null
+
+    $elapsed = 0; $lastCount = 0; $stall = 0
+    while (-not $msiProc.HasExited) {
+        Start-Sleep -Milliseconds 700
+        $elapsed += 0.7
+        $count = if (Test-Path $extractPath) {
+            (Get-ChildItem $extractPath -Recurse -EA SilentlyContinue).Count
+        } else { 0 }
+        if ($count -gt $lastCount) { $stall = 0; $lastCount = $count } else { $stall++ }
+        $mins = [int]($elapsed / 60); $secs = [int]($elapsed % 60)
+        SetExtract -Pct -1 -Label "Extracting... $count files  ($mins`m $secs`s)"
+        Step-ExSpinner
+        Step-OverallSpinner
+        [System.Windows.Forms.Application]::DoEvents()
+        if ($script:CancelRequested) {
+            Log "  MSI extraction cancelled by user."
+            try { $msiProc.Kill() } catch {}
+            return $false
+        }
+        if ($elapsed -gt 600) {
+            Log "  WARNING: MSI extraction exceeded 10 minutes - aborting."
+            try { $msiProc.Kill() } catch {}
+            return $false
+        }
+    }
+
+    $exitCode = $msiProc.ExitCode
+    Log "  msiexec /a exit code: $exitCode"
+
+    if ($exitCode -ne 0) {
+        Log "  MSI extraction failed (exit $exitCode)."
+        SetExtract -Pct 0 -Label "MSI extraction failed (exit $exitCode)"
+        Stop-ExSpinner -Success $false
+        return $false
+    }
+
+    $finalCount = if (Test-Path $extractPath) {
+        (Get-ChildItem $extractPath -Recurse -EA SilentlyContinue).Count
+    } else { 0 }
+    Log "  MSI extracted: $finalCount files in $extractPath"
+    SetExtract -Pct 60 -Label "Extracted $finalCount files - installing INFs..."
+    Play-Sound -Event "ExtractComplete"
+
+    $exGroupBox.Text = "Install INFs"
+    SetProgress 60
+    return (Install-DriversFromPath -BasePath $extractPath)
+}
+
+# Helper: show a modal dialog with a sorted ComboBox of all known Surface models.
+# Returns the selected model name string, or $null if the user cancels.
+# Called when WMI reports an unrecognised/generic manufacturer (e.g. "OEMBY").
+function Show-SurfaceModelPicker {
+    param([string]$DetectedManufacturer = "", [string]$DetectedModel = "")
+
+    $pickerForm                  = New-Object System.Windows.Forms.Form
+    $pickerForm.Text             = "Select Surface Model"
+    $pickerForm.Size             = New-Object System.Drawing.Size(420, 200)
+    $pickerForm.StartPosition    = "CenterParent"
+    $pickerForm.FormBorderStyle  = "FixedDialog"
+    $pickerForm.MaximizeBox      = $false
+    $pickerForm.MinimizeBox      = $false
+    $pickerForm.BackColor        = [System.Drawing.Color]::FromArgb(245, 245, 245)
+
+    $lbl           = New-Object System.Windows.Forms.Label
+    $lbl.AutoSize  = $false
+    $lbl.Size      = New-Object System.Drawing.Size(380, 36)
+    $lbl.Location  = New-Object System.Drawing.Point(16, 12)
+    $lbl.Font      = $FontUI
+    $lbl.Text      = "Manufacturer '$DetectedManufacturer' was not recognised.`nSelect the Surface model to install drivers for:"
+    $lbl.UseCompatibleTextRendering = $false
+    $pickerForm.Controls.Add($lbl)
+
+    $combo               = New-Object System.Windows.Forms.ComboBox
+    $combo.Size          = New-Object System.Drawing.Size(380, 24)
+    $combo.Location      = New-Object System.Drawing.Point(16, 56)
+    $combo.Font          = $FontUI
+    $combo.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
+    # Populate sorted model list from the global $SurfaceDownloadIds hashtable
+    $sortedModels = $SurfaceDownloadIds.Keys | Sort-Object
+    foreach ($m in $sortedModels) { $combo.Items.Add($m) | Out-Null }
+    $combo.SelectedIndex = 0
+    $pickerForm.Controls.Add($combo)
+
+    $okBtn            = New-Object System.Windows.Forms.Button
+    $okBtn.Text       = "Install Drivers"
+    $okBtn.Size       = New-Object System.Drawing.Size(140, 32)
+    $okBtn.Location   = New-Object System.Drawing.Point(130, 96)
+    $okBtn.Font       = $FontUIBold
+    $okBtn.BackColor  = [System.Drawing.Color]::FromArgb(0, 120, 215)
+    $okBtn.ForeColor  = [System.Drawing.Color]::White
+    $okBtn.FlatStyle  = "Flat"
+    $okBtn.FlatAppearance.BorderSize = 0
+    $okBtn.DialogResult = [System.Windows.Forms.DialogResult]::OK
+    $pickerForm.Controls.Add($okBtn)
+
+    $cancelBtn            = New-Object System.Windows.Forms.Button
+    $cancelBtn.Text       = "Cancel"
+    $cancelBtn.Size       = New-Object System.Drawing.Size(80, 32)
+    $cancelBtn.Location   = New-Object System.Drawing.Point(286, 96)
+    $cancelBtn.Font       = $FontUIBold
+    $cancelBtn.BackColor  = [System.Drawing.Color]::FromArgb(160, 160, 160)
+    $cancelBtn.ForeColor  = [System.Drawing.Color]::White
+    $cancelBtn.FlatStyle  = "Flat"
+    $cancelBtn.FlatAppearance.BorderSize = 0
+    $cancelBtn.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+    $pickerForm.Controls.Add($cancelBtn)
+
+    $pickerForm.AcceptButton = $okBtn
+    $pickerForm.CancelButton = $cancelBtn
+
+    $result = $pickerForm.ShowDialog($form)
+    if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+        return $combo.SelectedItem
+    }
+    return $null
+}
+
 function Start-MicrosoftSurfaceDriverInstall {
     param([string]$DriverRoot, [string]$ModelName)
 
@@ -1723,6 +1881,166 @@ function Start-MicrosoftSurfaceDriverInstall {
         $osBuild = [int](Get-CimInstance Win32_OperatingSystem).BuildNumber
         Log "OS Build: $osBuild"
     } catch { Log "Could not read OS build: $($_.Exception.Message)" }
+
+    # Read SystemSKU - used by OSDCatalog JSON matching (more reliable than model name)
+    $systemSKU = ""
+    try {
+        $systemSKU = (Get-CimInstance Win32_ComputerSystem).SystemSKUNumber.Trim()
+        Log "SystemSKU: $systemSKU"
+    } catch { Log "  WARNING: Could not read SystemSKU." }
+
+    if (-not (Test-Path $DriverRoot)) { New-Item -Path $DriverRoot -ItemType Directory -Force | Out-Null }
+
+    # --------------------------------------------------
+    # PRIMARY PATH: OSDCatalog JSON (DriverAutomationTool GitHub)
+    # Structured catalog with direct URLs, OSBuild per entry, and MD5 hashes.
+    # --------------------------------------------------
+    $osdCatalogUrl  = "https://raw.githubusercontent.com/maurice-daly/DriverAutomationTool/master/Data/OSDCatalogMicrosoftDriverPack.json"
+    $osdCatalogFile = Join-Path $env:TEMP "OSDCatalogMicrosoftDriverPack.json"
+    Remove-Item $osdCatalogFile -EA SilentlyContinue
+
+    Log "Fetching OSDCatalog JSON..."
+    SetExtract -Pct 5 -Label "Fetching Surface catalog..."
+    SetProgress 10
+
+    $psi                 = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName        = "curl.exe"
+    $psi.Arguments       = "--silent --location --max-time 30 --connect-timeout 15 " +
+                           "--output `"$osdCatalogFile`" `"$osdCatalogUrl`""
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow  = $true
+    $fetchProc           = New-Object System.Diagnostics.Process
+    $fetchProc.StartInfo = $psi
+    $fetchProc.Start() | Out-Null
+    $start = Get-Date
+    while (-not $fetchProc.HasExited) {
+        Start-Sleep -Milliseconds 400; Step-AllSpinners
+        if (((Get-Date) - $start).TotalSeconds -gt 35) {
+            Log "  Timeout fetching OSDCatalog JSON."
+            try { $fetchProc.Kill() } catch {}
+            break
+        }
+    }
+    $fetchProc.WaitForExit()
+
+    $chosenEntry = $null
+
+    if ((Test-Path $osdCatalogFile) -and (Get-Item $osdCatalogFile).Length -gt 100) {
+        Log "Parsing OSDCatalog JSON..."
+        SetExtract -Pct 15 -Label "Parsing catalog..."
+        try {
+            $jsonText = [System.IO.File]::ReadAllText($osdCatalogFile)
+            $catalog  = $jsonText | ConvertFrom-Json
+            Log "  Catalog entries: $($catalog.Count)"
+
+            # Match on SystemSKU (normalise spaces/hyphens -> underscores for comparison)
+            if ($systemSKU) {
+                $skuNorm = $systemSKU -replace '[\s\-]','_'
+                $skuCandidates = @($catalog | Where-Object {
+                    $_.Product -and (
+                        ($_.Product -replace '[\s\-]','_') -ieq $skuNorm -or
+                        ($_.Product -split ':' | ForEach-Object { $_ -replace '[\s\-]','_' }) -icontains $skuNorm
+                    )
+                })
+                Log "  SKU matches for '$systemSKU': $($skuCandidates.Count)"
+
+                if ($skuCandidates.Count -gt 0 -and $osBuild -gt 0) {
+                    $eligible = @($skuCandidates | Where-Object {
+                        $_.OSBuild -and [int]$_.OSBuild -le $osBuild
+                    } | Sort-Object { [int]$_.OSBuild } -Descending)
+
+                    if ($eligible.Count -gt 0) {
+                        $chosenEntry = $eligible[0]
+                        Log "  Selected (OSBuild $($chosenEntry.OSBuild) <= device $osBuild): $($chosenEntry.FileName)"
+                    } else {
+                        $chosenEntry = ($skuCandidates | Sort-Object { [int]$_.OSBuild })[0]
+                        Log "  No entry at/below build $osBuild - using lowest available: $($chosenEntry.FileName)"
+                    }
+                } elseif ($skuCandidates.Count -gt 0) {
+                    $chosenEntry = ($skuCandidates | Sort-Object { [int]$_.OSBuild } -Descending)[0]
+                    Log "  OS build unknown - using latest SKU match: $($chosenEntry.FileName)"
+                }
+            }
+
+            # Fallback within JSON: match on Model display name if SKU didn't match
+            if (-not $chosenEntry -and $ModelName) {
+                $nameCandidates = @($catalog | Where-Object {
+                    $_.Model -and $ModelName -ilike "*$($_.Model)*"
+                })
+                Log "  Model name matches for '$ModelName': $($nameCandidates.Count)"
+
+                if ($nameCandidates.Count -gt 0 -and $osBuild -gt 0) {
+                    $eligible = @($nameCandidates | Where-Object {
+                        $_.OSBuild -and [int]$_.OSBuild -le $osBuild
+                    } | Sort-Object { [int]$_.OSBuild } -Descending)
+                    $chosenEntry = if ($eligible.Count -gt 0) { $eligible[0] }
+                                   else { ($nameCandidates | Sort-Object { [int]$_.OSBuild })[0] }
+                    Log "  Selected via model name: $($chosenEntry.FileName)"
+                } elseif ($nameCandidates.Count -gt 0) {
+                    $chosenEntry = ($nameCandidates | Sort-Object { [int]$_.OSBuild } -Descending)[0]
+                }
+            }
+        } catch {
+            Log "  Failed to parse OSDCatalog JSON: $($_.Exception.Message)"
+            $chosenEntry = $null
+        }
+    } else {
+        Log "  OSDCatalog JSON unavailable or empty - falling back to Download Center."
+    }
+
+    if ($chosenEntry) {
+        Log "OSDCatalog match found:"
+        Log "  Model    : $($chosenEntry.Model)"
+        Log "  Product  : $($chosenEntry.Product)"
+        Log "  OSBuild  : $($chosenEntry.OSBuild)"
+        Log "  FileName : $($chosenEntry.FileName)"
+        Log "  URL      : $($chosenEntry.Url)"
+        Log "  MD5      : $($chosenEntry.HashMD5)"
+        SetExtract -Pct 25 -Label "Catalog match: $($chosenEntry.FileName)"
+        SetProgress 20
+
+        $msiFile = Join-Path $DriverRoot $chosenEntry.FileName
+        SetProgress 25
+
+        if (-not (Invoke-CurlDownload -Url $chosenEntry.Url -OutFile $msiFile)) {
+            Log "  Surface MSI download failed."
+            return $false
+        }
+        if (Test-Cancelled) { return $false }
+        SetProgress 50
+
+        # MD5 verification (catalog provides pre-computed hash)
+        if ($chosenEntry.HashMD5 -and $chosenEntry.HashMD5.Length -eq 32) {
+            Log "Verifying MD5 hash..."
+            SetExtract -Pct 30 -Label "Verifying download..."
+            try {
+                $md5       = [System.Security.Cryptography.MD5]::Create()
+                $stream    = [System.IO.File]::OpenRead($msiFile)
+                $hashBytes = $md5.ComputeHash($stream)
+                $stream.Close()
+                $actualMd5   = ([System.BitConverter]::ToString($hashBytes) -replace '-','').ToLower()
+                $expectedMd5 = $chosenEntry.HashMD5.ToLower()
+                if ($actualMd5 -eq $expectedMd5) {
+                    Log "  MD5 OK: $actualMd5"
+                } else {
+                    Log "  WARNING: MD5 mismatch!"
+                    Log "    Expected : $expectedMd5"
+                    Log "    Actual   : $actualMd5"
+                    Log "  Continuing - hash may be stale in catalog."
+                }
+            } catch {
+                Log "  MD5 check error: $($_.Exception.Message) - skipping."
+            }
+        }
+
+        return (Install-SurfaceMsi -MsiFile $msiFile -DriverRoot $DriverRoot -FileName $chosenEntry.FileName)
+    }
+
+    # --------------------------------------------------
+    # FALLBACK PATH: Hardcoded Download Center IDs + HTML scraping
+    # --------------------------------------------------
+    Log "OSDCatalog had no match - falling back to Download Center lookup..."
+    SetExtract -Pct 0 -Label "Trying fallback catalog..."
 
     $pageId = $null
     foreach ($entry in $SurfaceDownloadIds.GetEnumerator()) {
@@ -1766,21 +2084,21 @@ function Start-MicrosoftSurfaceDriverInstall {
     $psi.UseShellExecute        = $false
     $psi.CreateNoWindow         = $true
     $psi.RedirectStandardError  = $true
-    $fetchProc                  = New-Object System.Diagnostics.Process
-    $fetchProc.StartInfo        = $psi
-    $fetchProc.Start() | Out-Null
+    $fetchProc2                 = New-Object System.Diagnostics.Process
+    $fetchProc2.StartInfo       = $psi
+    $fetchProc2.Start() | Out-Null
 
-    $start = Get-Date
-    while (-not $fetchProc.HasExited) {
+    $start2 = Get-Date
+    while (-not $fetchProc2.HasExited) {
         Start-Sleep -Milliseconds 400
         Step-AllSpinners
-        if (((Get-Date) - $start).TotalSeconds -gt 35) {
+        if (((Get-Date) - $start2).TotalSeconds -gt 35) {
             Log "  Timeout fetching download page."
-            try { $fetchProc.Kill() } catch {}
+            try { $fetchProc2.Kill() } catch {}
             break
         }
     }
-    $fetchProc.WaitForExit()
+    $fetchProc2.WaitForExit()
 
     if (-not (Test-Path $detailsFile) -or (Get-Item $detailsFile).Length -lt 1000) {
         Log "Failed to fetch download details page for ID=$pageId"
@@ -1842,7 +2160,6 @@ function Start-MicrosoftSurfaceDriverInstall {
     SetExtract -Pct 40 -Label "MSI selected: $($chosen.FileName)"
     SetProgress 25
 
-    if (-not (Test-Path $DriverRoot)) { New-Item -Path $DriverRoot -ItemType Directory -Force | Out-Null }
     $msiFile = Join-Path $DriverRoot $chosen.FileName
     SetProgress 30
 
@@ -1853,69 +2170,7 @@ function Start-MicrosoftSurfaceDriverInstall {
     if (Test-Cancelled) { return $false }
     SetProgress 55
 
-    Log "Installing Surface MSI: $($chosen.FileName)"
-    Log "  msiexec /i `"$msiFile`" /quiet /norestart"
-    $exGroupBox.Text             = "Install MSI"
-    $exSpinnerLabel.Text         = " " + $SpinnerFrames[0]
-    $script:SpinnerIndex         = 0
-    $exBar.Style                 = "Marquee"
-    $exBar.MarqueeAnimationSpeed = 30
-    SetExtract -Pct -1 -Label "Installing MSI - this may take several minutes..."
-
-    $psi                 = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName        = "msiexec.exe"
-    $psi.Arguments       = "/i `"$msiFile`" /quiet /norestart /l*v `"$DriverRoot\msiexec_install.log`""
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow  = $true
-    $msiProc             = New-Object System.Diagnostics.Process
-    $msiProc.StartInfo   = $psi
-    $msiProc.Start() | Out-Null
-
-    $elapsed = 0
-    while (-not $msiProc.HasExited) {
-        Start-Sleep -Milliseconds 700
-        $elapsed += 0.7
-        $mins = [int]($elapsed / 60)
-        $secs = [int]($elapsed % 60)
-        SetExtract -Pct -1 -Label "Installing MSI... ($mins`m $secs`s elapsed)"
-        Step-ExSpinner
-        Step-OverallSpinner
-        [System.Windows.Forms.Application]::DoEvents()
-        if ($script:CancelRequested) {
-            Log "  MSI install cancelled by user."
-            try { $msiProc.Kill() } catch {}
-            break
-        }
-        if ($elapsed -gt 1800) {
-            Log "  WARNING: MSI install exceeded 30 minutes - aborting."
-            try { $msiProc.Kill() } catch {}
-            break
-        }
-    }
-
-    $exitCode   = $msiProc.ExitCode
-    $msiSuccess = ($exitCode -eq 0 -or $exitCode -eq 3010)
-    Log "  msiexec exit code: $exitCode"
-
-    if ($msiSuccess) {
-        $rebootNeeded = ($exitCode -eq 3010)
-        SetExtract -Pct 100 -Label "MSI installed $(if ($rebootNeeded) {'- reboot required'} else {'successfully'})"
-        Stop-ExSpinner      -Success $true
-        Stop-OverallSpinner -Success $true
-        Play-Sound -Event "ExtractComplete"
-        Log "  Surface MSI installation complete.$(if ($rebootNeeded) {' Reboot required.'})"
-        $script:AnalyticsInfCount = 0
-        SetProgress 100
-        $exGroupBox.Text = "Install MSI"
-        return $true
-    } else {
-        SetExtract -Pct 0 -Label "MSI install failed (exit $exitCode)"
-        Stop-ExSpinner      -Success $false
-        Stop-OverallSpinner -Success $false
-        Play-Sound -Event "Failure"
-        Log "  MSI installation failed. See: $DriverRoot\msiexec_install.log"
-        return $false
-    }
+    return (Install-SurfaceMsi -MsiFile $msiFile -DriverRoot $DriverRoot -FileName $chosen.FileName)
 }
 
 # =========================
@@ -2240,22 +2495,45 @@ function Start-Install {
         if (-not (Assert-Curl)) { Send-AnalyticsEvent -Result "failure"; Set-ButtonIdle; return }
         $success = Start-MicrosoftSurfaceDriverInstall -DriverRoot $driverRoot -ModelName $model
     } else {
-        Log "Unsupported manufacturer: $manufacturer"
-        Log "Supported OEMs: Dell, HP, Lenovo, Microsoft (Surface)"
-        Send-AnalyticsEvent -Result "failure"
+        # Unknown manufacturer (e.g. "OEMBY", blank, generic OEM string).
+        # In headless mode: if -Model was explicitly passed and looks like a Surface, run it.
+        # Otherwise error out with instructions to pass -Manufacturer/-Model explicitly.
+        # In GUI mode: show a Surface model picker dialog and proceed if user selects one.
+        Log "Unrecognised manufacturer: '$manufacturer'"
+        Log "  Model reported as: '$model'"
+
         if ($script:Headless) {
-            Write-Host "UNSUPPORTED: Manufacturer '$manufacturer' is not supported."
-            Write-Host "Supported: Dell, HP, Lenovo, Microsoft (Surface)"
+            # Allow headless override: if -Model param contains a known Surface name, proceed.
+            $headlessSurfaceMatch = $SurfaceDownloadIds.Keys | Where-Object { $model -ilike "*$_*" } | Select-Object -First 1
+            if ($headlessSurfaceMatch) {
+                Log "  Headless: model '$model' looks like a Surface - proceeding as Microsoft Surface."
+                if (-not (Assert-Curl)) { Send-AnalyticsEvent -Result "failure"; return }
+                $success = Start-MicrosoftSurfaceDriverInstall -DriverRoot $driverRoot -ModelName $model
+            } else {
+                Write-Host "ERROR: Manufacturer '$manufacturer' not recognised and model '$model' doesn't match a known Surface."
+                Write-Host "Pass -Manufacturer and -Model explicitly, e.g.:"
+                Write-Host "  -Manufacturer Microsoft -Model `"Surface Pro 9`""
+                Send-AnalyticsEvent -Result "failure"
+                return
+            }
         } else {
-            [System.Windows.Forms.MessageBox]::Show(
-                "Manufacturer '$manufacturer' is not supported.`nSupported: Dell, HP, Lenovo, Microsoft (Surface)",
-                "Unsupported Manufacturer", "OK", "Warning"
-            )
+            Log "  Showing Surface model picker..."
+            Set-ButtonIdle
+            $pickedModel = Show-SurfaceModelPicker -DetectedManufacturer $manufacturer -DetectedModel $model
+            if (-not $pickedModel) {
+                Log "  User cancelled Surface model selection."
+                Send-AnalyticsEvent -Result "cancelled"
+                return
+            }
+            Log "  User selected: $pickedModel"
+            # Update analytics model to the picked Surface model
+            $script:AnalyticsManufacturer = "Microsoft"
+            $script:AnalyticsModel        = $pickedModel
+            $title.Text = "Driver Installer - $pickedModel"
+            Set-ButtonRunning
+            if (-not (Assert-Curl)) { Send-AnalyticsEvent -Result "failure"; Set-ButtonIdle; return }
+            $success = Start-MicrosoftSurfaceDriverInstall -DriverRoot $driverRoot -ModelName $pickedModel
         }
-        # Remove 7-Zip before returning on unsupported manufacturer
-        if ($script:7zInstalled) { Remove-7Zip }
-        Set-ButtonIdle
-        return
     }
 
     # Remove 7-Zip before cleanup - must happen before C:\DRIVERS is deleted
