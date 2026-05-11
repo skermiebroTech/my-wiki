@@ -1,2 +1,3 @@
 - [Panasonic FZ-G1 one click bundle direct download](https://na.panasonic.com/computer/cab/G1F_Mk2_Win10x64_1803_V1.00.cab)
 - [dell 7450 camera driver](https://dl.dell.com/FOLDER13137215M/3/Intel-2D-Imaging-MCU-Visual-Sensing-Controller-Driver_WXX55_WIN64_73.22000.5.14_A06_02.EXE)
+- https://github.com/maurice-daly/DriverAutomationTool

@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.6.2
+# Version: 1.6.7
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -21,6 +21,11 @@
 #
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
 #
+# v1.6.7 - Pre-screen missing devices for parseable VEN/DEV before downloading CatalogPC
+# v1.6.6 - Fixed INTELAUDIO bus HW ID parsing (CTLR_DEV_xxxx) for HDA audio devices
+# v1.6.5 - Fixed param() position in Stop-DlSpinner/Stop-ExSpinner/Stop-OverallSpinner causing PS error
+# v1.6.4 - Fixed CatalogPC parsing: UTF-16 encoding, PCIInfo VEN+DEV matching, osCode Win11 detection, systemID model filter
+# v1.6.3 - Dell: individual driver lookup via CatalogPC when 1-3 devices missing; falls back to full pack
 # v1.6.2 - Fixed: MessageBox DialogResult compared to enum not string (prompt was always falling through)
 # v1.6.1 - Fixed: prompt blocks correctly before UI locks; auto-run restored when drivers missing
 # v1.6.0 - GUI no longer auto-runs on launch; waits for user to click Install Drivers
@@ -49,7 +54,7 @@ param(
 # Auto-enable headless when any override param is passed
 if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" -or $SkipInstall -or $SkipCleanup) { $Headless = $true }
 
-$ScriptVersion   = "1.6.2"
+$ScriptVersion   = "1.6.7"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -386,8 +391,8 @@ function Step-DlSpinner {
     [System.Windows.Forms.Application]::DoEvents()
 }
 function Stop-DlSpinner {
-    if ($script:Headless) { return }
     param([bool]$Success = $true)
+    if ($script:Headless) { return }
     $dlSpinnerLabel.Text      = if ($Success) { " OK" } else { " XX" }
     $dlSpinnerLabel.ForeColor = if ($Success) { [System.Drawing.Color]::FromArgb(0, 100, 180) } else { [System.Drawing.Color]::FromArgb(200, 40, 40) }
     [System.Windows.Forms.Application]::DoEvents()
@@ -400,8 +405,8 @@ function Step-ExSpinner {
     [System.Windows.Forms.Application]::DoEvents()
 }
 function Stop-ExSpinner {
-    if ($script:Headless) { return }
     param([bool]$Success = $true)
+    if ($script:Headless) { return }
     $exSpinnerLabel.Text      = if ($Success) { " OK" } else { " XX" }
     $exSpinnerLabel.ForeColor = if ($Success) { [System.Drawing.Color]::FromArgb(0, 140, 80) } else { [System.Drawing.Color]::FromArgb(200, 40, 40) }
     [System.Windows.Forms.Application]::DoEvents()
@@ -414,8 +419,8 @@ function Step-OverallSpinner {
     [System.Windows.Forms.Application]::DoEvents()
 }
 function Stop-OverallSpinner {
-    if ($script:Headless) { return }
     param([bool]$Success = $true)
+    if ($script:Headless) { return }
     $overallSpinnerLabel.Text      = if ($Success) { " OK" } else { " XX" }
     $overallSpinnerLabel.ForeColor = if ($Success) { [System.Drawing.Color]::FromArgb(80, 80, 80) } else { [System.Drawing.Color]::FromArgb(200, 40, 40) }
     [System.Windows.Forms.Application]::DoEvents()
@@ -1046,6 +1051,225 @@ function Start-PackExtraction {
 }
 
 # =========================
+# DELL - INDIVIDUAL DRIVER INSTALL (1-3 missing devices)
+#
+# Uses CatalogPC.cab which contains individual driver entries,
+# each with <SupportedDevices> hardware IDs. Downloads only the
+# specific drivers needed for the missing devices rather than the
+# full driver pack.
+#
+# Falls back to full pack install if any device has no catalog match.
+# =========================
+function Start-DellIndividualDriverInstall {
+    param([string]$DriverRoot, [string]$ServiceTag, [bool]$IsWin11)
+
+    Log "=== DELL: Individual driver mode (<=3 missing devices) ==="
+
+    # Get missing devices and their hardware IDs
+    Log "Enumerating missing devices..."
+    $missingDevices = @()
+    try {
+        $missingDevices = @(Get-CimInstance Win32_PnPEntity |
+            Where-Object { $_.ConfigManagerErrorCode -ne 0 } |
+            Select-Object Name, DeviceID,
+                @{ N='HardwareIDs'; E={
+                    try { (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Enum\$($_.DeviceID)" -EA Stop).HardwareID }
+                    catch { @() }
+                }}
+        )
+    } catch {
+        Log "  Failed to enumerate missing devices: $($_.Exception.Message)"
+        return $null
+    }
+
+    if ($missingDevices.Count -eq 0) {
+        Log "  No missing devices found on re-check."
+        return $true
+    }
+
+    foreach ($dev in $missingDevices) {
+        $ids = @($dev.HardwareIDs) | Where-Object { $_ }
+        Log "  Missing: $($dev.Name)"
+        foreach ($id in $ids) { Log "    HW ID: $id" }
+    }
+
+    # Get the SystemSKUNumber - used to filter drivers to this specific model
+    $systemSKU = ""
+    try {
+        $systemSKU = (Get-CimInstance Win32_ComputerSystem).SystemSKUNumber.Trim().ToUpper()
+        Log "  SystemSKUNumber: $systemSKU"
+    } catch { Log "  WARNING: Could not read SystemSKUNumber - model filtering disabled." }
+
+    # Download CatalogPC.cab
+    Log "Downloading Dell CatalogPC.cab..."
+    $catalogCab = Join-Path $env:TEMP "DellCatalogPC.cab"
+    $catalogXml = Join-Path $env:TEMP "CatalogPC.xml"
+    Remove-Item $catalogCab -EA SilentlyContinue
+    Remove-Item $catalogXml -EA SilentlyContinue
+
+    SetDownload -Pct 0 -Label "Downloading Dell CatalogPC..."
+    if (-not (Invoke-CurlDownload -Url "https://downloads.dell.com/catalog/CatalogPC.cab" -OutFile $catalogCab)) {
+        Log "  Failed to download CatalogPC.cab - falling back to full pack."
+        return $null
+    }
+    if (Test-Cancelled) { return $false }
+
+    Log "Extracting CatalogPC.cab..."
+    SetExtract -Pct 10 -Label "Extracting catalog..."
+    $expandOut = & expand.exe "`"$catalogCab`"" "`"$catalogXml`"" 2>&1
+    Log "  expand.exe: $expandOut"
+    if (-not (Test-Path $catalogXml) -or (Get-Item $catalogXml).Length -eq 0) {
+        Log "  CatalogPC CAB extraction failed - falling back to full pack."
+        return $null
+    }
+    SetExtract -Pct 30 -Label "Catalog extracted OK"
+
+    # CatalogPC.xml is UTF-16 encoded
+    Log "Parsing CatalogPC.xml (UTF-16)..."
+    try {
+        $rawXml   = [System.IO.File]::ReadAllText($catalogXml, [System.Text.Encoding]::Unicode)
+        [xml]$cat = $rawXml
+    } catch {
+        Log "  Failed to parse CatalogPC.xml: $($_.Exception.Message) - falling back to full pack."
+        return $null
+    }
+
+    # Win11 osCodes in CatalogPC.xml use W21xx prefix (not Display text)
+    $win11Codes = @('W21H4','W21P4','W21S4','W21S5','W11AH','W11AP','W11S5','W11TM','IOTL5')
+    $win10Codes = @('W10H4','W10P4','W10H2','W10P2','IOT01','IOTL3','IOTL4','WTCLD')
+
+    # For each missing device, find matching driver entries in the catalog
+    $toDownload = [System.Collections.Generic.List[object]]::new()
+    $allMatched = $true
+
+    foreach ($dev in $missingDevices) {
+        # Parse VEN and DEV from each hardware ID string.
+        # Handles both standard PCI IDs (PCI\VEN_xxx&DEV_xxx) and
+        # INTELAUDIO bus IDs (INTELAUDIO\CTLR_DEV_xxx&...VEN_xxx&DEV_xxx)
+        # where CTLR_DEV is the HDA controller and DEV is the codec endpoint.
+        $devVenDev = @()
+        $seen = @{}
+        foreach ($hwId in @($dev.HardwareIDs) | Where-Object { $_ }) {
+            $ven = $null; $dev2 = $null
+            if ($hwId -match 'VEN_([0-9A-Fa-f]+)') { $ven = $Matches[1].ToUpper() }
+            # For INTELAUDIO, use CTLR_DEV as the primary device ID (matches catalog PCIInfo)
+            if ($hwId -match 'CTLR_DEV_([0-9A-Fa-f]+)') {
+                $dev2 = $Matches[1].ToUpper()
+            } elseif ($hwId -match '(?:^|&)DEV_([0-9A-Fa-f]+)') {
+                $dev2 = $Matches[1].ToUpper()
+            }
+            if ($ven -and $dev2) {
+                $key = "$ven|$dev2"
+                if (-not $seen[$key]) {
+                    $seen[$key] = $true
+                    $devVenDev += [PSCustomObject]@{ VEN = $ven; DEV = $dev2 }
+                    Log "    Parsed VEN=$ven DEV=$dev2 from: $hwId"
+                }
+            }
+        }
+        if ($devVenDev.Count -eq 0) {
+            Log "  No PCI VEN/DEV found for '$($dev.Name)' - falling back to full pack."
+            $allMatched = $false
+            break
+        }
+
+        $matched = $false
+        foreach ($component in $cat.SelectNodes("//*[local-name()='SoftwareComponent']")) {
+
+            # Must be a driver (DRVR), not firmware
+            $typeNode = $component.SelectSingleNode("*[local-name()='ComponentType']")
+            if ($typeNode -and $typeNode.GetAttribute("value") -ne "DRVR") { continue }
+
+            # Check OS compatibility via osCode attribute
+            $osMatch = $false
+            $targetCodes = if ($IsWin11) { $win11Codes } else { $win10Codes }
+            foreach ($osNode in $component.SelectNodes(".//*[local-name()='OperatingSystem']")) {
+                if ($targetCodes -contains $osNode.GetAttribute("osCode")) { $osMatch = $true; break }
+            }
+            if (-not $osMatch) { continue }
+
+            # Check model compatibility via systemID (matches SystemSKUNumber)
+            if ($systemSKU) {
+                $modelMatch = $false
+                foreach ($modelNode in $component.SelectNodes(".//*[local-name()='Model']")) {
+                    if ($modelNode.GetAttribute("systemID").ToUpper() -eq $systemSKU) { $modelMatch = $true; break }
+                }
+                if (-not $modelMatch) { continue }
+            }
+
+            # Match hardware ID via PCIInfo deviceID + vendorID attributes
+            foreach ($pciNode in $component.SelectNodes(".//*[local-name()='PCIInfo']")) {
+                $catVen = $pciNode.GetAttribute("vendorID").ToUpper()
+                $catDev = $pciNode.GetAttribute("deviceID").ToUpper()
+                foreach ($vd in $devVenDev) {
+                    if ($vd.VEN -eq $catVen -and $vd.DEV -eq $catDev) {
+                        $driverPath = $component.GetAttribute("path")
+                        $driverName = ""
+                        try { $driverName = $component.SelectSingleNode("*[local-name()='Name']/*[local-name()='Display']").InnerText } catch {}
+                        Log "  Matched '$($dev.Name)'"
+                        Log "    Driver : $driverName"
+                        Log "    Path   : $driverPath"
+                        if ($driverPath -and -not ($toDownload | Where-Object { $_.Path -eq $driverPath })) {
+                            $toDownload.Add([PSCustomObject]@{
+                                DeviceName = $dev.Name
+                                DriverName = $driverName
+                                Path       = $driverPath
+                            })
+                        }
+                        $matched = $true
+                        break
+                    }
+                }
+                if ($matched) { break }
+            }
+            if ($matched) { break }
+        }
+
+        if (-not $matched) {
+            Log "  No CatalogPC match for '$($dev.Name)' - will fall back to full pack."
+            $allMatched = $false
+            break
+        }
+    }
+
+    if (-not $allMatched) { return $null }
+
+    if ($toDownload.Count -eq 0) {
+        Log "  No drivers to download - all devices may already be covered."
+        return $true
+    }
+
+    Log "Found $($toDownload.Count) driver(s) to download individually."
+    if (-not (Test-Path $DriverRoot)) { New-Item -Path $DriverRoot -ItemType Directory -Force | Out-Null }
+
+    $i = 0
+    foreach ($drv in $toDownload) {
+        $i++
+        $driverUrl  = "https://downloads.dell.com/$($drv.Path)"
+        $driverFile = Join-Path $DriverRoot ([System.IO.Path]::GetFileName($drv.Path))
+        Log "[$i/$($toDownload.Count)] Downloading: $($drv.DriverName)"
+        SetProgress (20 + [int](($i / $toDownload.Count) * 30))
+        if (-not (Invoke-CurlDownload -Url $driverUrl -OutFile $driverFile)) {
+            Log "  Download failed for '$($drv.DriverName)' - falling back to full pack."
+            return $null
+        }
+        if (Test-Cancelled) { return $false }
+
+        $extractPath = Join-Path $DriverRoot "Dell_Individual_$i"
+        Log "  Extracting: $($drv.DriverName)..."
+        Start-PackExtraction -PackFile $driverFile -DestPath $extractPath -StallLimitSec 120 -Vendor "Dell"
+        SetProgress (50 + [int](($i / $toDownload.Count) * 10))
+    }
+
+    # Install all extracted INFs
+    $anyInstalled = $false
+    foreach ($extractDir in (Get-Item (Join-Path $DriverRoot "Dell_Individual_*") -EA SilentlyContinue)) {
+        if (Install-DriversFromPath -BasePath $extractDir.FullName) { $anyInstalled = $true }
+    }
+    return $anyInstalled
+}
+
+# =========================
 # DELL
 # =========================
 function Start-DellDriverInstall {
@@ -1071,6 +1295,51 @@ function Start-DellDriverInstall {
         $isWin11 = [int](Get-CimInstance Win32_OperatingSystem).BuildNumber -ge 22000
         Log "OS: $(if ($isWin11) {'Windows 11'} else {'Windows 10'})"
     } catch {}
+
+    # Threshold check: if 1-3 missing devices, try individual driver lookup first.
+    # Pre-screen: skip individual lookup if any missing device has no parseable VEN/DEV
+    # (e.g. proprietary bus devices like Qualcomm QMUX that will never be in CatalogPC).
+    $missingCount = $script:AnalyticsMissingBefore
+    if ($missingCount -ge 1 -and $missingCount -le 3) {
+        $allHaveVenDev = $true
+        $missingEntities = @(Get-CimInstance Win32_PnPEntity | Where-Object { $_.ConfigManagerErrorCode -ne 0 })
+        foreach ($ent in $missingEntities) {
+            try {
+                $hwIds = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Enum\$($ent.DeviceID)" -EA Stop).HardwareID
+                $hasVenDev = $false
+                foreach ($id in @($hwIds) | Where-Object { $_ }) {
+                    $ven = $null; $dev2 = $null
+                    if ($id -match 'VEN_([0-9A-Fa-f]+)') { $ven = $Matches[1] }
+                    if ($id -match 'CTLR_DEV_([0-9A-Fa-f]+)') { $dev2 = $Matches[1] }
+                    elseif ($id -match '(?:^|&)DEV_([0-9A-Fa-f]+)') { $dev2 = $Matches[1] }
+                    if ($ven -and $dev2) { $hasVenDev = $true; break }
+                }
+                if (-not $hasVenDev) {
+                    Log "Device '$($ent.Name)' has no parseable VEN/DEV (proprietary bus) - skipping individual lookup, using full pack."
+                    $allHaveVenDev = $false
+                    break
+                }
+            } catch {
+                Log "Could not read HW IDs for '$($ent.Name)' - skipping individual lookup."
+                $allHaveVenDev = $false
+                break
+            }
+        }
+
+        if ($allHaveVenDev) {
+            Log "Missing devices ($missingCount) within threshold - attempting individual driver lookup..."
+            $individualResult = Start-DellIndividualDriverInstall -DriverRoot $DriverRoot -ServiceTag $serviceTag -IsWin11 $isWin11
+            if ($individualResult -eq $true) {
+                Log "Individual driver install complete."
+                return $true
+            } elseif ($individualResult -eq $false) {
+                # Cancelled or hard failure
+                return $false
+            }
+            # $null = no catalog match found, fall through to full pack
+            Log "Falling back to full driver pack install..."
+        }
+    }
 
     Log "Downloading Dell DriverPackCatalog.cab..."
     $catalogCab = Join-Path $env:TEMP "DellDriverPackCatalog.cab"
