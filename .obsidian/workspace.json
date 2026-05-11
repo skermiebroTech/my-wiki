@@ -185,7 +185,6 @@
   },
   "active": "c699af67c7046aa9",
   "lastOpenFiles": [
-    "docs/todo.md",
     "site/search/search_index.json",
     "site/search",
     "site/Panasonic/panasonic-fzg1/index.html",
@@ -196,6 +195,8 @@
     "site/driver-installation/index.html",
     "site/driver-installation",
     "site/cab-file-driver-installation/index.html",
+    "site/cab-file-driver-installation",
+    "docs/todo.md",
     "docs/index.md",
     "docs/Auto-Installer-Docs.md",
     "docs/cab-file-driver-installation.md",
