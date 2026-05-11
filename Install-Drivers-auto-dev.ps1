@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.6.3
+# Version: 1.6.4
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -21,6 +21,7 @@
 #
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
 #
+# v1.6.4 - Fixed CatalogPC parsing: UTF-16 encoding, PCIInfo VEN+DEV matching, osCode Win11 detection, systemID model filter
 # v1.6.3 - Dell: individual driver lookup via CatalogPC when 1-3 devices missing; falls back to full pack
 # v1.6.2 - Fixed: MessageBox DialogResult compared to enum not string (prompt was always falling through)
 # v1.6.1 - Fixed: prompt blocks correctly before UI locks; auto-run restored when drivers missing
@@ -50,7 +51,7 @@ param(
 # Auto-enable headless when any override param is passed
 if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" -or $SkipInstall -or $SkipCleanup) { $Headless = $true }
 
-$ScriptVersion   = "1.6.3"
+$ScriptVersion   = "1.6.4"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -1075,7 +1076,7 @@ function Start-DellIndividualDriverInstall {
         )
     } catch {
         Log "  Failed to enumerate missing devices: $($_.Exception.Message)"
-        return $null  # signal caller to fall back to full pack
+        return $null
     }
 
     if ($missingDevices.Count -eq 0) {
@@ -1088,6 +1089,13 @@ function Start-DellIndividualDriverInstall {
         Log "  Missing: $($dev.Name)"
         foreach ($id in $ids) { Log "    HW ID: $id" }
     }
+
+    # Get the SystemSKUNumber - used to filter drivers to this specific model
+    $systemSKU = ""
+    try {
+        $systemSKU = (Get-CimInstance Win32_ComputerSystem).SystemSKUNumber.Trim().ToUpper()
+        Log "  SystemSKUNumber: $systemSKU"
+    } catch { Log "  WARNING: Could not read SystemSKUNumber - model filtering disabled." }
 
     # Download CatalogPC.cab
     Log "Downloading Dell CatalogPC.cab..."
@@ -1113,48 +1121,73 @@ function Start-DellIndividualDriverInstall {
     }
     SetExtract -Pct 30 -Label "Catalog extracted OK"
 
-    Log "Parsing CatalogPC.xml..."
+    # CatalogPC.xml is UTF-16 encoded
+    Log "Parsing CatalogPC.xml (UTF-16)..."
     try {
-        $rawXml   = [System.IO.File]::ReadAllText($catalogXml).TrimStart([char]0xFEFF)
+        $rawXml   = [System.IO.File]::ReadAllText($catalogXml, [System.Text.Encoding]::Unicode)
         [xml]$cat = $rawXml
     } catch {
         Log "  Failed to parse CatalogPC.xml: $($_.Exception.Message) - falling back to full pack."
         return $null
     }
 
-    $osPattern = if ($IsWin11) { "(?i)windows.*11" } else { "(?i)windows.*10" }
+    # Win11 osCodes in CatalogPC.xml use W21xx prefix (not Display text)
+    $win11Codes = @('W21H4','W21P4','W21S4','W21S5','W11AH','W11AP','W11S5','W11TM','IOTL5')
+    $win10Codes = @('W10H4','W10P4','W10H2','W10P2','IOT01','IOTL3','IOTL4','WTCLD')
 
     # For each missing device, find matching driver entries in the catalog
-    $toDownload  = [System.Collections.Generic.List[object]]::new()
-    $allMatched  = $true
+    $toDownload = [System.Collections.Generic.List[object]]::new()
+    $allMatched = $true
 
     foreach ($dev in $missingDevices) {
-        $hwIds      = @($dev.HardwareIDs) | Where-Object { $_ }
-        $matched    = $false
+        # Parse VEN and DEV from each hardware ID string
+        $devVenDev = @()
+        foreach ($hwId in @($dev.HardwareIDs) | Where-Object { $_ -match 'VEN_([0-9A-Fa-f]+)&DEV_([0-9A-Fa-f]+)' }) {
+            if ($hwId -match 'VEN_([0-9A-Fa-f]+)&DEV_([0-9A-Fa-f]+)') {
+                $devVenDev += [PSCustomObject]@{ VEN = $Matches[1].ToUpper(); DEV = $Matches[2].ToUpper() }
+            }
+        }
+        if ($devVenDev.Count -eq 0) {
+            Log "  No PCI VEN/DEV found for '$($dev.Name)' - skipping (non-PCI device?)"
+            continue
+        }
 
+        $matched = $false
         foreach ($component in $cat.SelectNodes("//*[local-name()='SoftwareComponent']")) {
-            # Check OS compatibility
+
+            # Must be a driver (DRVR), not firmware
+            $typeNode = $component.SelectSingleNode("*[local-name()='ComponentType']")
+            if ($typeNode -and $typeNode.GetAttribute("value") -ne "DRVR") { continue }
+
+            # Check OS compatibility via osCode attribute
             $osMatch = $false
+            $targetCodes = if ($IsWin11) { $win11Codes } else { $win10Codes }
             foreach ($osNode in $component.SelectNodes(".//*[local-name()='OperatingSystem']")) {
-                $osDisp = ""
-                try { $osDisp = $osNode.SelectSingleNode("*[local-name()='Display']").InnerText } catch {}
-                if ($osDisp -match $osPattern) { $osMatch = $true; break }
+                if ($targetCodes -contains $osNode.GetAttribute("osCode")) { $osMatch = $true; break }
             }
             if (-not $osMatch) { continue }
 
-            # Check hardware ID match
-            foreach ($hwIdNode in $component.SelectNodes(".//*[local-name()='PCCompatible']")) {
-                $catalogId = $hwIdNode.InnerText.Trim()
-                foreach ($devId in $hwIds) {
-                    # Match on VEN/DEV portion to handle subsystem variations
-                    $shortDev     = ($devId -split '&SUBSYS')[0]
-                    $shortCatalog = ($catalogId -split '&SUBSYS')[0]
-                    if ($shortDev -ieq $shortCatalog -or $catalogId -ieq $devId) {
+            # Check model compatibility via systemID (matches SystemSKUNumber)
+            if ($systemSKU) {
+                $modelMatch = $false
+                foreach ($modelNode in $component.SelectNodes(".//*[local-name()='Model']")) {
+                    if ($modelNode.GetAttribute("systemID").ToUpper() -eq $systemSKU) { $modelMatch = $true; break }
+                }
+                if (-not $modelMatch) { continue }
+            }
+
+            # Match hardware ID via PCIInfo deviceID + vendorID attributes
+            foreach ($pciNode in $component.SelectNodes(".//*[local-name()='PCIInfo']")) {
+                $catVen = $pciNode.GetAttribute("vendorID").ToUpper()
+                $catDev = $pciNode.GetAttribute("deviceID").ToUpper()
+                foreach ($vd in $devVenDev) {
+                    if ($vd.VEN -eq $catVen -and $vd.DEV -eq $catDev) {
                         $driverPath = $component.GetAttribute("path")
                         $driverName = ""
                         try { $driverName = $component.SelectSingleNode("*[local-name()='Name']/*[local-name()='Display']").InnerText } catch {}
-                        Log "  Matched '$($dev.Name)' -> $driverName"
-                        Log "    Path: $driverPath"
+                        Log "  Matched '$($dev.Name)'"
+                        Log "    Driver : $driverName"
+                        Log "    Path   : $driverPath"
                         if ($driverPath -and -not ($toDownload | Where-Object { $_.Path -eq $driverPath })) {
                             $toDownload.Add([PSCustomObject]@{
                                 DeviceName = $dev.Name
@@ -1178,7 +1211,7 @@ function Start-DellIndividualDriverInstall {
         }
     }
 
-    if (-not $allMatched) { return $null }  # fall back to full pack
+    if (-not $allMatched) { return $null }
 
     if ($toDownload.Count -eq 0) {
         Log "  No drivers to download - all devices may already be covered."
@@ -1208,11 +1241,9 @@ function Start-DellIndividualDriverInstall {
     }
 
     # Install all extracted INFs
-    $allExtracted = Join-Path $DriverRoot "Dell_Individual_*"
     $anyInstalled = $false
-    foreach ($extractDir in (Get-Item $allExtracted -EA SilentlyContinue)) {
-        $result = Install-DriversFromPath -BasePath $extractDir.FullName
-        if ($result) { $anyInstalled = $true }
+    foreach ($extractDir in (Get-Item (Join-Path $DriverRoot "Dell_Individual_*") -EA SilentlyContinue)) {
+        if (Install-DriversFromPath -BasePath $extractDir.FullName) { $anyInstalled = $true }
     }
     return $anyInstalled
 }
