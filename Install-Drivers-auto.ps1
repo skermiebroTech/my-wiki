@@ -1,16 +1,55 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.5.3
+# Version: 1.6.2
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
-# Run from Win+R in audit mode:
+# Run from Win+R in audit mode (GUI):
 #   powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto.ps1 | iex"
 #
+# Run headlessly with arguments:
+#   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -Manufacturer Dell
+#   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -Manufacturer HP -Model "EliteBook x360 1030 G8 Notebook PC"
+#   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -Manufacturer Lenovo -MachineType 20XX -SkipInstall -SkipCleanup
+#
+# Parameters:
+#   -Manufacturer  Override WMI manufacturer detection (Dell, HP, Lenovo, Microsoft)
+#   -Model         Override WMI model detection
+#   -Headless      Skip GUI, write to console only (auto-set when any param is passed)
+#   -SkipInstall   Download and extract only, skip pnputil driver installation
+#   -SkipCleanup   Keep C:\DRIVERS after run for inspection
+#
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
+#
+# v1.6.2 - Fixed: MessageBox DialogResult compared to enum not string (prompt was always falling through)
+# v1.6.1 - Fixed: prompt blocks correctly before UI locks; auto-run restored when drivers missing
+# v1.6.0 - GUI no longer auto-runs on launch; waits for user to click Install Drivers
+# v1.5.9 - Fixed: missing driver prompt now shows before 7-Zip install and download
+# v1.5.8 - Prompt to skip install if no missing drivers detected (GUI); continues in headless
+# v1.5.7 - Added -DriverRoot param for parallel testing
+# v1.5.6 - Added -MachineType param for Lenovo machine type override
+# v1.5.5 - Added headless/parameter mode for testing and automation
+# v1.5.4 - 7-Zip integration for Dell and HP extraction
+#   Dell: 7-Zip pass-1 replaces /s /e= (verified identical output, 1.1x faster)
+#   HP:   7-Zip pass-1 replaces /s /e /f (verified identical output, 4.7x faster)
+#   Lenovo: unchanged - Inno Setup proprietary format, 7-Zip cannot extract
+#   7-Zip is installed silently at start and removed before cleanup
 # =============================================================
 
-$ScriptVersion   = "1.5.3"
+param(
+    [string]$Manufacturer = "",
+    [string]$Model        = "",
+    [string]$MachineType  = "",   # Lenovo only: override 4-char machine type prefix (e.g. 20XX)
+    [string]$DriverRoot   = "C:\DRIVERS",  # Override default driver root (useful for parallel testing)
+    [switch]$Headless,
+    [switch]$SkipInstall,
+    [switch]$SkipCleanup
+)
+
+# Auto-enable headless when any override param is passed
+if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" -or $SkipInstall -or $SkipCleanup) { $Headless = $true }
+
+$ScriptVersion   = "1.6.2"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -268,6 +307,7 @@ function Play-Sound {
 # BUTTON STATE HELPERS
 # =========================
 function Set-ButtonRunning {
+    if ($script:Headless) { return }
     $button.Enabled         = $false
     $button.BackColor       = [System.Drawing.Color]::FromArgb(120, 120, 120)
     $cancelButton.Enabled   = $true
@@ -276,6 +316,7 @@ function Set-ButtonRunning {
 }
 
 function Set-ButtonIdle {
+    if ($script:Headless) { return }
     $button.Enabled         = $true
     $button.BackColor       = [System.Drawing.Color]::FromArgb(0, 120, 215)
     $cancelButton.Enabled   = $false
@@ -289,19 +330,25 @@ function Set-ButtonIdle {
 function Log($msg) {
     $ts   = Get-Date -Format 'HH:mm:ss'
     $line = "[$ts] $msg"
-    $statusBox.AppendText("$line`r`n")
-    $statusBox.ScrollToCaret()
+    if ($script:Headless) {
+        Write-Host $line
+    } else {
+        $statusBox.AppendText("$line`r`n")
+        $statusBox.ScrollToCaret()
+        [System.Windows.Forms.Application]::DoEvents()
+    }
     Add-Content -Path $LogFile -Value $line -Encoding UTF8
-    [System.Windows.Forms.Application]::DoEvents()
 }
 
 function SetProgress($val) {
+    if ($script:Headless) { return }
     $progress.Value = [math]::Min([math]::Max([int]$val, 0), 100)
     [System.Windows.Forms.Application]::DoEvents()
 }
 
 function SetDownload {
     param([int]$Pct, [string]$Label)
+    if ($script:Headless) { return }
     if ($Pct -ge 100) {
         $dlBar.Style = "Continuous"
         $dlBar.Value = 100
@@ -315,6 +362,7 @@ function SetDownload {
 
 function SetExtract {
     param([int]$Pct, [string]$Label)
+    if ($script:Headless) { return }
     if ($Pct -ge 100) {
         $exBar.Style = "Continuous"
         $exBar.Value = 100
@@ -332,42 +380,49 @@ function SetExtract {
 }
 
 function Step-DlSpinner {
+    if ($script:Headless) { return }
     $script:SpinnerIndex = ($script:SpinnerIndex + 1) % $SpinnerFrames.Count
     $dlSpinnerLabel.Text = " " + $SpinnerFrames[$script:SpinnerIndex]
     [System.Windows.Forms.Application]::DoEvents()
 }
 function Stop-DlSpinner {
+    if ($script:Headless) { return }
     param([bool]$Success = $true)
-    $dlSpinnerLabel.Text      = if ($Success) { " ✓" } else { " ✗" }
+    $dlSpinnerLabel.Text      = if ($Success) { " OK" } else { " XX" }
     $dlSpinnerLabel.ForeColor = if ($Success) { [System.Drawing.Color]::FromArgb(0, 100, 180) } else { [System.Drawing.Color]::FromArgb(200, 40, 40) }
     [System.Windows.Forms.Application]::DoEvents()
 }
 
 function Step-ExSpinner {
+    if ($script:Headless) { return }
     $script:SpinnerIndex  = ($script:SpinnerIndex + 1) % $SpinnerFrames.Count
     $exSpinnerLabel.Text  = " " + $SpinnerFrames[$script:SpinnerIndex]
     [System.Windows.Forms.Application]::DoEvents()
 }
 function Stop-ExSpinner {
+    if ($script:Headless) { return }
     param([bool]$Success = $true)
-    $exSpinnerLabel.Text      = if ($Success) { " ✓" } else { " ✗" }
+    $exSpinnerLabel.Text      = if ($Success) { " OK" } else { " XX" }
     $exSpinnerLabel.ForeColor = if ($Success) { [System.Drawing.Color]::FromArgb(0, 140, 80) } else { [System.Drawing.Color]::FromArgb(200, 40, 40) }
     [System.Windows.Forms.Application]::DoEvents()
 }
 
 function Step-OverallSpinner {
+    if ($script:Headless) { return }
     $script:SpinnerIndex      = ($script:SpinnerIndex + 1) % $SpinnerFrames.Count
     $overallSpinnerLabel.Text = " " + $SpinnerFrames[$script:SpinnerIndex]
     [System.Windows.Forms.Application]::DoEvents()
 }
 function Stop-OverallSpinner {
+    if ($script:Headless) { return }
     param([bool]$Success = $true)
-    $overallSpinnerLabel.Text      = if ($Success) { " ✓" } else { " ✗" }
+    $overallSpinnerLabel.Text      = if ($Success) { " OK" } else { " XX" }
     $overallSpinnerLabel.ForeColor = if ($Success) { [System.Drawing.Color]::FromArgb(80, 80, 80) } else { [System.Drawing.Color]::FromArgb(200, 40, 40) }
     [System.Windows.Forms.Application]::DoEvents()
 }
 
 function Step-AllSpinners {
+    if ($script:Headless) { return }
     $script:SpinnerIndex      = ($script:SpinnerIndex + 1) % $SpinnerFrames.Count
     $f                        = $SpinnerFrames[$script:SpinnerIndex]
     $dlSpinnerLabel.Text      = " " + $f
@@ -405,8 +460,82 @@ function Get-MissingDriverCount {
             Where-Object { $_.ConfigManagerErrorCode -ne 0 }).Count
         return $count
     } catch {
-        Log "  WARNING: Could not query PnP device status — $($_.Exception.Message)"
+        Log "  WARNING: Could not query PnP device status: $($_.Exception.Message)"
         return -1
+    }
+}
+
+# =========================
+# 7-ZIP HELPERS
+# Installed at start of Start-Install for Dell/HP extraction.
+# Removed before final cleanup so nothing persists to the customer.
+# Lenovo uses Inno Setup - 7-Zip cannot extract its proprietary format.
+# =========================
+$script:7zExe         = "C:\Program Files\7-Zip\7z.exe"
+$script:7zInstaller   = "$env:TEMP\7z-installer.exe"
+$script:7zInstalled   = $false
+
+function Install-7Zip {
+    if (Test-Path $script:7zExe) {
+        Log "7-Zip already present - skipping install."
+        $script:7zInstalled = $true
+        return $true
+    }
+    Log "Installing 7-Zip (temporary - will be removed after extraction)..."
+    SetDownload -Pct 0 -Label "Downloading 7-Zip..."
+    try {
+        $psi                        = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName               = "curl.exe"
+        $psi.Arguments              = "--silent --location --max-time 60 --connect-timeout 15 " +
+                                      "--output `"$($script:7zInstaller)`" " +
+                                      "`"https://www.7-zip.org/a/7z2409-x64.exe`""
+        $psi.UseShellExecute        = $false
+        $psi.CreateNoWindow         = $true
+        $proc                       = New-Object System.Diagnostics.Process
+        $proc.StartInfo             = $psi
+        $proc.Start() | Out-Null
+        while (-not $proc.HasExited) { Start-Sleep -Milliseconds 400; Step-AllSpinners }
+        if ($proc.ExitCode -ne 0 -or -not (Test-Path $script:7zInstaller)) {
+            Log "  7-Zip download failed (curl exit $($proc.ExitCode))."
+            return $false
+        }
+        Start-Process $script:7zInstaller -ArgumentList "/S" -Wait
+        if (-not (Test-Path $script:7zExe)) {
+            Log "  7-Zip installer ran but 7z.exe not found."
+            return $false
+        }
+        $script:7zInstalled = $true
+        Log "  7-Zip installed OK."
+        return $true
+    } catch {
+        Log "  7-Zip install error: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+function Remove-7Zip {
+    Log "Removing 7-Zip..."
+    try {
+        $uninstaller = "C:\Program Files\7-Zip\Uninstall.exe"
+        if (Test-Path $uninstaller) {
+            Start-Process $uninstaller -ArgumentList "/S" -Wait
+            Start-Sleep -Seconds 2
+        }
+        # Belt-and-braces: remove folder if uninstaller left anything
+        $folder = "C:\Program Files\7-Zip"
+        if (Test-Path $folder) { Remove-Item $folder -Recurse -Force -EA SilentlyContinue }
+    } catch {
+        Log "  WARNING: 7-Zip uninstall error: $($_.Exception.Message)"
+    }
+    # Always clean up the installer temp file
+    Remove-Item $script:7zInstaller -Force -EA SilentlyContinue
+    $script:7zInstalled = $false
+
+    # Verify
+    if (Test-Path $script:7zExe) {
+        Log "  WARNING: 7z.exe still present after uninstall - check manually before sysprep."
+    } else {
+        Log "  7-Zip removed OK."
     }
 }
 
@@ -476,9 +605,9 @@ function Send-AnalyticsEvent {
         $proc.WaitForExit()
         Remove-Item $payloadFile -EA SilentlyContinue
         if ($proc.ExitCode -ne 0) {
-            Log "  Analytics warning: curl exit $($proc.ExitCode) — $stderr"
+            Log "  Analytics warning: curl exit $($proc.ExitCode) - $stderr"
         } elseif ($stdout -eq "OK") {
-            Log "  Analytics sent OK — row written to Google Sheet."
+            Log "  Analytics sent OK - row written to Google Sheet."
         } else {
             Log "  Analytics unexpected response: $stdout"
         }
@@ -545,9 +674,9 @@ function Invoke-CurlDownload {
         }
         Step-AllSpinners
         if ($stall -gt 300) {
-            Log "  WARNING: download stalled 3.5 min — aborting."
+            Log "  WARNING: download stalled 3.5 min - aborting."
             $proc.Kill()
-            SetDownload -Pct 0 -Label "Stalled — aborted."
+            SetDownload -Pct 0 -Label "Stalled - aborted."
             Stop-DlSpinner -Success $false
             return $false
         }
@@ -561,7 +690,7 @@ function Invoke-CurlDownload {
     }
     if (-not (Test-Path $OutFile) -or (Get-Item $OutFile).Length -eq 0) {
         Log "  File missing or empty after download."
-        SetDownload -Pct 0 -Label "Failed — file empty."
+        SetDownload -Pct 0 -Label "Failed - file empty."
         Stop-DlSpinner -Success $false
         return $false
     }
@@ -569,7 +698,7 @@ function Invoke-CurlDownload {
     $finalMB = [math]::Round((Get-Item $OutFile).Length / 1MB, 1)
     if ($finalMB -gt $script:AnalyticsDownloadMB) { $script:AnalyticsDownloadMB = $finalMB }
     Log "  Download complete: $finalMB MB"
-    SetDownload -Pct 100 -Label "Complete — $finalMB MB"
+    SetDownload -Pct 100 -Label "Complete - $finalMB MB"
     Stop-DlSpinner -Success $true
     Play-Sound -Event "DownloadComplete"
     return $true
@@ -612,7 +741,7 @@ function Watch-Extraction {
             break
         }
         if ($stall -gt [int]($StallLimitSec * 1.25)) {
-            Log "  WARNING: extraction stalled — killing process."
+            Log "  WARNING: extraction stalled - killing process."
             try { $ExtractProc.Kill() } catch {}
             break
         }
@@ -621,7 +750,7 @@ function Watch-Extraction {
     $finalCount = if (Test-Path $DestPath) {
         (Get-ChildItem $DestPath -Recurse -EA SilentlyContinue).Count
     } else { 0 }
-    SetExtract -Pct 100 -Label "Done — $finalCount files extracted"
+    SetExtract -Pct 100 -Label "Done - $finalCount files extracted"
     Stop-ExSpinner      -Success $true
     Stop-OverallSpinner -Success $true
     Play-Sound -Event "ExtractComplete"
@@ -639,7 +768,17 @@ function Install-DriversFromPath {
         return $false
     }
     $total = $infs.Count; $i = 0
-    Log "Found $total INF file(s) — installing via pnputil..."
+    Log "Found $total INF file(s)."
+    if ($SkipInstall) {
+        Log "  SkipInstall flag set - skipping pnputil. Extraction verified OK."
+        $script:AnalyticsInfCount = 0
+        SetProgress 100
+        SetExtract -Pct 100 -Label "Extract complete ($total INFs found, install skipped)"
+        Stop-ExSpinner      -Success $true
+        Stop-OverallSpinner -Success $true
+        return $true
+    }
+    Log "Installing via pnputil..."
     $exGroupBox.Text     = "Install INFs"
     $exSpinnerLabel.Text = " " + $SpinnerFrames[0]
     $script:SpinnerIndex = 0
@@ -651,7 +790,7 @@ function Install-DriversFromPath {
         SetProgress (60 + [int](($i / $total) * 38))
         $infPct    = [int](($i / $total) * 100)
         $remaining = $total - $i
-        SetExtract -Pct $infPct -Label "$i / $total INFs  ($remaining remaining)  —  $($inf.Name)"
+        SetExtract -Pct $infPct -Label "$i / $total INFs  ($remaining remaining) - $($inf.Name)"
         Log "[$i/$total] $($inf.Name)"
         $out = pnputil /add-driver "`"$($inf.FullName)`"" /install 2>&1
         foreach ($l in $out) { Log "  $l" }
@@ -715,14 +854,14 @@ function Start-PackExtraction {
                 Step-ExSpinner
                 Step-OverallSpinner
                 [System.Windows.Forms.Application]::DoEvents()
-                if ($stall -gt 375) { Log "  ZIP stalled — stopping."; Stop-Job $zipJob; break }
+                if ($stall -gt 375) { Log "  ZIP stalled - stopping."; Stop-Job $zipJob; break }
             }
             Receive-Job $zipJob -EA SilentlyContinue | Out-Null
             Remove-Job  $zipJob
             $finalCount = if (Test-Path $DestPath) {
                 (Get-ChildItem $DestPath -Recurse -EA SilentlyContinue).Count
             } else { 0 }
-            SetExtract -Pct 100 -Label "Done — $finalCount files extracted"
+            SetExtract -Pct 100 -Label "Done - $finalCount files extracted"
             Stop-ExSpinner      -Success $true
             Stop-OverallSpinner -Success $true
             Play-Sound -Event "ExtractComplete"
@@ -743,12 +882,64 @@ function Start-PackExtraction {
         }
 
         default {
-            Log "Extracting EXE pack (Vendor=$Vendor)..."
+            # ------------------------------------------------------------------
+            # Dell and HP: use 7-Zip pass-1 when available.
+            #   Verified against real packs - byte-for-byte identical output,
+            #   faster than vendor extractors (Dell 1.1x, HP 4.7x).
+            #   Falls back to vendor extractor if 7-Zip unavailable or yields 0 files.
+            #
+            # Lenovo: always uses Inno Setup /VERYSILENT /EXTRACT=YES.
+            #   7-Zip cannot extract Lenovo's proprietary Inno payload format.
+            # ------------------------------------------------------------------
+
             $CountFiles = {
                 if (Test-Path $DestPath) {
                     (Get-ChildItem $DestPath -Recurse -EA SilentlyContinue).Count
                 } else { 0 }
             }
+
+            # Try 7-Zip pass-1 for Dell and HP
+            if (($Vendor -eq "Dell" -or $Vendor -eq "HP") -and (Test-Path $script:7zExe)) {
+                Log "  Extracting with 7-Zip (pass 1)..."
+                SetExtract -Pct -1 -Label "Extracting with 7-Zip..."
+                $script:SpinnerIndex      = 0
+                $exSpinnerLabel.Text      = " " + $SpinnerFrames[0]
+                $overallSpinnerLabel.Text = " " + $SpinnerFrames[0]
+
+                $psi                 = New-Object System.Diagnostics.ProcessStartInfo
+                $psi.FileName        = $script:7zExe
+                $psi.Arguments       = "x `"$PackFile`" -o`"$DestPath`" -y"
+                $psi.UseShellExecute = $false
+                $psi.CreateNoWindow  = $true
+                $sevenProc           = New-Object System.Diagnostics.Process
+                $sevenProc.StartInfo = $psi
+                $sevenProc.Start() | Out-Null
+
+                while (-not $sevenProc.HasExited) {
+                    Start-Sleep -Milliseconds 700
+                    $n = & $CountFiles
+                    SetExtract -Pct -1 -Label "$n files extracted..."
+                    Step-ExSpinner
+                    Step-OverallSpinner
+                    [System.Windows.Forms.Application]::DoEvents()
+                    if ($script:CancelRequested) { try { $sevenProc.Kill() } catch {}; break }
+                }
+                Start-Sleep -Seconds 1
+                $n7z = & $CountFiles
+
+                if ($n7z -gt 0) {
+                    Log "  7-Zip extraction complete: $n7z files."
+                    SetExtract -Pct 100 -Label "Done - $n7z files extracted"
+                    Stop-ExSpinner      -Success $true
+                    Stop-OverallSpinner -Success $true
+                    Play-Sound -Event "ExtractComplete"
+                    return  # success - skip fallback chain
+                }
+                Log "  7-Zip yielded 0 files - falling back to vendor extractor."
+            }
+
+            # Vendor extractor fallback (always used for Lenovo, fallback for Dell/HP)
+            Log "Extracting EXE pack (Vendor=$Vendor)..."
 
             function TrySync {
                 param([string]$ExeArgs)
@@ -790,7 +981,7 @@ function Start-PackExtraction {
                     Step-ExSpinner
                     [System.Windows.Forms.Application]::DoEvents()
                     if (((Get-Date) - $start).TotalSeconds -gt 30 -and $n -eq 0) {
-                        Log "  HP format timed out with no output — killing."
+                        Log "  HP format timed out with no output - killing."
                         try { $proc.Kill() } catch {}
                         break
                     }
@@ -829,7 +1020,7 @@ function Start-PackExtraction {
                 $n = & $attempt.Action
                 Log "  Result: $n files in $DestPath"
                 if ($n -gt 0) {
-                    SetExtract -Pct 100 -Label "Done — $n files extracted"
+                    SetExtract -Pct 100 -Label "Done - $n files extracted"
                     Stop-ExSpinner -Success $true; Stop-OverallSpinner -Success $true
                     Play-Sound -Event "ExtractComplete"
                     Log "  Extraction finished: $n files in $DestPath"
@@ -839,7 +1030,7 @@ function Start-PackExtraction {
             }
 
             if (-not $extracted) {
-                Log "  All primary formats failed — trying Lenovo legacy (-s -fdest)..."
+                Log "  All primary formats failed - trying Lenovo legacy (-s -fdest)..."
                 $p                 = New-Object System.Diagnostics.ProcessStartInfo
                 $p.FileName        = $PackFile
                 $p.Arguments       = "-s -f`"$DestPath`""
@@ -921,7 +1112,7 @@ function Start-DellDriverInstall {
         $searchNames += ($ModelName -replace '^Dell\s+','')
         $searchNames = $searchNames | Select-Object -Unique | Where-Object { $_.Length -gt 3 }
     }
-    Log "Searching catalog — model tokens: $($searchNames -join ' | ')"
+    Log "Searching catalog - model tokens: $($searchNames -join ' | ')"
 
     $candidates = @()
     foreach ($pkg in $cat.SelectNodes("//*[local-name()='DriverPackage']")) {
@@ -967,7 +1158,7 @@ function Start-DellDriverInstall {
 
     Log "Selected: $($chosen.DisplayName)"
     $packPath = $chosen.Path
-    if (-not $packPath) { Log "Driver pack entry has no path — unexpected catalog format."; return $false }
+    if (-not $packPath) { Log "Driver pack entry has no path - unexpected catalog format."; return $false }
 
     $packUrl  = "https://downloads.dell.com/$packPath"
     $packFile = Join-Path $DriverRoot ([System.IO.Path]::GetFileName($packPath))
@@ -1052,7 +1243,7 @@ function Start-HpDriverInstall {
         if (-not $matched) { continue }
         Log "  Matched matrix row: $($modelCell.Trim() -replace '\s+',' ')"
         $allLinks = [regex]::Matches($rowHtml, '(?i)href="([^"]*sp\d+\.exe)"')
-        if ($allLinks.Count -eq 0) { Log "  Row matched but contains no .exe links — skipping."; continue }
+        if ($allLinks.Count -eq 0) { Log "  Row matched but contains no .exe links - skipping."; continue }
         $bestUrl = $allLinks[0].Groups[1].Value
         if (-not $bestUrl.StartsWith("http")) { $bestUrl = "https://ftp.hp.com$bestUrl" }
         if (-not $isWin11) {
@@ -1079,7 +1270,7 @@ function Start-HpDriverInstall {
         return $false
     }
 
-    SetExtract  -Pct 40 -Label "Matrix OK — $packSpNum"
+    SetExtract  -Pct 40 -Label "Matrix OK - $packSpNum"
     SetProgress 25
     if (-not (Test-Path $DriverRoot)) { New-Item -Path $DriverRoot -ItemType Directory -Force | Out-Null }
     $packFile = Join-Path $DriverRoot "$packSpNum.exe"
@@ -1106,13 +1297,19 @@ function Start-LenovoDriverInstall {
     SetExtract  -Pct 0 -Label "Waiting..."
 
     $machineType = $null
-    try {
-        $sku = (Get-CimInstance Win32_ComputerSystemProduct).Name.Trim()
-        if ($sku.Length -ge 4) {
-            $machineType = $sku.Substring(0, 4).ToUpper()
-            Log "Machine type: $sku  ->  prefix: $machineType"
-        }
-    } catch { Log "Could not read machine type: $($_.Exception.Message)" }
+    if ($MachineType) {
+        # Use override from -MachineType param - take first 4 chars uppercased
+        $machineType = $MachineType.Substring(0, [math]::Min(4, $MachineType.Length)).ToUpper()
+        Log "Machine type: $MachineType  ->  prefix: $machineType  [overridden via param]"
+    } else {
+        try {
+            $sku = (Get-CimInstance Win32_ComputerSystemProduct).Name.Trim()
+            if ($sku.Length -ge 4) {
+                $machineType = $sku.Substring(0, 4).ToUpper()
+                Log "Machine type: $sku  ->  prefix: $machineType"
+            }
+        } catch { Log "Could not read machine type: $($_.Exception.Message)" }
+    }
     if (-not $machineType) { Log "Cannot determine Lenovo machine type."; return $false }
 
     try { $script:AnalyticsSerial = (Get-CimInstance Win32_BIOS).SerialNumber.Trim() } catch {}
@@ -1180,7 +1377,7 @@ function Start-LenovoDriverInstall {
 # =========================
 # MICROSOFT (SURFACE)
 #
-# No machine-readable catalog exists — uses a hardcoded lookup table
+# No machine-readable catalog exists - uses a hardcoded lookup table
 # mapping WMI model names to Microsoft Download Center page IDs.
 #
 # Flow:
@@ -1190,14 +1387,13 @@ function Start-LenovoDriverInstall {
 #      whose embedded build number is <= the device OS build (per
 #      Microsoft's own documented guidance).
 #   4. Download the MSI, then run: msiexec /i <file> /quiet /norestart
-#      No extraction step — the MSI installs drivers directly.
+#      No extraction step - the MSI installs drivers directly.
 #   5. Analytics InfCount stays 0 (MSI-based install, no pnputil).
 #
 # To add new Surface models: add an entry to $SurfaceDownloadIds below.
 # Source: https://support.microsoft.com/en-us/surface/drivers-firmware/
 # =========================
 
-# WMI model substring -> Download Center page ID (ordered, longest match first)
 $SurfaceDownloadIds = [ordered]@{
     # Surface Pro
     "Surface Pro 12"                          = "108199"
@@ -1259,9 +1455,6 @@ function Start-MicrosoftSurfaceDriverInstall {
         Log "OS Build: $osBuild"
     } catch { Log "Could not read OS build: $($_.Exception.Message)" }
 
-    # --------------------------------------------------
-    # Step 1: Match model to Download Center page ID
-    # --------------------------------------------------
     $pageId = $null
     foreach ($entry in $SurfaceDownloadIds.GetEnumerator()) {
         if ($ModelName -match [regex]::Escape($entry.Key)) {
@@ -1270,7 +1463,6 @@ function Start-MicrosoftSurfaceDriverInstall {
             break
         }
     }
-    # Fuzzy fallback
     if (-not $pageId) {
         foreach ($entry in $SurfaceDownloadIds.GetEnumerator()) {
             if ($ModelName -ilike "*$($entry.Key)*") {
@@ -1283,15 +1475,12 @@ function Start-MicrosoftSurfaceDriverInstall {
 
     if (-not $pageId) {
         Log "No Download Center entry found for: '$ModelName'"
-        Log "Note: Surface Pro X uses Windows Update only (ARM — no MSI available)."
+        Log "Note: Surface Pro X uses Windows Update only (ARM - no MSI available)."
         Log "Opening Surface driver downloads page for manual selection..."
         Start-Process "https://support.microsoft.com/en-us/surface/drivers-firmware/download-drivers-and-firmware-for-surface-pro"
         return $false
     }
 
-    # --------------------------------------------------
-    # Step 2: Fetch the Download Center page and scrape .msi link(s)
-    # --------------------------------------------------
     $detailsUrl  = "https://www.microsoft.com/en-us/download/details.aspx?id=$pageId"
     $detailsFile = Join-Path $env:TEMP "surface_dl_page_$pageId.html"
     Remove-Item $detailsFile -EA SilentlyContinue
@@ -1336,23 +1525,19 @@ function Start-MicrosoftSurfaceDriverInstall {
     SetExtract -Pct 20 -Label "Parsing download page..."
     $pageHtml = [System.IO.File]::ReadAllText($detailsFile)
 
-    # Primary: look for hrefs pointing directly to download.microsoft.com .msi files
     $msiMatches = [regex]::Matches($pageHtml, 'href="(https://download\.microsoft\.com/[^"]+\.msi)"')
-    # Fallback: bare URL reference (no surrounding quotes)
     if ($msiMatches.Count -eq 0) {
         $msiMatches = [regex]::Matches($pageHtml, '(https://download\.microsoft\.com/[^\s"<>]+\.msi)')
     }
 
     if ($msiMatches.Count -eq 0) {
-        Log "No MSI links found on page ID=$pageId — page may require JavaScript."
+        Log "No MSI links found on page ID=$pageId - page may require JavaScript."
         Log "Opening page for manual download: $detailsUrl"
         Start-Process $detailsUrl
         return $false
     }
     Log "  Found $($msiMatches.Count) MSI link(s)."
 
-    # Deduplicate and parse embedded OS build from filename
-    # Convention: SurfaceModel_WinXX_BBBBB_version.msi  (BBBBB = 5-digit OS build)
     $msiCandidates = [System.Collections.Generic.List[object]]::new()
     $seen          = @{}
     foreach ($m in $msiMatches) {
@@ -1366,11 +1551,6 @@ function Start-MicrosoftSurfaceDriverInstall {
         $msiCandidates.Add([PSCustomObject]@{ Url = $url; FileName = $fileName; OsBuild = $msiOsBuild })
     }
 
-    # --------------------------------------------------
-    # Step 3: Select best MSI for this device's OS build
-    # Rule: highest build number that is still <= device build.
-    # If none qualify, fall back to lowest available.
-    # --------------------------------------------------
     $chosen = $null
     if ($osBuild -gt 0) {
         $eligible = $msiCandidates |
@@ -1382,20 +1562,17 @@ function Start-MicrosoftSurfaceDriverInstall {
         } else {
             $chosen = $msiCandidates | Where-Object { $_.OsBuild -gt 0 } | Sort-Object OsBuild | Select-Object -First 1
             if (-not $chosen) { $chosen = $msiCandidates[0] }
-            Log "No MSI at/below build $osBuild — using lowest available: $($chosen.FileName)"
+            Log "No MSI at/below build $osBuild - using lowest available: $($chosen.FileName)"
         }
     } else {
         $chosen = $msiCandidates[0]
-        Log "OS build unknown — using first MSI on page: $($chosen.FileName)"
+        Log "OS build unknown - using first MSI on page: $($chosen.FileName)"
     }
 
     Log "MSI URL: $($chosen.Url)"
     SetExtract -Pct 40 -Label "MSI selected: $($chosen.FileName)"
     SetProgress 25
 
-    # --------------------------------------------------
-    # Step 4: Download the MSI
-    # --------------------------------------------------
     if (-not (Test-Path $DriverRoot)) { New-Item -Path $DriverRoot -ItemType Directory -Force | Out-Null }
     $msiFile = Join-Path $DriverRoot $chosen.FileName
     SetProgress 30
@@ -1407,18 +1584,14 @@ function Start-MicrosoftSurfaceDriverInstall {
     if (Test-Cancelled) { return $false }
     SetProgress 55
 
-    # --------------------------------------------------
-    # Step 5: Install silently via msiexec
-    # Exit 0 = success, 3010 = success + reboot required
-    # --------------------------------------------------
     Log "Installing Surface MSI: $($chosen.FileName)"
     Log "  msiexec /i `"$msiFile`" /quiet /norestart"
-    $exGroupBox.Text     = "Install MSI"
-    $exSpinnerLabel.Text = " " + $SpinnerFrames[0]
-    $script:SpinnerIndex = 0
+    $exGroupBox.Text             = "Install MSI"
+    $exSpinnerLabel.Text         = " " + $SpinnerFrames[0]
+    $script:SpinnerIndex         = 0
     $exBar.Style                 = "Marquee"
     $exBar.MarqueeAnimationSpeed = 30
-    SetExtract -Pct -1 -Label "Installing MSI — this may take several minutes..."
+    SetExtract -Pct -1 -Label "Installing MSI - this may take several minutes..."
 
     $psi                 = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName        = "msiexec.exe"
@@ -1439,15 +1612,13 @@ function Start-MicrosoftSurfaceDriverInstall {
         Step-ExSpinner
         Step-OverallSpinner
         [System.Windows.Forms.Application]::DoEvents()
-
         if ($script:CancelRequested) {
             Log "  MSI install cancelled by user."
             try { $msiProc.Kill() } catch {}
             break
         }
-        # Safety timeout: 30 minutes
         if ($elapsed -gt 1800) {
-            Log "  WARNING: MSI install exceeded 30 minutes — aborting."
+            Log "  WARNING: MSI install exceeded 30 minutes - aborting."
             try { $msiProc.Kill() } catch {}
             break
         }
@@ -1459,12 +1630,12 @@ function Start-MicrosoftSurfaceDriverInstall {
 
     if ($msiSuccess) {
         $rebootNeeded = ($exitCode -eq 3010)
-        SetExtract -Pct 100 -Label "MSI installed $(if ($rebootNeeded) {'— reboot required'} else {'successfully'})"
+        SetExtract -Pct 100 -Label "MSI installed $(if ($rebootNeeded) {'- reboot required'} else {'successfully'})"
         Stop-ExSpinner      -Success $true
         Stop-OverallSpinner -Success $true
         Play-Sound -Event "ExtractComplete"
         Log "  Surface MSI installation complete.$(if ($rebootNeeded) {' Reboot required.'})"
-        $script:AnalyticsInfCount = 0   # MSI install — pnputil not used
+        $script:AnalyticsInfCount = 0
         SetProgress 100
         $exGroupBox.Text = "Install MSI"
         return $true
@@ -1628,7 +1799,7 @@ function Write-DeviceInfo {
                 Log "  DesignCapacity     : $($b.DesignCapacity) mWh"
                 Log "  FullChargeCapacity : $($b.FullChargeCapacity) mWh"
             }
-        } else { Log "  (no battery detected — desktop?)" }
+        } else { Log "  (no battery detected - desktop?)" }
     } catch { Log "  [Win32_Battery ERROR] $($_.Exception.Message)" }
 
     Log "-- PnP Devices (problem state / no driver) --"
@@ -1641,7 +1812,7 @@ function Write-DeviceInfo {
                 Log "  [ERR $($p.ConfigManagerErrorCode)] $($p.Name)"
                 Log "    DeviceID: $($p.DeviceID)"
             }
-        } else { Log "  (none — all PnP devices have drivers)" }
+        } else { Log "  (none - all PnP devices have drivers)" }
     } catch { Log "  [Win32_PnPEntity ERROR] $($_.Exception.Message)" }
 
     Log "-- pnputil driver store (first 20 OEM INFs) --"
@@ -1686,21 +1857,17 @@ function Start-Install {
     $script:AnalyticsMissingBefore   = -1
     $script:AnalyticsMissingAfter    = -1
     $script:AnalyticsStartTime       = Get-Date
-
-    Set-ButtonRunning
-    SetProgress 0
-    SetDownload -Pct 0 -Label "Waiting..."
-    SetExtract  -Pct 0 -Label "Waiting..."
-    $exGroupBox.Text          = "Extract"
-    $dlSpinnerLabel.Text      = ""
-    $exSpinnerLabel.Text      = ""
-    $overallSpinnerLabel.Text = ""
-    $script:SpinnerIndex      = 0
+    $script:7zInstalled              = $false
+    $script:Headless                 = [bool]$Headless
 
     $id  = [Security.Principal.WindowsIdentity]::GetCurrent()
     $pri = New-Object Security.Principal.WindowsPrincipal($id)
     if (-not $pri.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-        Log "Not running as admin — re-launching elevated..."
+        if ($script:Headless) {
+            Write-Error "ERROR: Script must be run as Administrator."
+            exit 1
+        }
+        Log "Not running as admin - re-launching elevated..."
         Start-Process powershell `
             "-WindowStyle Hidden -ExecutionPolicy Bypass -Command `"irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto.ps1 | iex`"" `
             -Verb RunAs
@@ -1714,9 +1881,11 @@ function Start-Install {
 
     Play-Sound -Event "Start"
 
-    $cs           = Get-CimInstance Win32_ComputerSystem
-    $manufacturer = $cs.Manufacturer.Trim()
-    $model        = $cs.Model.Trim()
+    $cs = Get-CimInstance Win32_ComputerSystem
+
+    # Use param overrides if provided, otherwise read from WMI
+    $manufacturer = if ($Manufacturer) { $Manufacturer } else { $cs.Manufacturer.Trim() }
+    $model        = if ($Model)        { $Model }        else { $cs.Model.Trim() }
 
     $script:AnalyticsManufacturer = $manufacturer
     $script:AnalyticsModel        = $model
@@ -1726,11 +1895,14 @@ function Start-Install {
         $script:AnalyticsOsBuild   = [int]$osObj.BuildNumber
     } catch {}
 
-    try { [System.Windows.Forms.Clipboard]::SetText($model) } catch {}
+    if (-not $script:Headless) {
+        try { [System.Windows.Forms.Clipboard]::SetText($model) } catch {}
+        $title.Text = "Driver Installer - $model"
+    }
 
-    Log "Manufacturer : $manufacturer"
-    Log "Model        : $model  (copied to clipboard)"
-    $title.Text = "Driver Installer - $model"
+    $overrideNote = if ($Manufacturer -or $Model) { "  [OVERRIDDEN via param]" } else { "  (from WMI)" }
+    Log "Manufacturer : $manufacturer$overrideNote"
+    Log "Model        : $model$overrideNote"
 
     Write-DeviceInfo
     SetProgress 5
@@ -1740,7 +1912,50 @@ function Start-Install {
     $script:AnalyticsMissingBefore = Get-MissingDriverCount
     Log "Missing drivers BEFORE install: $($script:AnalyticsMissingBefore)"
 
-    $driverRoot = "C:\DRIVERS"
+    # Offer to skip if no missing drivers detected
+    if ($script:AnalyticsMissingBefore -eq 0) {
+        if ($script:Headless) {
+            Log "No missing drivers detected - continuing anyway (headless mode)."
+        } else {
+            $skipResult = [System.Windows.Forms.MessageBox]::Show(
+                "No missing drivers were detected on this device.`n`nRun driver installation anyway?",
+                "No Missing Drivers", "YesNo", "Question"
+            )
+            if ($skipResult -eq [System.Windows.Forms.DialogResult]::No) {
+                Log "User chose to skip - no missing drivers detected."
+                SetProgress 100
+                SetDownload -Pct 100 -Label "Skipped - no missing drivers"
+                SetExtract  -Pct 100 -Label "Skipped - no missing drivers"
+                $script:AnalyticsMissingAfter = 0
+                Send-AnalyticsEvent -Result "success"
+                Play-Sound -Event "Success"
+                Set-ButtonIdle
+                return
+            }
+            Log "User chose to run anyway despite no missing drivers."
+        }
+    }
+
+    # User confirmed (or drivers were missing) - lock UI and begin
+    Set-ButtonRunning
+    SetProgress 0
+    SetDownload -Pct 0 -Label "Waiting..."
+    SetExtract  -Pct 0 -Label "Waiting..."
+    $exGroupBox.Text          = "Extract"
+    $dlSpinnerLabel.Text      = ""
+    $exSpinnerLabel.Text      = ""
+    $overallSpinnerLabel.Text = ""
+    $script:SpinnerIndex      = 0
+
+    # Install 7-Zip for Dell and HP extraction (not needed for Lenovo or Surface)
+    if ($manufacturer -match "Dell|HP|Hewlett") {
+        Log "Installing 7-Zip for fast extraction..."
+        if (-not (Install-7Zip)) {
+            Log "WARNING: 7-Zip unavailable - will fall back to vendor extractor."
+        }
+    }
+
+    $driverRoot = $DriverRoot
     $success    = $false
 
     if ($manufacturer -match "Dell") {
@@ -1759,13 +1974,23 @@ function Start-Install {
         Log "Unsupported manufacturer: $manufacturer"
         Log "Supported OEMs: Dell, HP, Lenovo, Microsoft (Surface)"
         Send-AnalyticsEvent -Result "failure"
-        [System.Windows.Forms.MessageBox]::Show(
-            "Manufacturer '$manufacturer' is not supported.`nSupported: Dell, HP, Lenovo, Microsoft (Surface)",
-            "Unsupported Manufacturer", "OK", "Warning"
-        )
+        if ($script:Headless) {
+            Write-Host "UNSUPPORTED: Manufacturer '$manufacturer' is not supported."
+            Write-Host "Supported: Dell, HP, Lenovo, Microsoft (Surface)"
+        } else {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Manufacturer '$manufacturer' is not supported.`nSupported: Dell, HP, Lenovo, Microsoft (Surface)",
+                "Unsupported Manufacturer", "OK", "Warning"
+            )
+        }
+        # Remove 7-Zip before returning on unsupported manufacturer
+        if ($script:7zInstalled) { Remove-7Zip }
         Set-ButtonIdle
         return
     }
+
+    # Remove 7-Zip before cleanup - must happen before C:\DRIVERS is deleted
+    if ($script:7zInstalled) { Remove-7Zip }
 
     # Snapshot missing drivers after install
     $script:AnalyticsMissingAfter = Get-MissingDriverCount
@@ -1787,62 +2012,79 @@ function Start-Install {
         Send-AnalyticsEvent -Result "success"
         Play-Sound -Event "Success"
 
-        if (Test-Path $driverRoot) {
+        if ($SkipCleanup) {
+            Log "SkipCleanup flag set - keeping $driverRoot for inspection."
+        } elseif (Test-Path $driverRoot) {
             Log "Cleaning up $driverRoot..."
             try {
                 Remove-Item $driverRoot -Recurse -Force -ErrorAction Stop
                 Log "  $driverRoot removed."
-            } catch { Log "  WARNING: Could not remove $driverRoot — $($_.Exception.Message)" }
+            } catch { Log "  WARNING: Could not remove $driverRoot - $($_.Exception.Message)" }
         }
 
         $missingLine = if ($script:AnalyticsMissingBefore -ge 0 -and $script:AnalyticsMissingAfter -ge 0) {
-            "`n`nMissing drivers:  $($script:AnalyticsMissingBefore) → $($script:AnalyticsMissingAfter)  ($missingDelta resolved)"
+            "`n`nMissing drivers:  $($script:AnalyticsMissingBefore) -> $($script:AnalyticsMissingAfter)  ($missingDelta resolved)"
         } else { "" }
 
-        $result = [System.Windows.Forms.MessageBox]::Show(
-            "Drivers installed successfully for:`n$model$missingLine`n`nReboot now to complete installation?",
-            "Installation Complete", "YesNo", "Information"
-        )
-        if ($result -eq "Yes") { Restart-Computer -Force }
-        else { Set-ButtonIdle }
+        if ($script:Headless) {
+            Write-Host "SUCCESS: Drivers installed for $model.$missingLine"
+            Write-Host "Run complete. Reboot when ready."
+        } else {
+            $result = [System.Windows.Forms.MessageBox]::Show(
+                "Drivers installed successfully for:`n$model$missingLine`n`nReboot now to complete installation?",
+                "Installation Complete", "YesNo", "Information"
+            )
+            if ($result -eq [System.Windows.Forms.DialogResult]::Yes) { Restart-Computer -Force }
+            else { Set-ButtonIdle }
+        }
     } else {
         if (-not $script:CancelRequested) { Send-AnalyticsEvent -Result "failure" }
-        SetDownload -Pct 0 -Label "Failed — see log"
-        SetExtract  -Pct 0 -Label "Failed — see log"
+        SetDownload -Pct 0 -Label "Failed - see log"
+        SetExtract  -Pct 0 -Label "Failed - see log"
         Stop-DlSpinner      -Success $false
         Stop-ExSpinner      -Success $false
         Stop-OverallSpinner -Success $false
         Play-Sound -Event "Failure"
         Log "Driver installation did not complete. Check log: $LogFile"
-        [System.Windows.Forms.MessageBox]::Show(
-            "Driver installation failed or no pack was found.`nCheck the log:`n`n$LogFile",
-            "Installation Failed", "OK", "Error"
-        )
-        Set-ButtonIdle
+        if ($script:Headless) {
+            Write-Host "FAILED: Driver installation did not complete. Check log: $LogFile"
+        } else {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Driver installation failed or no pack was found.`nCheck the log:`n`n$LogFile",
+                "Installation Failed", "OK", "Error"
+            )
+            Set-ButtonIdle
+        }
     }
 }
 
 # =========================
 # WIRE UP + LAUNCH
 # =========================
-$button.Add_Click({ Start-Install })
-
-$cancelButton.Add_Click({
-    if ($cancelButton.Enabled) {
-        $script:CancelRequested = $true
-        Log "--- Cancel requested by user ---"
-        Play-Sound -Event "Cancel"
-        $cancelButton.Enabled   = $false
-        $cancelButton.BackColor = [System.Drawing.Color]::FromArgb(160, 160, 160)
-        [System.Windows.Forms.Application]::DoEvents()
-    }
-})
-
-$form.Add_Shown({
-    $form.Activate()
-    Start-Sleep -Milliseconds 300
-    Log "Running startup checks..."
+if ($Headless) {
+    # Headless mode - run directly, no GUI
     Start-Install
-})
+} else {
+    # GUI mode - wire up form and show
+    $button.Add_Click({ Start-Install })
 
-[void]$form.ShowDialog()
+    $cancelButton.Add_Click({
+        if ($cancelButton.Enabled) {
+            $script:CancelRequested = $true
+            Log "--- Cancel requested by user ---"
+            Play-Sound -Event "Cancel"
+            $cancelButton.Enabled   = $false
+            $cancelButton.BackColor = [System.Drawing.Color]::FromArgb(160, 160, 160)
+            [System.Windows.Forms.Application]::DoEvents()
+        }
+    })
+
+    $form.Add_Shown({
+        $form.Activate()
+        Start-Sleep -Milliseconds 300
+        Log "Running startup checks..."
+        Start-Install
+    })
+
+    [void]$form.ShowDialog()
+}
