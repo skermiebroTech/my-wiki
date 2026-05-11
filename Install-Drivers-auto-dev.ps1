@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.6.4
+# Version: 1.6.5
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -21,6 +21,7 @@
 #
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
 #
+# v1.6.5 - Fixed param() position in Stop-DlSpinner/Stop-ExSpinner/Stop-OverallSpinner causing PS error
 # v1.6.4 - Fixed CatalogPC parsing: UTF-16 encoding, PCIInfo VEN+DEV matching, osCode Win11 detection, systemID model filter
 # v1.6.3 - Dell: individual driver lookup via CatalogPC when 1-3 devices missing; falls back to full pack
 # v1.6.2 - Fixed: MessageBox DialogResult compared to enum not string (prompt was always falling through)
@@ -51,7 +52,7 @@ param(
 # Auto-enable headless when any override param is passed
 if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" -or $SkipInstall -or $SkipCleanup) { $Headless = $true }
 
-$ScriptVersion   = "1.6.4"
+$ScriptVersion   = "1.6.5"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -388,8 +389,8 @@ function Step-DlSpinner {
     [System.Windows.Forms.Application]::DoEvents()
 }
 function Stop-DlSpinner {
-    if ($script:Headless) { return }
     param([bool]$Success = $true)
+    if ($script:Headless) { return }
     $dlSpinnerLabel.Text      = if ($Success) { " OK" } else { " XX" }
     $dlSpinnerLabel.ForeColor = if ($Success) { [System.Drawing.Color]::FromArgb(0, 100, 180) } else { [System.Drawing.Color]::FromArgb(200, 40, 40) }
     [System.Windows.Forms.Application]::DoEvents()
@@ -402,8 +403,8 @@ function Step-ExSpinner {
     [System.Windows.Forms.Application]::DoEvents()
 }
 function Stop-ExSpinner {
-    if ($script:Headless) { return }
     param([bool]$Success = $true)
+    if ($script:Headless) { return }
     $exSpinnerLabel.Text      = if ($Success) { " OK" } else { " XX" }
     $exSpinnerLabel.ForeColor = if ($Success) { [System.Drawing.Color]::FromArgb(0, 140, 80) } else { [System.Drawing.Color]::FromArgb(200, 40, 40) }
     [System.Windows.Forms.Application]::DoEvents()
@@ -416,8 +417,8 @@ function Step-OverallSpinner {
     [System.Windows.Forms.Application]::DoEvents()
 }
 function Stop-OverallSpinner {
-    if ($script:Headless) { return }
     param([bool]$Success = $true)
+    if ($script:Headless) { return }
     $overallSpinnerLabel.Text      = if ($Success) { " OK" } else { " XX" }
     $overallSpinnerLabel.ForeColor = if ($Success) { [System.Drawing.Color]::FromArgb(80, 80, 80) } else { [System.Drawing.Color]::FromArgb(200, 40, 40) }
     [System.Windows.Forms.Application]::DoEvents()
