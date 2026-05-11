@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.5.8
+# Version: 1.6.1
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -21,6 +21,9 @@
 #
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
 #
+# v1.6.1 - Fixed: prompt blocks correctly before UI locks; auto-run restored when drivers missing
+# v1.6.0 - GUI no longer auto-runs on launch; waits for user to click Install Drivers
+# v1.5.9 - Fixed: missing driver prompt now shows before 7-Zip install and download
 # v1.5.8 - Prompt to skip install if no missing drivers detected (GUI); continues in headless
 # v1.5.7 - Added -DriverRoot param for parallel testing
 # v1.5.6 - Added -MachineType param for Lenovo machine type override
@@ -45,7 +48,7 @@ param(
 # Auto-enable headless when any override param is passed
 if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" -or $SkipInstall -or $SkipCleanup) { $Headless = $true }
 
-$ScriptVersion   = "1.5.8"
+$ScriptVersion   = "1.6.1"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -1856,16 +1859,6 @@ function Start-Install {
     $script:7zInstalled              = $false
     $script:Headless                 = [bool]$Headless
 
-    Set-ButtonRunning
-    SetProgress 0
-    SetDownload -Pct 0 -Label "Waiting..."
-    SetExtract  -Pct 0 -Label "Waiting..."
-    $exGroupBox.Text          = "Extract"
-    $dlSpinnerLabel.Text      = ""
-    $exSpinnerLabel.Text      = ""
-    $overallSpinnerLabel.Text = ""
-    $script:SpinnerIndex      = 0
-
     $id  = [Security.Principal.WindowsIdentity]::GetCurrent()
     $pri = New-Object Security.Principal.WindowsPrincipal($id)
     if (-not $pri.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -1913,14 +1906,6 @@ function Start-Install {
     Write-DeviceInfo
     SetProgress 5
 
-    # Install 7-Zip for Dell and HP extraction (not needed for Lenovo or Surface)
-    if ($manufacturer -match "Dell|HP|Hewlett") {
-        Log "Installing 7-Zip for fast extraction..."
-        if (-not (Install-7Zip)) {
-            Log "WARNING: 7-Zip unavailable - will fall back to vendor extractor."
-        }
-    }
-
     # Snapshot missing drivers before install
     Log "Checking for devices with missing drivers..."
     $script:AnalyticsMissingBefore = Get-MissingDriverCount
@@ -1947,6 +1932,25 @@ function Start-Install {
                 return
             }
             Log "User chose to run anyway despite no missing drivers."
+        }
+    }
+
+    # User confirmed (or drivers were missing) - lock UI and begin
+    Set-ButtonRunning
+    SetProgress 0
+    SetDownload -Pct 0 -Label "Waiting..."
+    SetExtract  -Pct 0 -Label "Waiting..."
+    $exGroupBox.Text          = "Extract"
+    $dlSpinnerLabel.Text      = ""
+    $exSpinnerLabel.Text      = ""
+    $overallSpinnerLabel.Text = ""
+    $script:SpinnerIndex      = 0
+
+    # Install 7-Zip for Dell and HP extraction (not needed for Lenovo or Surface)
+    if ($manufacturer -match "Dell|HP|Hewlett") {
+        Log "Installing 7-Zip for fast extraction..."
+        if (-not (Install-7Zip)) {
+            Log "WARNING: 7-Zip unavailable - will fall back to vendor extractor."
         }
     }
 
