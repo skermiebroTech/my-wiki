@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.6.9
+# Version: 1.6.10
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -21,6 +21,7 @@
 #
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
 #
+# v1.6.10 - OSDCatalog: null-OSBuild entries treated as any-OS compatible; version tiebreaker picks newest package
 # v1.6.9 - Unknown manufacturer (e.g. OEMBY) shows Surface model picker dialog; headless auto-detects from -Model
 # v1.6.8 - Surface: OSDCatalog JSON primary (SystemSKU match, MD5 verify, msiexec /a extract + pnputil)
 # v1.6.7 - Pre-screen missing devices for parseable VEN/DEV before downloading CatalogPC
@@ -56,7 +57,7 @@ param(
 # Auto-enable headless when any override param is passed
 if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" -or $SkipInstall -or $SkipCleanup) { $Headless = $true }
 
-$ScriptVersion   = "1.6.9"
+$ScriptVersion   = "1.6.10"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -1946,18 +1947,24 @@ function Start-MicrosoftSurfaceDriverInstall {
 
                 if ($skuCandidates.Count -gt 0 -and $osBuild -gt 0) {
                     $eligible = @($skuCandidates | Where-Object {
-                        $_.OSBuild -and [int]$_.OSBuild -le $osBuild
-                    } | Sort-Object { [int]$_.OSBuild } -Descending)
+                        (-not $_.OSBuild) -or ([int]$_.OSBuild -le $osBuild)
+                    } | Sort-Object { [int]$_.OSBuild }, {
+                        try { [version]([regex]::Match($_.FileName, '_(\d+\.\d+\.\d+\.\d+)\.msi$').Groups[1].Value) } catch { [version]'0.0.0.0' }
+                    } -Descending)
 
                     if ($eligible.Count -gt 0) {
                         $chosenEntry = $eligible[0]
                         Log "  Selected (OSBuild $($chosenEntry.OSBuild) <= device $osBuild): $($chosenEntry.FileName)"
                     } else {
-                        $chosenEntry = ($skuCandidates | Sort-Object { [int]$_.OSBuild })[0]
+                        $chosenEntry = ($skuCandidates | Sort-Object { [int]$_.OSBuild }, {
+                            try { [version]([regex]::Match($_.FileName, '_(\d+\.\d+\.\d+\.\d+)\.msi$').Groups[1].Value) } catch { [version]'0.0.0.0' }
+                        })[0]
                         Log "  No entry at/below build $osBuild - using lowest available: $($chosenEntry.FileName)"
                     }
                 } elseif ($skuCandidates.Count -gt 0) {
-                    $chosenEntry = ($skuCandidates | Sort-Object { [int]$_.OSBuild } -Descending)[0]
+                    $chosenEntry = ($skuCandidates | Sort-Object { [int]$_.OSBuild }, {
+                        try { [version]([regex]::Match($_.FileName, '_(\d+\.\d+\.\d+\.\d+)\.msi$').Groups[1].Value) } catch { [version]'0.0.0.0' }
+                    } -Descending)[0]
                     Log "  OS build unknown - using latest SKU match: $($chosenEntry.FileName)"
                 }
             }
@@ -1971,13 +1978,19 @@ function Start-MicrosoftSurfaceDriverInstall {
 
                 if ($nameCandidates.Count -gt 0 -and $osBuild -gt 0) {
                     $eligible = @($nameCandidates | Where-Object {
-                        $_.OSBuild -and [int]$_.OSBuild -le $osBuild
-                    } | Sort-Object { [int]$_.OSBuild } -Descending)
+                        (-not $_.OSBuild) -or ([int]$_.OSBuild -le $osBuild)
+                    } | Sort-Object { [int]$_.OSBuild }, {
+                        try { [version]([regex]::Match($_.FileName, '_(\d+\.\d+\.\d+\.\d+)\.msi$').Groups[1].Value) } catch { [version]'0.0.0.0' }
+                    } -Descending)
                     $chosenEntry = if ($eligible.Count -gt 0) { $eligible[0] }
-                                   else { ($nameCandidates | Sort-Object { [int]$_.OSBuild })[0] }
+                                   else { ($nameCandidates | Sort-Object { [int]$_.OSBuild }, {
+                                       try { [version]([regex]::Match($_.FileName, '_(\d+\.\d+\.\d+\.\d+)\.msi$').Groups[1].Value) } catch { [version]'0.0.0.0' }
+                                   })[0] }
                     Log "  Selected via model name: $($chosenEntry.FileName)"
                 } elseif ($nameCandidates.Count -gt 0) {
-                    $chosenEntry = ($nameCandidates | Sort-Object { [int]$_.OSBuild } -Descending)[0]
+                    $chosenEntry = ($nameCandidates | Sort-Object { [int]$_.OSBuild }, {
+                        try { [version]([regex]::Match($_.FileName, '_(\d+\.\d+\.\d+\.\d+)\.msi$').Groups[1].Value) } catch { [version]'0.0.0.0' }
+                    } -Descending)[0]
                 }
             }
         } catch {
