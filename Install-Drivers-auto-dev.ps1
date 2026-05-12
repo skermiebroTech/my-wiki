@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.6.10
+# Version: 1.7.1
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -21,7 +21,11 @@
 #
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
 #
-# v1.6.10 - OSDCatalog: null-OSBuild entries treated as any-OS compatible; version tiebreaker picks newest package
+# v1.7.1 - Surface OSDCatalog: added secondary sort on driver version parsed from MSI filename
+#           so latest pack wins when multiple entries share the same OSBuild
+#           (e.g. 26.040.371.0 correctly beats 26.011.7745.0)
+# v1.7.0 - Fixed Surface OSDCatalog SKU matching (colon-separated Product field now split correctly);
+#           added URL guard to skip catalog entries with no download URL
 # v1.6.9 - Unknown manufacturer (e.g. OEMBY) shows Surface model picker dialog; headless auto-detects from -Model
 # v1.6.8 - Surface: OSDCatalog JSON primary (SystemSKU match, MD5 verify, msiexec /a extract + pnputil)
 # v1.6.7 - Pre-screen missing devices for parseable VEN/DEV before downloading CatalogPC
@@ -57,7 +61,7 @@ param(
 # Auto-enable headless when any override param is passed
 if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" -or $SkipInstall -or $SkipCleanup) { $Headless = $true }
 
-$ScriptVersion   = "1.6.10"
+$ScriptVersion   = "1.7.1"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -1934,63 +1938,76 @@ function Start-MicrosoftSurfaceDriverInstall {
             $catalog  = $jsonText | ConvertFrom-Json
             Log "  Catalog entries: $($catalog.Count)"
 
-            # Match on SystemSKU (normalise spaces/hyphens -> underscores for comparison)
+            # Helper: parse driver version from MSI filename e.g. "26.040.371.0" -> [Version].
+            # Falls back to 0.0.0.0 so entries without a version always sort last.
+            function Parse-DriverVersion {
+                param([string]$FileName)
+                $m = [regex]::Match($FileName, '_(\d+\.\d+\.\d+\.\d+)\.msi$')
+                if ($m.Success) { try { return [Version]$m.Groups[1].Value } catch {} }
+                return [Version]"0.0.0.0"
+            }
+
+            # Sort a candidate list best-first: primary OSBuild desc, secondary driver version desc.
+            # Requires $pool (array) and $osBuild (int) to be in scope.
+            function Select-BestEntry {
+                param([object[]]$Pool)
+                # Only consider entries that have a usable URL
+                $withUrl = @($Pool | Where-Object { $_.Url })
+                if ($withUrl.Count -eq 0) { return $null }
+
+                if ($osBuild -gt 0) {
+                    $eligible = @($withUrl | Where-Object { $_.OSBuild -and [int]$_.OSBuild -le $osBuild })
+                    if ($eligible.Count -eq 0) {
+                        # Nothing at/below device build - fall back to lowest available build
+                        $eligible = @($withUrl | Where-Object { $_.OSBuild } |
+                            Sort-Object { [int]$_.OSBuild })
+                    }
+                    if ($eligible.Count -eq 0) { $eligible = $withUrl }
+                } else {
+                    $eligible = $withUrl
+                }
+
+                # Sort: highest OSBuild first, then highest driver version first
+                return ($eligible | Sort-Object `
+                    @{ E = { if ($_.OSBuild) { [int]$_.OSBuild } else { 0 } }; Descending = $true },
+                    @{ E = { Parse-DriverVersion $_.FileName };                  Descending = $true }
+                )[0]
+            }
+
+            # Match on SystemSKU - catalog Product field may be a single SKU or colon-separated list.
+            # Normalise spaces/hyphens to underscores and split on colon before comparing.
             if ($systemSKU) {
-                $skuNorm = $systemSKU -replace '[\s\-]','_'
+                $skuNorm = $systemSKU.ToUpper() -replace '[\s\-]','_'
                 $skuCandidates = @($catalog | Where-Object {
-                    $_.Product -and (
-                        ($_.Product -replace '[\s\-]','_') -ieq $skuNorm -or
-                        ($_.Product -split ':' | ForEach-Object { $_ -replace '[\s\-]','_' }) -icontains $skuNorm
-                    )
+                    if (-not $_.Product) { return $false }
+                    # Split Product on ':' and check each part individually
+                    ($_.Product.ToUpper() -replace '[\s\-]','_') -split ':' |
+                        ForEach-Object { $_.Trim() } |
+                        Where-Object { $_ -eq $skuNorm } |
+                        Select-Object -First 1
                 })
                 Log "  SKU matches for '$systemSKU': $($skuCandidates.Count)"
 
-                if ($skuCandidates.Count -gt 0 -and $osBuild -gt 0) {
-                    $eligible = @($skuCandidates | Where-Object {
-                        (-not $_.OSBuild) -or ([int]$_.OSBuild -le $osBuild)
-                    } | Sort-Object { [int]$_.OSBuild }, {
-                        try { [version]([regex]::Match($_.FileName, '_(\d+\.\d+\.\d+\.\d+)\.msi$').Groups[1].Value) } catch { [version]'0.0.0.0' }
-                    } -Descending)
-
-                    if ($eligible.Count -gt 0) {
-                        $chosenEntry = $eligible[0]
-                        Log "  Selected (OSBuild $($chosenEntry.OSBuild) <= device $osBuild): $($chosenEntry.FileName)"
-                    } else {
-                        $chosenEntry = ($skuCandidates | Sort-Object { [int]$_.OSBuild }, {
-                            try { [version]([regex]::Match($_.FileName, '_(\d+\.\d+\.\d+\.\d+)\.msi$').Groups[1].Value) } catch { [version]'0.0.0.0' }
-                        })[0]
-                        Log "  No entry at/below build $osBuild - using lowest available: $($chosenEntry.FileName)"
+                if ($skuCandidates.Count -gt 0) {
+                    $chosenEntry = Select-BestEntry -Pool $skuCandidates
+                    if ($chosenEntry) {
+                        Log "  Selected (OSBuild=$($chosenEntry.OSBuild)): $($chosenEntry.FileName)"
                     }
-                } elseif ($skuCandidates.Count -gt 0) {
-                    $chosenEntry = ($skuCandidates | Sort-Object { [int]$_.OSBuild }, {
-                        try { [version]([regex]::Match($_.FileName, '_(\d+\.\d+\.\d+\.\d+)\.msi$').Groups[1].Value) } catch { [version]'0.0.0.0' }
-                    } -Descending)[0]
-                    Log "  OS build unknown - using latest SKU match: $($chosenEntry.FileName)"
                 }
             }
 
             # Fallback within JSON: match on Model display name if SKU didn't match
             if (-not $chosenEntry -and $ModelName) {
                 $nameCandidates = @($catalog | Where-Object {
-                    $_.Model -and $ModelName -ilike "*$($_.Model)*"
+                    $_.Model -and $_.Url -and $ModelName -ilike "*$($_.Model)*"
                 })
                 Log "  Model name matches for '$ModelName': $($nameCandidates.Count)"
 
-                if ($nameCandidates.Count -gt 0 -and $osBuild -gt 0) {
-                    $eligible = @($nameCandidates | Where-Object {
-                        (-not $_.OSBuild) -or ([int]$_.OSBuild -le $osBuild)
-                    } | Sort-Object { [int]$_.OSBuild }, {
-                        try { [version]([regex]::Match($_.FileName, '_(\d+\.\d+\.\d+\.\d+)\.msi$').Groups[1].Value) } catch { [version]'0.0.0.0' }
-                    } -Descending)
-                    $chosenEntry = if ($eligible.Count -gt 0) { $eligible[0] }
-                                   else { ($nameCandidates | Sort-Object { [int]$_.OSBuild }, {
-                                       try { [version]([regex]::Match($_.FileName, '_(\d+\.\d+\.\d+\.\d+)\.msi$').Groups[1].Value) } catch { [version]'0.0.0.0' }
-                                   })[0] }
-                    Log "  Selected via model name: $($chosenEntry.FileName)"
-                } elseif ($nameCandidates.Count -gt 0) {
-                    $chosenEntry = ($nameCandidates | Sort-Object { [int]$_.OSBuild }, {
-                        try { [version]([regex]::Match($_.FileName, '_(\d+\.\d+\.\d+\.\d+)\.msi$').Groups[1].Value) } catch { [version]'0.0.0.0' }
-                    } -Descending)[0]
+                if ($nameCandidates.Count -gt 0) {
+                    $chosenEntry = Select-BestEntry -Pool $nameCandidates
+                    if ($chosenEntry) {
+                        Log "  Selected via model name (OSBuild=$($chosenEntry.OSBuild)): $($chosenEntry.FileName)"
+                    }
                 }
             }
         } catch {
