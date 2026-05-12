@@ -18,7 +18,7 @@
 #   -Headless      Skip GUI, write to console only (auto-set when any param is passed)
 #   -SkipInstall   Download and extract only, skip pnputil driver installation
 #   -SkipCleanup   Keep C:\DRIVERS after run for inspection
-#
+# huh
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
 #
 # v1.7.3 - Surface: removed OSDCatalog JSON path entirely (unreliable); Download Center is now
