@@ -21,13 +21,10 @@
 #
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
 #
-# v1.7.1 - Surface OSDCatalog: added secondary sort on driver version parsed from MSI filename
-#           so latest pack wins when multiple entries share the same OSBuild
-#           (e.g. 26.040.371.0 correctly beats 26.011.7745.0)
-# v1.7.0 - Fixed Surface OSDCatalog SKU matching (colon-separated Product field now split correctly);
-#           added URL guard to skip catalog entries with no download URL
+# v1.7.1 - Surface: removed unreliable OSDCatalog JSON path; Download Center ID lookup is now
+#           the sole method (scrapes MSI link, picks best OS build match, msiexec /a + pnputil)
 # v1.6.9 - Unknown manufacturer (e.g. OEMBY) shows Surface model picker dialog; headless auto-detects from -Model
-# v1.6.8 - Surface: OSDCatalog JSON primary (SystemSKU match, MD5 verify, msiexec /a extract + pnputil)
+# v1.6.8 - Surface: OSDCatalog JSON primary path (superseded in v1.7.1)
 # v1.6.7 - Pre-screen missing devices for parseable VEN/DEV before downloading CatalogPC
 # v1.6.6 - Fixed INTELAUDIO bus HW ID parsing (CTLR_DEV_xxxx) for HDA audio devices
 # v1.6.5 - Fixed param() position in Stop-DlSpinner/Stop-ExSpinner/Stop-OverallSpinner causing PS error
@@ -1653,28 +1650,17 @@ function Start-LenovoDriverInstall {
 # =========================
 # MICROSOFT (SURFACE)
 #
-# Two-path approach:
-#
-# PRIMARY: OSDCatalog JSON (DriverAutomationTool - maintained on GitHub)
-#   - Fetches OSDCatalogMicrosoftDriverPack.json from GitHub
-#   - Matches on SystemSKU (hardware identifier - more reliable than model name)
-#   - Handles Commercial vs Consumer SKU variants
-#   - Selects best MSI by OSBuild (highest build <= device OS build)
-#   - Verifies MD5 hash after download (hash included in catalog)
-#   - Extracts MSI with msiexec /a (admin install) into Surface_Extracted folder
-#   - Installs extracted INFs via pnputil (consistent with Dell/HP/Lenovo flow)
-#
-# FALLBACK: Hardcoded Download Center IDs
-#   - Used if JSON catalog has no entry for this SKU/model
-#   - Fetches Microsoft Download Center HTML page and scrapes .msi link
-#   - Same msiexec /a + pnputil flow as primary path
+# Uses Microsoft Download Center IDs to find the correct driver MSI for the model.
+# Fetches the Download Center details page, scrapes the .msi link(s), selects the
+# best match by OS build (highest build <= device OS build), downloads the MSI,
+# extracts with msiexec /a (admin install), and installs INFs via pnputil.
 #
 # Surface Pro X (ARM/SQ processor): not supported.
 #   Microsoft requires Windows Update for Pro X driver delivery.
 #   No MSI is published; script opens support page and exits gracefully.
 #
-# To add new Surface models to the fallback table: add an entry to
-#   $SurfaceDownloadIds below (value = numeric ID from details.aspx?id=XXXXXX).
+# To add new Surface models: add an entry to $SurfaceDownloadIds below
+#   (value = numeric ID from details.aspx?id=XXXXXX).
 # =========================
 
 $SurfaceDownloadIds = [ordered]@{
@@ -1887,7 +1873,7 @@ function Start-MicrosoftSurfaceDriverInstall {
         Log "OS Build: $osBuild"
     } catch { Log "Could not read OS build: $($_.Exception.Message)" }
 
-    # Read SystemSKU - used by OSDCatalog JSON matching (more reliable than model name)
+    # Read SystemSKU for logging purposes
     $systemSKU = ""
     try {
         $systemSKU = (Get-CimInstance Win32_ComputerSystem).SystemSKUNumber.Trim()
@@ -1897,180 +1883,13 @@ function Start-MicrosoftSurfaceDriverInstall {
     if (-not (Test-Path $DriverRoot)) { New-Item -Path $DriverRoot -ItemType Directory -Force | Out-Null }
 
     # --------------------------------------------------
-    # PRIMARY PATH: OSDCatalog JSON (DriverAutomationTool GitHub)
-    # Structured catalog with direct URLs, OSBuild per entry, and MD5 hashes.
+    # Download Center IDs + HTML scraping
+    # Fetches the Microsoft Download Center page for this model, scrapes the MSI
+    # link, selects best OS build match, extracts with msiexec /a, installs INFs.
     # --------------------------------------------------
-    $osdCatalogUrl  = "https://raw.githubusercontent.com/maurice-daly/DriverAutomationTool/master/Data/OSDCatalogMicrosoftDriverPack.json"
-    $osdCatalogFile = Join-Path $env:TEMP "OSDCatalogMicrosoftDriverPack.json"
-    Remove-Item $osdCatalogFile -EA SilentlyContinue
-
-    Log "Fetching OSDCatalog JSON..."
-    SetExtract -Pct 5 -Label "Fetching Surface catalog..."
+    Log "Looking up Surface driver pack via Download Center..."
+    SetExtract -Pct 5 -Label "Looking up Download Center ID..."
     SetProgress 10
-
-    $psi                 = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName        = "curl.exe"
-    $psi.Arguments       = "--silent --location --max-time 30 --connect-timeout 15 " +
-                           "--output `"$osdCatalogFile`" `"$osdCatalogUrl`""
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow  = $true
-    $fetchProc           = New-Object System.Diagnostics.Process
-    $fetchProc.StartInfo = $psi
-    $fetchProc.Start() | Out-Null
-    $start = Get-Date
-    while (-not $fetchProc.HasExited) {
-        Start-Sleep -Milliseconds 400; Step-AllSpinners
-        if (((Get-Date) - $start).TotalSeconds -gt 35) {
-            Log "  Timeout fetching OSDCatalog JSON."
-            try { $fetchProc.Kill() } catch {}
-            break
-        }
-    }
-    $fetchProc.WaitForExit()
-
-    $chosenEntry = $null
-
-    if ((Test-Path $osdCatalogFile) -and (Get-Item $osdCatalogFile).Length -gt 100) {
-        Log "Parsing OSDCatalog JSON..."
-        SetExtract -Pct 15 -Label "Parsing catalog..."
-        try {
-            $jsonText = [System.IO.File]::ReadAllText($osdCatalogFile)
-            $catalog  = $jsonText | ConvertFrom-Json
-            Log "  Catalog entries: $($catalog.Count)"
-
-            # Helper: parse driver version from MSI filename e.g. "26.040.371.0" -> [Version].
-            # Falls back to 0.0.0.0 so entries without a version always sort last.
-            function Parse-DriverVersion {
-                param([string]$FileName)
-                $m = [regex]::Match($FileName, '_(\d+\.\d+\.\d+\.\d+)\.msi$')
-                if ($m.Success) { try { return [Version]$m.Groups[1].Value } catch {} }
-                return [Version]"0.0.0.0"
-            }
-
-            # Sort a candidate list best-first: primary OSBuild desc, secondary driver version desc.
-            # Requires $pool (array) and $osBuild (int) to be in scope.
-            function Select-BestEntry {
-                param([object[]]$Pool)
-                # Only consider entries that have a usable URL
-                $withUrl = @($Pool | Where-Object { $_.Url })
-                if ($withUrl.Count -eq 0) { return $null }
-
-                if ($osBuild -gt 0) {
-                    $eligible = @($withUrl | Where-Object { $_.OSBuild -and [int]$_.OSBuild -le $osBuild })
-                    if ($eligible.Count -eq 0) {
-                        # Nothing at/below device build - fall back to lowest available build
-                        $eligible = @($withUrl | Where-Object { $_.OSBuild } |
-                            Sort-Object { [int]$_.OSBuild })
-                    }
-                    if ($eligible.Count -eq 0) { $eligible = $withUrl }
-                } else {
-                    $eligible = $withUrl
-                }
-
-                # Sort: highest OSBuild first, then highest driver version first
-                return ($eligible | Sort-Object `
-                    @{ E = { if ($_.OSBuild) { [int]$_.OSBuild } else { 0 } }; Descending = $true },
-                    @{ E = { Parse-DriverVersion $_.FileName };                  Descending = $true }
-                )[0]
-            }
-
-            # Match on SystemSKU - catalog Product field may be a single SKU or colon-separated list.
-            # Normalise spaces/hyphens to underscores and split on colon before comparing.
-            if ($systemSKU) {
-                $skuNorm = $systemSKU.ToUpper() -replace '[\s\-]','_'
-                $skuCandidates = @($catalog | Where-Object {
-                    if (-not $_.Product) { return $false }
-                    # Split Product on ':' and check each part individually
-                    ($_.Product.ToUpper() -replace '[\s\-]','_') -split ':' |
-                        ForEach-Object { $_.Trim() } |
-                        Where-Object { $_ -eq $skuNorm } |
-                        Select-Object -First 1
-                })
-                Log "  SKU matches for '$systemSKU': $($skuCandidates.Count)"
-
-                if ($skuCandidates.Count -gt 0) {
-                    $chosenEntry = Select-BestEntry -Pool $skuCandidates
-                    if ($chosenEntry) {
-                        Log "  Selected (OSBuild=$($chosenEntry.OSBuild)): $($chosenEntry.FileName)"
-                    }
-                }
-            }
-
-            # Fallback within JSON: match on Model display name if SKU didn't match
-            if (-not $chosenEntry -and $ModelName) {
-                $nameCandidates = @($catalog | Where-Object {
-                    $_.Model -and $_.Url -and $ModelName -ilike "*$($_.Model)*"
-                })
-                Log "  Model name matches for '$ModelName': $($nameCandidates.Count)"
-
-                if ($nameCandidates.Count -gt 0) {
-                    $chosenEntry = Select-BestEntry -Pool $nameCandidates
-                    if ($chosenEntry) {
-                        Log "  Selected via model name (OSBuild=$($chosenEntry.OSBuild)): $($chosenEntry.FileName)"
-                    }
-                }
-            }
-        } catch {
-            Log "  Failed to parse OSDCatalog JSON: $($_.Exception.Message)"
-            $chosenEntry = $null
-        }
-    } else {
-        Log "  OSDCatalog JSON unavailable or empty - falling back to Download Center."
-    }
-
-    if ($chosenEntry) {
-        Log "OSDCatalog match found:"
-        Log "  Model    : $($chosenEntry.Model)"
-        Log "  Product  : $($chosenEntry.Product)"
-        Log "  OSBuild  : $($chosenEntry.OSBuild)"
-        Log "  FileName : $($chosenEntry.FileName)"
-        Log "  URL      : $($chosenEntry.Url)"
-        Log "  MD5      : $($chosenEntry.HashMD5)"
-        SetExtract -Pct 25 -Label "Catalog match: $($chosenEntry.FileName)"
-        SetProgress 20
-
-        $msiFile = Join-Path $DriverRoot $chosenEntry.FileName
-        SetProgress 25
-
-        if (-not (Invoke-CurlDownload -Url $chosenEntry.Url -OutFile $msiFile)) {
-            Log "  Surface MSI download failed."
-            return $false
-        }
-        if (Test-Cancelled) { return $false }
-        SetProgress 50
-
-        # MD5 verification (catalog provides pre-computed hash)
-        if ($chosenEntry.HashMD5 -and $chosenEntry.HashMD5.Length -eq 32) {
-            Log "Verifying MD5 hash..."
-            SetExtract -Pct 30 -Label "Verifying download..."
-            try {
-                $md5       = [System.Security.Cryptography.MD5]::Create()
-                $stream    = [System.IO.File]::OpenRead($msiFile)
-                $hashBytes = $md5.ComputeHash($stream)
-                $stream.Close()
-                $actualMd5   = ([System.BitConverter]::ToString($hashBytes) -replace '-','').ToLower()
-                $expectedMd5 = $chosenEntry.HashMD5.ToLower()
-                if ($actualMd5 -eq $expectedMd5) {
-                    Log "  MD5 OK: $actualMd5"
-                } else {
-                    Log "  WARNING: MD5 mismatch!"
-                    Log "    Expected : $expectedMd5"
-                    Log "    Actual   : $actualMd5"
-                    Log "  Continuing - hash may be stale in catalog."
-                }
-            } catch {
-                Log "  MD5 check error: $($_.Exception.Message) - skipping."
-            }
-        }
-
-        return (Install-SurfaceMsi -MsiFile $msiFile -DriverRoot $DriverRoot -FileName $chosenEntry.FileName)
-    }
-
-    # --------------------------------------------------
-    # FALLBACK PATH: Hardcoded Download Center IDs + HTML scraping
-    # --------------------------------------------------
-    Log "OSDCatalog had no match - falling back to Download Center lookup..."
-    SetExtract -Pct 0 -Label "Trying fallback catalog..."
 
     $pageId = $null
     foreach ($entry in $SurfaceDownloadIds.GetEnumerator()) {
