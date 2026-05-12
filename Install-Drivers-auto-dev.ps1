@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.7.3
+# Version: 1.8.0
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -18,9 +18,18 @@
 #   -Headless      Skip GUI, write to console only (auto-set when any param is passed)
 #   -SkipInstall   Download and extract only, skip pnputil driver installation
 #   -SkipCleanup   Keep C:\DRIVERS after run for inspection
-#
+# huh
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
 #
+# v1.8.0 - Lenovo: added consumer catalog support (per-machine-type XML used by Lenovo
+#           System Update). Fixes coverage for ThinkBook/IdeaPad/consumer models missing
+#           from catalogv2.xml (e.g. ThinkBook 14 G2 ITL / 20VD).
+#           Flow: try https://download.lenovo.com/catalog/<MTM>_<Win10|Win11>.xml first,
+#           parse each package descriptor, SHA256-verify, run vendor install commands
+#           (with %PACKAGEPATH% / %WINDOWS% substitution). Falls back to legacy SCCM
+#           driver pack via catalogv2.xml when consumer catalog has no entries.
+#           Installs everything offered (drivers, firmware, BIOS); -SkipInstall still
+#           honoured for download-only runs.
 # v1.7.3 - Surface: removed OSDCatalog JSON path entirely (unreliable); Download Center is now
 #           the sole method; MSI URL extracted from window.__DLCDetails__ JSON blob first
 #           (reliable primary file), with href regex as fallback; driver version secondary sort;
@@ -60,7 +69,7 @@ param(
 # Auto-enable headless when any override param is passed
 if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" -or $SkipInstall -or $SkipCleanup) { $Headless = $true }
 
-$ScriptVersion   = "1.7.3"
+$ScriptVersion   = "1.8.0"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -1564,6 +1573,353 @@ function Start-HpDriverInstall {
 # =========================
 # LENOVO
 # =========================
+# Two-path Lenovo flow:
+#
+#   Path 1: Consumer catalog (https://download.lenovo.com/catalog/<MTM>_<OS>.xml)
+#     Same catalog Lenovo System Update uses. Covers ThinkBook/IdeaPad consumer
+#     plus most ThinkPad/ThinkCentre. Returns a list of individual <package>
+#     entries; each package has a descriptor XML containing the silent install
+#     command + SHA256 checksums. We run each package's own installer.
+#
+#   Path 2 (fallback): catalogv2.xml SCCM driver pack
+#     One monolithic .exe -> Inno Setup extract -> pnputil INFs. Only used if
+#     Path 1 returned nothing (very old / niche commercial models).
+#
+# Helper Invoke-LenovoPackageCommand runs each package's <ExtractCommand>
+# and <Install><Cmdline> via cmd.exe with the placeholder substitutions
+# Lenovo's installer authors expect (%PACKAGEPATH% and %WINDOWS%).
+# =========================
+
+function Invoke-LenovoPackageCommand {
+    param(
+        [string]$Command,
+        [string]$WorkingDir,
+        [int]$TimeoutSec = 1200
+    )
+    # cmd.exe /c handles quoting + path-with-spaces cleanly. The downside is
+    # cmd swallows '^' as escape - Lenovo install lines do not use it, so safe.
+    try {
+        $psi                  = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName         = $env:ComSpec
+        $psi.Arguments        = "/c $Command"
+        $psi.WorkingDirectory = $WorkingDir
+        $psi.UseShellExecute  = $false
+        $psi.CreateNoWindow   = $true
+        $proc                 = New-Object System.Diagnostics.Process
+        $proc.StartInfo       = $psi
+        $proc.Start() | Out-Null
+
+        $deadline = (Get-Date).AddSeconds($TimeoutSec)
+        while (-not $proc.HasExited) {
+            Start-Sleep -Milliseconds 500
+            Step-AllSpinners
+            [System.Windows.Forms.Application]::DoEvents()
+            if ((Get-Date) -gt $deadline) {
+                Log "  WARNING: process exceeded $TimeoutSec s - killing."
+                try { $proc.Kill() } catch {}
+                return -9999
+            }
+            if ($script:CancelRequested) {
+                try { $proc.Kill() } catch {}
+                return -9998
+            }
+        }
+        return $proc.ExitCode
+    } catch {
+        Log "  Command exec error: $($_.Exception.Message)"
+        return -9997
+    }
+}
+
+function Start-LenovoConsumerCatalogInstall {
+    param(
+        [string]$MachineType,   # 4-char (e.g. "20VD")
+        [string]$OsCode,        # "Win10" or "Win11"
+        [string]$DriverRoot
+    )
+
+    Log "--- Lenovo consumer catalog (System Update mechanism) ---"
+    $catalogUrl  = "https://download.lenovo.com/catalog/${MachineType}_${OsCode}.xml"
+    $catalogFile = Join-Path $env:TEMP "lenovo_${MachineType}_${OsCode}.xml"
+    Log "Catalog URL: $catalogUrl"
+
+    if (-not (Invoke-CurlDownload -Url $catalogUrl -OutFile $catalogFile)) {
+        Log "Consumer catalog not available for ${MachineType}_${OsCode} (404 or fetch failed)."
+        return $false
+    }
+    if (Test-Cancelled) { return $false }
+
+    # Parse catalog (BOM-safe)
+    try {
+        $bytes    = [System.IO.File]::ReadAllBytes($catalogFile)
+        $rawText  = [System.Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0xFEFF)
+        [xml]$cat = $rawText
+    } catch {
+        Log "Consumer catalog parse failed: $($_.Exception.Message)"
+        return $false
+    }
+
+    $pkgNodes = @($cat.packages.package)
+    if ($pkgNodes.Count -eq 0) {
+        Log "Consumer catalog has 0 packages - cannot proceed."
+        return $false
+    }
+    Log "Consumer catalog lists $($pkgNodes.Count) package(s)."
+    SetProgress 10
+
+    # Working dir for all consumer-catalog payloads
+    $pkgRoot = Join-Path $DriverRoot "Lenovo_Consumer"
+    if (-not (Test-Path $pkgRoot)) { New-Item -ItemType Directory -Path $pkgRoot -Force | Out-Null }
+
+    $totalPkgs    = $pkgNodes.Count
+    $pkgIdx       = 0
+    $okCount      = 0
+    $failCount    = 0
+    $skipCount    = 0
+    $rebootNeeded = $false
+    $results      = New-Object System.Collections.Generic.List[object]
+
+    foreach ($pkg in $pkgNodes) {
+        $pkgIdx++
+        if (Test-Cancelled) { Log "Cancelled at package $pkgIdx/$totalPkgs."; break }
+
+        $descUrl         = ([string]$pkg.location).Trim()
+        $category        = if ($pkg.category) { ([string]$pkg.category).Trim() } else { "" }
+        $expectedDescSha = ""
+        if ($pkg.checksum) {
+            $expectedDescSha = if ($pkg.checksum.'#text') { $pkg.checksum.'#text' } else { [string]$pkg.checksum }
+            $expectedDescSha = $expectedDescSha.Trim().ToLower()
+        }
+
+        # Map overall progress 15-95 across packages
+        $overall = 15 + [int](($pkgIdx / $totalPkgs) * 80)
+        SetProgress $overall
+        Log ""
+        Log "----- [$pkgIdx/$totalPkgs] $category -----"
+
+        # 1. Descriptor XML
+        $descName = [System.IO.Path]::GetFileName(([System.Uri]$descUrl).LocalPath)
+        $descFile = Join-Path $pkgRoot $descName
+        if (-not (Invoke-CurlDownload -Url $descUrl -OutFile $descFile)) {
+            Log "  Descriptor download failed - skipping."
+            $failCount++; continue
+        }
+        if ($expectedDescSha) {
+            $actualSha = (Get-FileHash -Path $descFile -Algorithm SHA256).Hash.ToLower()
+            if ($actualSha -ne $expectedDescSha) {
+                Log "  Descriptor SHA256 mismatch - skipping."
+                Log "    expected: $expectedDescSha"
+                Log "    actual:   $actualSha"
+                $failCount++; continue
+            }
+        }
+
+        # 2. Parse descriptor (BOM-safe)
+        try {
+            $descBytes = [System.IO.File]::ReadAllBytes($descFile)
+            $descText  = [System.Text.Encoding]::UTF8.GetString($descBytes).TrimStart([char]0xFEFF)
+            [xml]$desc = $descText
+        } catch {
+            Log "  Descriptor parse failed: $($_.Exception.Message)"
+            $failCount++; continue
+        }
+
+        $pkgName     = [string]$desc.Package.name
+        $pkgId       = [string]$desc.Package.id
+        $pkgVer      = [string]$desc.Package.version
+        $releaseDate = [string]$desc.Package.ReleaseDate
+        $severity    = if ($desc.Package.Severity)    { [string]$desc.Package.Severity.type }    else { '?' }
+        $packageType = if ($desc.Package.PackageType) { [string]$desc.Package.PackageType.type } else { '?' }
+        $rebootType  = if ($desc.Package.Reboot)      { [string]$desc.Package.Reboot.type }      else { '0' }
+
+        # Title (EN preferred)
+        $title = ""
+        try {
+            $descNodes = @($desc.Package.Title.Desc)
+            $enDesc = $descNodes | Where-Object { $_.id -eq 'EN' } | Select-Object -First 1
+            if (-not $enDesc) { $enDesc = $descNodes | Select-Object -First 1 }
+            if ($enDesc) { $title = [string]$enDesc.InnerText }
+        } catch {}
+        if (-not $title) { $title = $pkgName }
+
+        $typeName = switch ($packageType) {
+            '1' { 'Application' }
+            '2' { 'Driver' }
+            '3' { 'BIOS' }
+            '4' { 'Firmware' }
+            default { "Type$packageType" }
+        }
+        $sevName = switch ($severity) {
+            '1' { 'Critical' }
+            '2' { 'Recommended' }
+            '3' { 'Optional' }
+            default { "Sev$severity" }
+        }
+
+        Log "  $title"
+        Log "  id=$pkgId  version=$pkgVer  released=$releaseDate"
+        Log "  $typeName / $sevName  (reboot type $rebootType)"
+
+        # 3. Installer file metadata
+        $installerNode = $null
+        try { $installerNode = $desc.Package.Files.Installer.File } catch {}
+        if (-not $installerNode -or -not $installerNode.Name) {
+            Log "  No <Installer><File> entry - cannot install. Skipping."
+            $skipCount++; continue
+        }
+        $installerName = [string]$installerNode.Name
+        $expectedCrc   = if ($installerNode.CRC) { ([string]$installerNode.CRC).ToLower() } else { "" }
+
+        # Installer URL = same directory as descriptor URL + installer filename
+        $descDir      = $descUrl.Substring(0, $descUrl.LastIndexOf('/') + 1)
+        $installerUrl = $descDir + $installerName
+
+        # Per-package extract directory == %PACKAGEPATH%
+        $packagePath   = Join-Path $pkgRoot $pkgId
+        if (-not (Test-Path $packagePath)) { New-Item -ItemType Directory -Path $packagePath -Force | Out-Null }
+        $installerFile = Join-Path $packagePath $installerName
+
+        # 4. Download installer
+        if (-not (Invoke-CurlDownload -Url $installerUrl -OutFile $installerFile)) {
+            Log "  Installer download failed - skipping."
+            $failCount++; continue
+        }
+        if ($expectedCrc) {
+            $actualCrc = (Get-FileHash -Path $installerFile -Algorithm SHA256).Hash.ToLower()
+            if ($actualCrc -ne $expectedCrc) {
+                Log "  Installer SHA256 mismatch - skipping."
+                Log "    expected: $expectedCrc"
+                Log "    actual:   $actualCrc"
+                $failCount++; continue
+            }
+            Log "  SHA256 OK."
+        }
+
+        # 5. Download External helpers (version checkers etc.) if present
+        try {
+            if ($desc.Package.Files.External) {
+                foreach ($ext in @($desc.Package.Files.External.File)) {
+                    if (-not $ext -or -not $ext.Name) { continue }
+                    $extName = [string]$ext.Name
+                    $extUrl  = $descDir + $extName
+                    $extFile = Join-Path $packagePath $extName
+                    Log "  External helper: $extName"
+                    if (-not (Invoke-CurlDownload -Url $extUrl -OutFile $extFile)) {
+                        Log "  WARNING: external helper download failed (continuing)."
+                        continue
+                    }
+                    if ($ext.CRC) {
+                        $extSha    = (Get-FileHash -Path $extFile -Algorithm SHA256).Hash.ToLower()
+                        $extExpect = ([string]$ext.CRC).ToLower()
+                        if ($extSha -ne $extExpect) { Log "  WARNING: external helper SHA256 mismatch (continuing)." }
+                    }
+                }
+            }
+        } catch { Log "  External helper handling error: $($_.Exception.Message)" }
+
+        if ($SkipInstall) {
+            Log "  -SkipInstall set: download + verify only."
+            $okCount++
+            $results.Add([pscustomobject]@{
+                Index=$pkgIdx; Title=$title; Category=$category; Version=$pkgVer; Exit=$null; Status='DOWNLOAD-ONLY'
+            })
+            continue
+        }
+
+        # 6. Run extract command (if present) - unpacks payload into %PACKAGEPATH%
+        $extractCmd = [string]$desc.Package.ExtractCommand
+        if ($extractCmd) {
+            $cmd = $extractCmd.Replace('%PACKAGEPATH%', $packagePath).Replace('%WINDOWS%', $env:WINDIR)
+            Log "  Extract: $cmd"
+            SetExtract -Pct $overall -Label "Extracting [$pkgIdx/$totalPkgs]: $title"
+            $extExit = Invoke-LenovoPackageCommand -Command $cmd -WorkingDir $packagePath -TimeoutSec 600
+            Log "  Extract exit code: $extExit"
+            # Extract exit codes vary by vendor - non-zero isn't necessarily failure, continue regardless.
+        }
+
+        # 7. Run install command
+        $installNode = $null
+        try { $installNode = $desc.Package.Install } catch {}
+        if (-not $installNode) {
+            Log "  No <Install> block - skipping."
+            $skipCount++; continue
+        }
+
+        # Cmdline: prefer id="EN", else first one
+        $installCmdRaw = ""
+        try {
+            $cmdNodes = @($installNode.Cmdline)
+            $enCmd = $cmdNodes | Where-Object { $_.id -eq 'EN' } | Select-Object -First 1
+            if (-not $enCmd) { $enCmd = $cmdNodes | Select-Object -First 1 }
+            if ($enCmd) {
+                $installCmdRaw = if ($enCmd -is [System.Xml.XmlElement]) { $enCmd.InnerText } else { [string]$enCmd }
+            }
+        } catch {}
+        if (-not $installCmdRaw) {
+            Log "  No <Cmdline> text - skipping."
+            $skipCount++; continue
+        }
+
+        # Acceptable exit codes: 0 plus Windows reboot codes plus whatever rc="" lists
+        $rcOk = New-Object System.Collections.Generic.HashSet[int64]
+        [void]$rcOk.Add(0); [void]$rcOk.Add(3010); [void]$rcOk.Add(1641)
+        if ($installNode.rc) {
+            foreach ($r in (([string]$installNode.rc) -split ',')) {
+                $r = $r.Trim()
+                if ($r -match '^-?\d+$') { [void]$rcOk.Add([int64]$r) }
+            }
+        }
+
+        $installCmd = $installCmdRaw.Replace('%PACKAGEPATH%', $packagePath).Replace('%WINDOWS%', $env:WINDIR)
+        Log "  Install: $installCmd"
+        SetExtract -Pct $overall -Label "Installing [$pkgIdx/$totalPkgs]: $title"
+
+        # BIOS updates take longer - give them more headroom
+        $timeout = if ($packageType -eq '3' -or $packageType -eq '4') { 1800 } else { 1200 }
+        $exit = Invoke-LenovoPackageCommand -Command $installCmd -WorkingDir $packagePath -TimeoutSec $timeout
+        $isOk = $rcOk.Contains([int64]$exit)
+        $statusLabel = if ($isOk) { 'OK' } else { 'FAIL' }
+        Log "  Install exit: $exit  [$statusLabel]"
+
+        if ($isOk) {
+            $okCount++
+            if ($exit -eq 3010 -or $exit -eq 1641 -or $rebootType -in @('1','3','4','5')) {
+                $rebootNeeded = $true
+            }
+        } else {
+            $failCount++
+        }
+        $results.Add([pscustomobject]@{
+            Index=$pkgIdx; Title=$title; Category=$category; Version=$pkgVer; Exit=$exit; Status=$statusLabel
+        })
+
+        Play-Sound -Event "DriverAdded"
+    }
+
+    # Summary
+    Log ""
+    Log "=== LENOVO CONSUMER CATALOG SUMMARY ==="
+    Log "Machine type: $MachineType  OS: $OsCode"
+    Log "Total:     $totalPkgs"
+    Log "Installed: $okCount"
+    Log "Failed:    $failCount"
+    Log "Skipped:   $skipCount"
+    if ($rebootNeeded) { Log "*** REBOOT REQUIRED to finalize one or more updates ***" }
+    foreach ($r in $results) {
+        $mark = if ($r.Status -eq 'OK' -or $r.Status -eq 'DOWNLOAD-ONLY') { '[OK]  ' } else { '[FAIL]' }
+        $exitTxt = if ($null -eq $r.Exit) { '-' } else { "exit $($r.Exit)" }
+        Log "  $mark [$($r.Index)/$totalPkgs] $($r.Category) - $($r.Title) (v$($r.Version)) $exitTxt"
+    }
+
+    $script:AnalyticsInfCount = $okCount
+    SetProgress 100
+    SetExtract -Pct 100 -Label "Done - $okCount/$totalPkgs installed"
+    Stop-ExSpinner      -Success ($failCount -eq 0)
+    Stop-OverallSpinner -Success ($failCount -eq 0)
+
+    return ($okCount -gt 0)
+}
+
 function Start-LenovoDriverInstall {
     param([string]$DriverRoot)
 
@@ -1589,11 +1945,32 @@ function Start-LenovoDriverInstall {
 
     try { $script:AnalyticsSerial = (Get-CimInstance Win32_BIOS).SerialNumber.Trim() } catch {}
 
-    $winVer     = (Get-CimInstance Win32_OperatingSystem).Version
-    $osAttr     = if ($winVer -match "^10\.0\.2") { "win11" } else { "win10" }
-    $osFallback = if ($osAttr -eq "win11") { "win10" } else { "win11" }
-    Log "Detected OS tag: $osAttr"
+    # BuildNumber is the unambiguous Win10 vs Win11 discriminator (>=22000 = Win11).
+    $buildNum = 0
+    try { $buildNum = [int](Get-CimInstance Win32_OperatingSystem).BuildNumber } catch {}
+    $osCode     = if ($buildNum -ge 22000) { 'Win11' } else { 'Win10' }
+    $osAttr     = $osCode.ToLower()  # 'win10' or 'win11' for the legacy SCCM-pack code below
+    $osFallback = if ($osAttr -eq 'win11') { 'win10' } else { 'win11' }
+    Log "Detected OS: $osCode (build $buildNum)"
 
+    # ------------------------------------------------------------------
+    # PATH 1: Consumer catalog (Lenovo System Update mechanism)
+    #   This is the catalog that ALSO covers ThinkBook/IdeaPad/consumer
+    #   models missing from catalogv2.xml. Try it first.
+    # ------------------------------------------------------------------
+    SetProgress 5
+    $consumerOK = Start-LenovoConsumerCatalogInstall -MachineType $machineType -OsCode $osCode -DriverRoot $DriverRoot
+    if ($consumerOK) {
+        Log "Consumer catalog flow succeeded - skipping legacy SCCM pack path."
+        return $true
+    }
+    Log "Consumer catalog yielded nothing - falling back to legacy SCCM driver pack..."
+    SetProgress 15
+
+    # ------------------------------------------------------------------
+    # PATH 2: Legacy SCCM driver pack (catalogv2.xml)
+    #   Original behaviour - kept as fallback for older / niche models.
+    # ------------------------------------------------------------------
     Log "Fetching Lenovo catalogv2.xml..."
     $catalogFile = Join-Path $env:TEMP "lenovo_catalogv2.xml"
     if (-not (Invoke-CurlDownload -Url "https://download.lenovo.com/cdrt/td/catalogv2.xml" -OutFile $catalogFile)) {

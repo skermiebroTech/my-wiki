@@ -1,0 +1,3 @@
+```
+.\setupRST.exe -extractdrivers <location>
+```
