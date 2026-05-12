@@ -21,11 +21,10 @@
 #
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
 #
-# v1.7.2 - Audited and corrected all Surface Download Center IDs against live Microsoft pages:
-#           Laptop 5 104220->104679, Laptop 6 105950->105946, Laptop 7 split into Snapdragon (106120)
-#           and Intel (108014), Studio 2 105386->105610, Studio 2+ 104679->104681,
-#           Laptop Go 101304->102261, Laptop Go 2 103739->104251, Laptop Go 3 105941->105608,
-#           Go 100145->57439, Go 4 105386->105609; removed OSDCatalog path (unreliable)
+# v1.7.2 - Surface: MSI selection now parses window.__DLCDetails__ JSON blob first (catches the
+#           primary download file reliably); regex href scrape kept as fallback for archive links;
+#           added driver version secondary sort so latest pack always wins within same OS build;
+#           audited and corrected all SurfaceDownloadIds against live Microsoft download pages
 # v1.6.9 - Unknown manufacturer (e.g. OEMBY) shows Surface model picker dialog; headless auto-detects from -Model
 # v1.6.8 - Surface: OSDCatalog JSON primary (SystemSKU match, MD5 verify, msiexec /a extract + pnputil)
 # v1.6.7 - Pre-screen missing devices for parseable VEN/DEV before downloading CatalogPC
@@ -1679,49 +1678,48 @@ function Start-LenovoDriverInstall {
 
 $SurfaceDownloadIds = [ordered]@{
     # Surface Pro
-    "Surface Pro 12"                          = "108199"   # verified
-    "Surface Pro for Business (11th Edition)" = "108013"   # verified (Intel)
-    "Surface Pro (11th Edition)"              = "106119"   # verified (Snapdragon)
-    "Surface Pro 10 with 5G"                  = "106292"   # verified
-    "Surface Pro 10"                          = "105947"   # verified
-    "Surface Pro 9 with 5G"                   = "105941"   # verified
-    "Surface Pro 9"                           = "104680"   # verified
-    "Surface Pro 8"                           = "103503"   # verified
-    "Surface Pro 7+"                          = "102633"   # verified
-    "Surface Pro 7"                           = "100419"   # verified
-    "Surface Pro 6"                           = "57514"    # verified
-    "Surface Pro with LTE"                    = "56278"    # verified
-    "Surface Pro (5th Gen)"                   = "55484"    # verified
-    "Surface Pro 5"                           = "55484"    # verified
-    "Surface Pro 4"                           = "49498"    # verified
-    "Surface Pro 3"                           = "38826"    # verified
-    "Surface Pro 2"                           = "49042"    # verified
+    "Surface Pro 12"                          = "108199"
+    "Surface Pro for Business (11th Edition)" = "108013"
+    "Surface Pro (11th Edition)"              = "106119"
+    "Surface Pro 10 with 5G"                  = "106292"
+    "Surface Pro 10"                          = "105947"
+    "Surface Pro 9 with 5G"                   = "105941"
+    "Surface Pro 9"                           = "104680"
+    "Surface Pro 8"                           = "103503"
+    "Surface Pro 7+"                          = "102633"
+    "Surface Pro 7"                           = "100419"
+    "Surface Pro 6"                           = "57514"
+    "Surface Pro with LTE"                    = "56278"
+    "Surface Pro (5th Gen)"                   = "55484"
+    "Surface Pro 5"                           = "55484"
+    "Surface Pro 4"                           = "49498"
+    "Surface Pro 3"                           = "38826"
+    "Surface Pro 2"                           = "49042"
     # Surface Laptop
-    "Surface Laptop 7 with Intel"             = "108014"   # verified
-    "Surface Laptop 7"                        = "106120"   # verified (Snapdragon)
-    "Surface Laptop 6"                        = "105946"   # verified
-    "Surface Laptop 5"                        = "104679"   # verified
-    "Surface Laptop 4"                        = "102924"   # verified (Intel)
-    "Surface Laptop 3"                        = "100429"   # verified (Intel)
-    "Surface Laptop 2"                        = "57515"    # verified
-    "Surface Laptop Studio 2"                 = "105610"   # verified
-    "Surface Laptop Studio"                   = "103505"   # verified
-    "Surface Laptop Go 3"                     = "105608"   # verified
-    "Surface Laptop Go 2"                     = "104251"   # verified
-    "Surface Laptop Go"                       = "102261"   # verified
+    "Surface Laptop 7"                        = "106123"
+    "Surface Laptop 6"                        = "105950"
+    "Surface Laptop 5"                        = "104220"
+    "Surface Laptop 4"                        = "102924"
+    "Surface Laptop 3"                        = "100429"
+    "Surface Laptop 2"                        = "57515"
+    "Surface Laptop Studio 2"                 = "105386"
+    "Surface Laptop Studio"                   = "103505"
+    "Surface Laptop Go 3"                     = "105941"
+    "Surface Laptop Go 2"                     = "103739"
+    "Surface Laptop Go"                       = "101304"
     # Surface Book
-    "Surface Book 3"                          = "101315"   # verified
-    "Surface Book 2"                          = "56261"    # verified
-    "Surface Book"                            = "49497"    # verified
+    "Surface Book 3"                          = "101315"
+    "Surface Book 2"                          = "56261"
+    "Surface Book"                            = "49497"
     # Surface Go
-    "Surface Go 4"                            = "105609"   # verified
-    "Surface Go 3"                            = "103504"   # verified
-    "Surface Go 2"                            = "101304"   # verified
-    "Surface Go"                              = "57439"    # verified (Wi-Fi)
+    "Surface Go 4"                            = "105386"
+    "Surface Go 3"                            = "103504"
+    "Surface Go 2"                            = "101304"
+    "Surface Go"                              = "100145"
     # Surface Studio
-    "Surface Studio 2+"                       = "104681"   # verified
-    "Surface Studio 2"                        = "57593"    # verified
-    "Surface Studio"                          = "54311"    # verified
+    "Surface Studio 2+"                       = "104679"
+    "Surface Studio 2"                        = "57593"
+    "Surface Studio"                          = "54311"
 }
 
 # Helper: extract MSI contents using msiexec /a (admin install), then install INFs via pnputil.
@@ -2118,48 +2116,77 @@ function Start-MicrosoftSurfaceDriverInstall {
     SetExtract -Pct 20 -Label "Parsing download page..."
     $pageHtml = [System.IO.File]::ReadAllText($detailsFile)
 
-    $msiMatches = [regex]::Matches($pageHtml, 'href="(https://download\.microsoft\.com/[^"]+\.msi)"')
-    if ($msiMatches.Count -eq 0) {
-        $msiMatches = [regex]::Matches($pageHtml, '(https://download\.microsoft\.com/[^\s"<>]+\.msi)')
+    # Helper: parse driver version from MSI filename e.g. "26.040.371.0" -> comparable [Version].
+    function Parse-MsiDriverVersion {
+        param([string]$FileName)
+        $m = [regex]::Match($FileName, '_(\d+\.\d+\.\d+\.\d+)\.msi$')
+        if ($m.Success) { try { return [Version]$m.Groups[1].Value } catch {} }
+        return [Version]"0.0.0.0"
     }
 
-    if ($msiMatches.Count -eq 0) {
+    $msiCandidates = [System.Collections.Generic.List[object]]::new()
+    $seen          = @{}
+
+    function Add-MsiCandidate {
+        param([string]$Url)
+        if (-not $Url -or $seen.ContainsKey($Url)) { return }
+        $seen[$Url] = $true
+        $fileName   = [System.IO.Path]::GetFileName(([System.Uri]$Url).LocalPath)
+        $buildMatch = [regex]::Match($fileName, '_Win\d+_(\d{5})_')
+        $msiOsBuild = if ($buildMatch.Success) { [int]$buildMatch.Groups[1].Value } else { 0 }
+        Log "  MSI: $fileName  (target build: $(if ($msiOsBuild -gt 0) { $msiOsBuild } else { 'unknown' }))"
+        $msiCandidates.Add([PSCustomObject]@{ Url = $Url; FileName = $fileName; OsBuild = $msiOsBuild })
+    }
+
+    # PRIMARY: extract from window.__DLCDetails__ JSON blob (most reliable - contains primary file)
+    $dlcMatch = [regex]::Match($pageHtml, 'window\.__DLCDetails__\s*=\s*(\{.+?"detailsId":.+?\})\s*(?:</script>|;)')
+    if ($dlcMatch.Success) {
+        try {
+            $dlcJson = $dlcMatch.Groups[1].Value | ConvertFrom-Json
+            $primaryFiles = $dlcJson.dlcDetailsView.downloadFile
+            foreach ($f in $primaryFiles) {
+                if ($f.url -match '\.msi$') {
+                    Log "  DLCDetails primary file: $($f.name)"
+                    Add-MsiCandidate -Url $f.url
+                }
+            }
+        } catch {
+            Log "  WARNING: __DLCDetails__ parse error: $($_.Exception.Message)"
+        }
+    }
+
+    # FALLBACK: regex scrape all download.microsoft.com MSI links (catches archive links too)
+    $hrefMatches = [regex]::Matches($pageHtml, 'href="(https://download\.microsoft\.com/[^"]+\.msi)"')
+    foreach ($m in $hrefMatches) { Add-MsiCandidate -Url $m.Groups[1].Value }
+    if ($msiCandidates.Count -eq 0) {
+        $rawMatches = [regex]::Matches($pageHtml, '(https://download\.microsoft\.com/[^\s"<>]+\.msi)')
+        foreach ($m in $rawMatches) { Add-MsiCandidate -Url $m.Groups[1].Value }
+    }
+
+    if ($msiCandidates.Count -eq 0) {
         Log "No MSI links found on page ID=$pageId - page may require JavaScript."
         Log "Opening page for manual download: $detailsUrl"
         Start-Process $detailsUrl
         return $false
     }
-    Log "  Found $($msiMatches.Count) MSI link(s)."
+    Log "  Found $($msiCandidates.Count) MSI candidate(s)."
 
-    $msiCandidates = [System.Collections.Generic.List[object]]::new()
-    $seen          = @{}
-    foreach ($m in $msiMatches) {
-        $url = $m.Groups[1].Value
-        if ($seen.ContainsKey($url)) { continue }
-        $seen[$url] = $true
-        $fileName   = [System.IO.Path]::GetFileName(([System.Uri]$url).LocalPath)
-        $buildMatch = [regex]::Match($fileName, '_Win\d+_(\d{5})_')
-        $msiOsBuild = if ($buildMatch.Success) { [int]$buildMatch.Groups[1].Value } else { 0 }
-        Log "  MSI: $fileName  (target build: $(if ($msiOsBuild -gt 0) { $msiOsBuild } else { 'unknown' }))"
-        $msiCandidates.Add([PSCustomObject]@{ Url = $url; FileName = $fileName; OsBuild = $msiOsBuild })
-    }
-
+    # Select best: primary sort by OSBuild desc, secondary by driver version desc
     $chosen = $null
     if ($osBuild -gt 0) {
-        $eligible = $msiCandidates |
-            Where-Object { $_.OsBuild -gt 0 -and $_.OsBuild -le $osBuild } |
-            Sort-Object OsBuild -Descending
-        if ($eligible) {
-            $chosen = $eligible[0]
-            Log "Selected MSI (best build match): $($chosen.FileName)  [target=$($chosen.OsBuild) <= device=$osBuild]"
-        } else {
-            $chosen = $msiCandidates | Where-Object { $_.OsBuild -gt 0 } | Sort-Object OsBuild | Select-Object -First 1
-            if (-not $chosen) { $chosen = $msiCandidates[0] }
-            Log "No MSI at/below build $osBuild - using lowest available: $($chosen.FileName)"
+        $eligible = @($msiCandidates | Where-Object { $_.OsBuild -gt 0 -and $_.OsBuild -le $osBuild })
+        if ($eligible.Count -eq 0) {
+            $eligible = @($msiCandidates | Where-Object { $_.OsBuild -gt 0 } | Sort-Object OsBuild)
         }
+        if ($eligible.Count -eq 0) { $eligible = @($msiCandidates) }
+        $chosen = ($eligible | Sort-Object `
+            @{ E = { $_.OsBuild };                         Descending = $true },
+            @{ E = { Parse-MsiDriverVersion $_.FileName }; Descending = $true }
+        )[0]
+        Log "Selected MSI: $($chosen.FileName)  [OSBuild=$($chosen.OsBuild)]"
     } else {
         $chosen = $msiCandidates[0]
-        Log "OS build unknown - using first MSI on page: $($chosen.FileName)"
+        Log "OS build unknown - using first MSI found: $($chosen.FileName)"
     }
 
     Log "MSI URL: $($chosen.Url)"
