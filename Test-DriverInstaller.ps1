@@ -835,4 +835,4 @@ $form.Add_Shown({
 })
 
 $form.Add_FormClosed({ $ticker.Stop() })
-[void]$form.ShowDialog()
+[void]$form.ShowDialog()x

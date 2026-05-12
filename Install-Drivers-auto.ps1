@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.6.9
+# Version: 1.7.3
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -21,6 +21,10 @@
 #
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
 #
+# v1.7.3 - Surface: removed OSDCatalog JSON path entirely (unreliable); Download Center is now
+#           the sole method; MSI URL extracted from window.__DLCDetails__ JSON blob first
+#           (reliable primary file), with href regex as fallback; driver version secondary sort;
+#           audited and corrected all SurfaceDownloadIds against live Microsoft download pages
 # v1.6.9 - Unknown manufacturer (e.g. OEMBY) shows Surface model picker dialog; headless auto-detects from -Model
 # v1.6.8 - Surface: OSDCatalog JSON primary (SystemSKU match, MD5 verify, msiexec /a extract + pnputil)
 # v1.6.7 - Pre-screen missing devices for parseable VEN/DEV before downloading CatalogPC
@@ -56,7 +60,7 @@ param(
 # Auto-enable headless when any override param is passed
 if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" -or $SkipInstall -or $SkipCleanup) { $Headless = $true }
 
-$ScriptVersion   = "1.6.9"
+$ScriptVersion   = "1.7.3"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -1648,74 +1652,65 @@ function Start-LenovoDriverInstall {
 # =========================
 # MICROSOFT (SURFACE)
 #
-# Two-path approach:
-#
-# PRIMARY: OSDCatalog JSON (DriverAutomationTool - maintained on GitHub)
-#   - Fetches OSDCatalogMicrosoftDriverPack.json from GitHub
-#   - Matches on SystemSKU (hardware identifier - more reliable than model name)
-#   - Handles Commercial vs Consumer SKU variants
-#   - Selects best MSI by OSBuild (highest build <= device OS build)
-#   - Verifies MD5 hash after download (hash included in catalog)
-#   - Extracts MSI with msiexec /a (admin install) into Surface_Extracted folder
-#   - Installs extracted INFs via pnputil (consistent with Dell/HP/Lenovo flow)
-#
-# FALLBACK: Hardcoded Download Center IDs
-#   - Used if JSON catalog has no entry for this SKU/model
-#   - Fetches Microsoft Download Center HTML page and scrapes .msi link
-#   - Same msiexec /a + pnputil flow as primary path
+# Uses Microsoft Download Center IDs to find the correct driver MSI for the model.
+# Fetches the Download Center details page, extracts the MSI URL from the embedded
+# window.__DLCDetails__ JSON blob (primary), falls back to href regex scraping.
+# Selects best MSI by OS build (highest build <= device OS build) with secondary
+# sort on driver version. Downloads MSI, extracts with msiexec /a, installs via pnputil.
 #
 # Surface Pro X (ARM/SQ processor): not supported.
 #   Microsoft requires Windows Update for Pro X driver delivery.
 #   No MSI is published; script opens support page and exits gracefully.
 #
-# To add new Surface models to the fallback table: add an entry to
-#   $SurfaceDownloadIds below (value = numeric ID from details.aspx?id=XXXXXX).
+# To add new Surface models: add an entry to $SurfaceDownloadIds below
+#   (value = numeric ID from details.aspx?id=XXXXXX).
 # =========================
 
 $SurfaceDownloadIds = [ordered]@{
     # Surface Pro
-    "Surface Pro 12"                          = "108199"
-    "Surface Pro for Business (11th Edition)" = "108013"
-    "Surface Pro (11th Edition)"              = "106119"
-    "Surface Pro 10 with 5G"                  = "106292"
-    "Surface Pro 10"                          = "105947"
-    "Surface Pro 9 with 5G"                   = "105941"
-    "Surface Pro 9"                           = "104680"
-    "Surface Pro 8"                           = "103503"
-    "Surface Pro 7+"                          = "102633"
-    "Surface Pro 7"                           = "100419"
-    "Surface Pro 6"                           = "57514"
-    "Surface Pro with LTE"                    = "56278"
-    "Surface Pro (5th Gen)"                   = "55484"
-    "Surface Pro 5"                           = "55484"
-    "Surface Pro 4"                           = "49498"
-    "Surface Pro 3"                           = "38826"
-    "Surface Pro 2"                           = "49042"
+    "Surface Pro 12"                          = "108199"   # verified
+    "Surface Pro for Business (11th Edition)" = "108013"   # verified (Intel)
+    "Surface Pro (11th Edition)"              = "106119"   # verified (Snapdragon)
+    "Surface Pro 10 with 5G"                  = "106292"   # verified
+    "Surface Pro 10"                          = "105947"   # verified
+    "Surface Pro 9 with 5G"                   = "105941"   # verified
+    "Surface Pro 9"                           = "104680"   # verified
+    "Surface Pro 8"                           = "103503"   # verified
+    "Surface Pro 7+"                          = "102633"   # verified
+    "Surface Pro 7"                           = "100419"   # verified
+    "Surface Pro 6"                           = "57514"    # verified
+    "Surface Pro with LTE"                    = "56278"    # verified
+    "Surface Pro (5th Gen)"                   = "55484"    # verified
+    "Surface Pro 5"                           = "55484"    # verified
+    "Surface Pro 4"                           = "49498"    # verified
+    "Surface Pro 3"                           = "38826"    # verified
+    "Surface Pro 2"                           = "49042"    # verified
     # Surface Laptop
-    "Surface Laptop 7"                        = "106123"
-    "Surface Laptop 6"                        = "105950"
-    "Surface Laptop 5"                        = "104220"
-    "Surface Laptop 4"                        = "102924"
-    "Surface Laptop 3"                        = "100429"
-    "Surface Laptop 2"                        = "57515"
-    "Surface Laptop Studio 2"                 = "105386"
-    "Surface Laptop Studio"                   = "103505"
-    "Surface Laptop Go 3"                     = "105941"
-    "Surface Laptop Go 2"                     = "103739"
-    "Surface Laptop Go"                       = "101304"
+    "Surface Laptop 7 with Intel"             = "108014"   # verified
+    "Surface Laptop 7"                        = "106120"   # verified (Snapdragon)
+    "Surface Laptop 6"                        = "105946"   # verified
+    "Surface Laptop 5"                        = "104679"   # verified
+    "Surface Laptop 4"                        = "102924"   # verified (Intel)
+    "Surface Laptop 3"                        = "100429"   # verified (Intel)
+    "Surface Laptop 2"                        = "57515"    # verified
+    "Surface Laptop Studio 2"                 = "105610"   # verified
+    "Surface Laptop Studio"                   = "103505"   # verified
+    "Surface Laptop Go 3"                     = "105608"   # verified
+    "Surface Laptop Go 2"                     = "104251"   # verified
+    "Surface Laptop Go"                       = "102261"   # verified
     # Surface Book
-    "Surface Book 3"                          = "101315"
-    "Surface Book 2"                          = "56261"
-    "Surface Book"                            = "49497"
+    "Surface Book 3"                          = "101315"   # verified
+    "Surface Book 2"                          = "56261"    # verified
+    "Surface Book"                            = "49497"    # verified
     # Surface Go
-    "Surface Go 4"                            = "105386"
-    "Surface Go 3"                            = "103504"
-    "Surface Go 2"                            = "101304"
-    "Surface Go"                              = "100145"
+    "Surface Go 4"                            = "105609"   # verified
+    "Surface Go 3"                            = "103504"   # verified
+    "Surface Go 2"                            = "101304"   # verified
+    "Surface Go"                              = "57439"    # verified (Wi-Fi)
     # Surface Studio
-    "Surface Studio 2+"                       = "104679"
-    "Surface Studio 2"                        = "57593"
-    "Surface Studio"                          = "54311"
+    "Surface Studio 2+"                       = "104681"   # verified
+    "Surface Studio 2"                        = "57593"    # verified
+    "Surface Studio"                          = "54311"    # verified
 }
 
 # Helper: extract MSI contents using msiexec /a (admin install), then install INFs via pnputil.
@@ -1882,7 +1877,7 @@ function Start-MicrosoftSurfaceDriverInstall {
         Log "OS Build: $osBuild"
     } catch { Log "Could not read OS build: $($_.Exception.Message)" }
 
-    # Read SystemSKU - used by OSDCatalog JSON matching (more reliable than model name)
+    # Read SystemSKU for logging purposes
     $systemSKU = ""
     try {
         $systemSKU = (Get-CimInstance Win32_ComputerSystem).SystemSKUNumber.Trim()
@@ -1892,155 +1887,12 @@ function Start-MicrosoftSurfaceDriverInstall {
     if (-not (Test-Path $DriverRoot)) { New-Item -Path $DriverRoot -ItemType Directory -Force | Out-Null }
 
     # --------------------------------------------------
-    # PRIMARY PATH: OSDCatalog JSON (DriverAutomationTool GitHub)
-    # Structured catalog with direct URLs, OSBuild per entry, and MD5 hashes.
+    # Download Center lookup: match model -> page ID -> fetch page ->
+    # extract MSI URL from __DLCDetails__ JSON blob -> download -> msiexec /a -> pnputil
     # --------------------------------------------------
-    $osdCatalogUrl  = "https://raw.githubusercontent.com/maurice-daly/DriverAutomationTool/master/Data/OSDCatalogMicrosoftDriverPack.json"
-    $osdCatalogFile = Join-Path $env:TEMP "OSDCatalogMicrosoftDriverPack.json"
-    Remove-Item $osdCatalogFile -EA SilentlyContinue
-
-    Log "Fetching OSDCatalog JSON..."
-    SetExtract -Pct 5 -Label "Fetching Surface catalog..."
+    Log "Looking up Surface driver pack via Download Center..."
+    SetExtract -Pct 5 -Label "Looking up Download Center ID..."
     SetProgress 10
-
-    $psi                 = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName        = "curl.exe"
-    $psi.Arguments       = "--silent --location --max-time 30 --connect-timeout 15 " +
-                           "--output `"$osdCatalogFile`" `"$osdCatalogUrl`""
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow  = $true
-    $fetchProc           = New-Object System.Diagnostics.Process
-    $fetchProc.StartInfo = $psi
-    $fetchProc.Start() | Out-Null
-    $start = Get-Date
-    while (-not $fetchProc.HasExited) {
-        Start-Sleep -Milliseconds 400; Step-AllSpinners
-        if (((Get-Date) - $start).TotalSeconds -gt 35) {
-            Log "  Timeout fetching OSDCatalog JSON."
-            try { $fetchProc.Kill() } catch {}
-            break
-        }
-    }
-    $fetchProc.WaitForExit()
-
-    $chosenEntry = $null
-
-    if ((Test-Path $osdCatalogFile) -and (Get-Item $osdCatalogFile).Length -gt 100) {
-        Log "Parsing OSDCatalog JSON..."
-        SetExtract -Pct 15 -Label "Parsing catalog..."
-        try {
-            $jsonText = [System.IO.File]::ReadAllText($osdCatalogFile)
-            $catalog  = $jsonText | ConvertFrom-Json
-            Log "  Catalog entries: $($catalog.Count)"
-
-            # Match on SystemSKU (normalise spaces/hyphens -> underscores for comparison)
-            if ($systemSKU) {
-                $skuNorm = $systemSKU -replace '[\s\-]','_'
-                $skuCandidates = @($catalog | Where-Object {
-                    $_.Product -and (
-                        ($_.Product -replace '[\s\-]','_') -ieq $skuNorm -or
-                        ($_.Product -split ':' | ForEach-Object { $_ -replace '[\s\-]','_' }) -icontains $skuNorm
-                    )
-                })
-                Log "  SKU matches for '$systemSKU': $($skuCandidates.Count)"
-
-                if ($skuCandidates.Count -gt 0 -and $osBuild -gt 0) {
-                    $eligible = @($skuCandidates | Where-Object {
-                        $_.OSBuild -and [int]$_.OSBuild -le $osBuild
-                    } | Sort-Object { [int]$_.OSBuild } -Descending)
-
-                    if ($eligible.Count -gt 0) {
-                        $chosenEntry = $eligible[0]
-                        Log "  Selected (OSBuild $($chosenEntry.OSBuild) <= device $osBuild): $($chosenEntry.FileName)"
-                    } else {
-                        $chosenEntry = ($skuCandidates | Sort-Object { [int]$_.OSBuild })[0]
-                        Log "  No entry at/below build $osBuild - using lowest available: $($chosenEntry.FileName)"
-                    }
-                } elseif ($skuCandidates.Count -gt 0) {
-                    $chosenEntry = ($skuCandidates | Sort-Object { [int]$_.OSBuild } -Descending)[0]
-                    Log "  OS build unknown - using latest SKU match: $($chosenEntry.FileName)"
-                }
-            }
-
-            # Fallback within JSON: match on Model display name if SKU didn't match
-            if (-not $chosenEntry -and $ModelName) {
-                $nameCandidates = @($catalog | Where-Object {
-                    $_.Model -and $ModelName -ilike "*$($_.Model)*"
-                })
-                Log "  Model name matches for '$ModelName': $($nameCandidates.Count)"
-
-                if ($nameCandidates.Count -gt 0 -and $osBuild -gt 0) {
-                    $eligible = @($nameCandidates | Where-Object {
-                        $_.OSBuild -and [int]$_.OSBuild -le $osBuild
-                    } | Sort-Object { [int]$_.OSBuild } -Descending)
-                    $chosenEntry = if ($eligible.Count -gt 0) { $eligible[0] }
-                                   else { ($nameCandidates | Sort-Object { [int]$_.OSBuild })[0] }
-                    Log "  Selected via model name: $($chosenEntry.FileName)"
-                } elseif ($nameCandidates.Count -gt 0) {
-                    $chosenEntry = ($nameCandidates | Sort-Object { [int]$_.OSBuild } -Descending)[0]
-                }
-            }
-        } catch {
-            Log "  Failed to parse OSDCatalog JSON: $($_.Exception.Message)"
-            $chosenEntry = $null
-        }
-    } else {
-        Log "  OSDCatalog JSON unavailable or empty - falling back to Download Center."
-    }
-
-    if ($chosenEntry) {
-        Log "OSDCatalog match found:"
-        Log "  Model    : $($chosenEntry.Model)"
-        Log "  Product  : $($chosenEntry.Product)"
-        Log "  OSBuild  : $($chosenEntry.OSBuild)"
-        Log "  FileName : $($chosenEntry.FileName)"
-        Log "  URL      : $($chosenEntry.Url)"
-        Log "  MD5      : $($chosenEntry.HashMD5)"
-        SetExtract -Pct 25 -Label "Catalog match: $($chosenEntry.FileName)"
-        SetProgress 20
-
-        $msiFile = Join-Path $DriverRoot $chosenEntry.FileName
-        SetProgress 25
-
-        if (-not (Invoke-CurlDownload -Url $chosenEntry.Url -OutFile $msiFile)) {
-            Log "  Surface MSI download failed."
-            return $false
-        }
-        if (Test-Cancelled) { return $false }
-        SetProgress 50
-
-        # MD5 verification (catalog provides pre-computed hash)
-        if ($chosenEntry.HashMD5 -and $chosenEntry.HashMD5.Length -eq 32) {
-            Log "Verifying MD5 hash..."
-            SetExtract -Pct 30 -Label "Verifying download..."
-            try {
-                $md5       = [System.Security.Cryptography.MD5]::Create()
-                $stream    = [System.IO.File]::OpenRead($msiFile)
-                $hashBytes = $md5.ComputeHash($stream)
-                $stream.Close()
-                $actualMd5   = ([System.BitConverter]::ToString($hashBytes) -replace '-','').ToLower()
-                $expectedMd5 = $chosenEntry.HashMD5.ToLower()
-                if ($actualMd5 -eq $expectedMd5) {
-                    Log "  MD5 OK: $actualMd5"
-                } else {
-                    Log "  WARNING: MD5 mismatch!"
-                    Log "    Expected : $expectedMd5"
-                    Log "    Actual   : $actualMd5"
-                    Log "  Continuing - hash may be stale in catalog."
-                }
-            } catch {
-                Log "  MD5 check error: $($_.Exception.Message) - skipping."
-            }
-        }
-
-        return (Install-SurfaceMsi -MsiFile $msiFile -DriverRoot $DriverRoot -FileName $chosenEntry.FileName)
-    }
-
-    # --------------------------------------------------
-    # FALLBACK PATH: Hardcoded Download Center IDs + HTML scraping
-    # --------------------------------------------------
-    Log "OSDCatalog had no match - falling back to Download Center lookup..."
-    SetExtract -Pct 0 -Label "Trying fallback catalog..."
 
     $pageId = $null
     foreach ($entry in $SurfaceDownloadIds.GetEnumerator()) {
@@ -2112,48 +1964,76 @@ function Start-MicrosoftSurfaceDriverInstall {
     SetExtract -Pct 20 -Label "Parsing download page..."
     $pageHtml = [System.IO.File]::ReadAllText($detailsFile)
 
-    $msiMatches = [regex]::Matches($pageHtml, 'href="(https://download\.microsoft\.com/[^"]+\.msi)"')
-    if ($msiMatches.Count -eq 0) {
-        $msiMatches = [regex]::Matches($pageHtml, '(https://download\.microsoft\.com/[^\s"<>]+\.msi)')
+    # Helper: parse driver version from MSI filename e.g. "26.040.371.0" -> [Version]
+    function Parse-MsiDriverVersion {
+        param([string]$FileName)
+        $m = [regex]::Match($FileName, '_(\d+\.\d+\.\d+\.\d+)\.msi$')
+        if ($m.Success) { try { return [Version]$m.Groups[1].Value } catch {} }
+        return [Version]"0.0.0.0"
     }
 
-    if ($msiMatches.Count -eq 0) {
+    $msiCandidates = [System.Collections.Generic.List[object]]::new()
+    $seen          = @{}
+
+    function Add-MsiCandidate {
+        param([string]$Url)
+        if (-not $Url -or $seen.ContainsKey($Url)) { return }
+        $seen[$Url] = $true
+        $fileName   = [System.IO.Path]::GetFileName(([System.Uri]$Url).LocalPath)
+        $buildMatch = [regex]::Match($fileName, '_Win\d+_(\d{5})_')
+        $msiOsBuild = if ($buildMatch.Success) { [int]$buildMatch.Groups[1].Value } else { 0 }
+        Log "  MSI: $fileName  (target build: $(if ($msiOsBuild -gt 0) { $msiOsBuild } else { 'unknown' }))"
+        $msiCandidates.Add([PSCustomObject]@{ Url = $Url; FileName = $fileName; OsBuild = $msiOsBuild })
+    }
+
+    # PRIMARY: extract from window.__DLCDetails__ JSON blob (contains the primary download file)
+    $dlcMatch = [regex]::Match($pageHtml, 'window\.__DLCDetails__\s*=\s*(\{.+?"detailsId":.+?\})\s*</script>')
+    if ($dlcMatch.Success) {
+        try {
+            $dlcJson = $dlcMatch.Groups[1].Value | ConvertFrom-Json
+            foreach ($f in $dlcJson.dlcDetailsView.downloadFile) {
+                if ($f.url -match '\.msi$') {
+                    Log "  DLCDetails primary: $($f.name)"
+                    Add-MsiCandidate -Url $f.url
+                }
+            }
+        } catch { Log "  WARNING: __DLCDetails__ parse error: $($_.Exception.Message)" }
+    }
+
+    # FALLBACK: regex scrape all download.microsoft.com MSI hrefs (catches archive links too)
+    foreach ($m in [regex]::Matches($pageHtml, 'href="(https://download\.microsoft\.com/[^"]+\.msi)"')) {
+        Add-MsiCandidate -Url $m.Groups[1].Value
+    }
+    if ($msiCandidates.Count -eq 0) {
+        foreach ($m in [regex]::Matches($pageHtml, '(https://download\.microsoft\.com/[^\s"<>]+\.msi)')) {
+            Add-MsiCandidate -Url $m.Groups[1].Value
+        }
+    }
+
+    if ($msiCandidates.Count -eq 0) {
         Log "No MSI links found on page ID=$pageId - page may require JavaScript."
         Log "Opening page for manual download: $detailsUrl"
         Start-Process $detailsUrl
         return $false
     }
-    Log "  Found $($msiMatches.Count) MSI link(s)."
+    Log "  Found $($msiCandidates.Count) MSI candidate(s)."
 
-    $msiCandidates = [System.Collections.Generic.List[object]]::new()
-    $seen          = @{}
-    foreach ($m in $msiMatches) {
-        $url = $m.Groups[1].Value
-        if ($seen.ContainsKey($url)) { continue }
-        $seen[$url] = $true
-        $fileName   = [System.IO.Path]::GetFileName(([System.Uri]$url).LocalPath)
-        $buildMatch = [regex]::Match($fileName, '_Win\d+_(\d{5})_')
-        $msiOsBuild = if ($buildMatch.Success) { [int]$buildMatch.Groups[1].Value } else { 0 }
-        Log "  MSI: $fileName  (target build: $(if ($msiOsBuild -gt 0) { $msiOsBuild } else { 'unknown' }))"
-        $msiCandidates.Add([PSCustomObject]@{ Url = $url; FileName = $fileName; OsBuild = $msiOsBuild })
-    }
-
+    # Select best: OSBuild desc (primary), driver version desc (secondary)
     $chosen = $null
     if ($osBuild -gt 0) {
-        $eligible = $msiCandidates |
-            Where-Object { $_.OsBuild -gt 0 -and $_.OsBuild -le $osBuild } |
-            Sort-Object OsBuild -Descending
-        if ($eligible) {
-            $chosen = $eligible[0]
-            Log "Selected MSI (best build match): $($chosen.FileName)  [target=$($chosen.OsBuild) <= device=$osBuild]"
-        } else {
-            $chosen = $msiCandidates | Where-Object { $_.OsBuild -gt 0 } | Sort-Object OsBuild | Select-Object -First 1
-            if (-not $chosen) { $chosen = $msiCandidates[0] }
-            Log "No MSI at/below build $osBuild - using lowest available: $($chosen.FileName)"
+        $eligible = @($msiCandidates | Where-Object { $_.OsBuild -gt 0 -and $_.OsBuild -le $osBuild })
+        if ($eligible.Count -eq 0) {
+            $eligible = @($msiCandidates | Where-Object { $_.OsBuild -gt 0 } | Sort-Object OsBuild)
         }
+        if ($eligible.Count -eq 0) { $eligible = @($msiCandidates) }
+        $chosen = ($eligible | Sort-Object `
+            @{ E = { $_.OsBuild };                         Descending = $true },
+            @{ E = { Parse-MsiDriverVersion $_.FileName }; Descending = $true }
+        )[0]
+        Log "Selected MSI: $($chosen.FileName)  [OSBuild=$($chosen.OsBuild)]"
     } else {
         $chosen = $msiCandidates[0]
-        Log "OS build unknown - using first MSI on page: $($chosen.FileName)"
+        Log "OS build unknown - using first MSI found: $($chosen.FileName)"
     }
 
     Log "MSI URL: $($chosen.Url)"
