@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.8.5
+# Version: 1.8.6
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -21,6 +21,12 @@
 # huh
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
 #
+# v1.8.6 - End-of-run diagnostic: after the "Missing drivers AFTER install" count,
+#           print a detailed list of every device still in problem state with
+#           ErrorCode, Caption, DeviceID, HardwareID(s), and CompatibleID(s).
+#           Works for all manufacturers (Dell/HP/Lenovo/Surface), not just the
+#           Lenovo consumer-catalog path. Makes "still missing N drivers" runs
+#           debuggable without a follow-up Get-PnpDevice query.
 # v1.8.5 - Lenovo consumer catalog: two fixes for the unbound-ACPI-device case.
 #           (1) Test-LenovoDPInstStaged bound-check bug: 0xFFFFFFFF parses as
 #               Int32 -1 in PowerShell, so the upper-bound test "rejected" every
@@ -123,7 +129,7 @@ param(
 # Auto-enable headless when any override param is passed
 if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" -or $SkipInstall -or $SkipCleanup) { $Headless = $true }
 
-$ScriptVersion   = "1.8.5"
+$ScriptVersion   = "1.8.6"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -536,6 +542,48 @@ function Get-MissingDriverCount {
     } catch {
         Log "  WARNING: Could not query PnP device status: $($_.Exception.Message)"
         return -1
+    }
+}
+
+function Write-MissingDriverDetails {
+    # Detailed end-of-run dump of every device still in problem state.
+    # Pulls HardwareID + CompatibleID arrays from Get-PnpDevice (Win32_PnPEntity
+    # alone doesn't expose those) so the log shows exactly which IDs an INF
+    # would need to claim to bind to each device.
+    try {
+        $missing = @(Get-CimInstance Win32_PnPEntity -EA Stop |
+                     Where-Object { $_.ConfigManagerErrorCode -ne 0 })
+    } catch {
+        Log "-- Missing drivers AFTER install (enumeration error: $($_.Exception.Message)) --"
+        return
+    }
+    if ($missing.Count -eq 0) {
+        Log "-- Missing drivers AFTER install (0 - all present devices are bound) --"
+        return
+    }
+    Log "-- Missing drivers AFTER install ($($missing.Count)) --"
+    foreach ($m in $missing) {
+        $name = if ($m.Name)         { $m.Name }
+                elseif ($m.Caption)  { $m.Caption }
+                else                 { '(unnamed device)' }
+        Log "  [ERR $($m.ConfigManagerErrorCode)] $name"
+        Log "    DeviceID:    $($m.DeviceID)"
+        try {
+            $pnp = Get-PnpDevice -InstanceId $m.DeviceID -EA Stop
+            if ($pnp.HardwareID) {
+                $ids = @($pnp.HardwareID)
+                Log "    HardwareID:  $($ids[0])"
+                for ($i = 1; $i -lt $ids.Count; $i++) { Log "                 $($ids[$i])" }
+            }
+            if ($pnp.CompatibleID) {
+                $ids = @($pnp.CompatibleID)
+                Log "    CompatID:    $($ids[0])"
+                for ($i = 1; $i -lt $ids.Count; $i++) { Log "                 $($ids[$i])" }
+            }
+        } catch {
+            # Get-PnpDevice failed for this InstanceId - DeviceID line above is
+            # still enough to identify the device; skip the extra detail.
+        }
     }
 }
 
@@ -3448,6 +3496,7 @@ function Start-Install {
     } else { 0 }
     Log "Missing drivers AFTER  install: $($script:AnalyticsMissingAfter)"
     Log "Devices resolved by this install: $missingDelta"
+    Write-MissingDriverDetails
 
     if ($script:CancelRequested) { Send-AnalyticsEvent -Result "cancelled" }
 
