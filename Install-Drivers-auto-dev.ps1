@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.8.0
+# Version: 1.8.1
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -21,6 +21,16 @@
 # huh
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
 #
+# v1.8.1 - Lenovo consumer catalog: two behavioural improvements.
+#           (1) Evaluates each package's <DetectInstall> block - if the package
+#               is already installed, skip download + install entirely. Supports
+#               _Bios (BIOS level glob), _File (path + optional version), _FileVersion,
+#               _Registry, _RegistryKey, and And/Or/Not combinators. Anything we can't
+#               evaluate is fail-open (install anyway) for safety.
+#           (2) BIOS packages (PackageType=3) are now deferred: downloaded + verified
+#               in the main loop with everything else, but their install runs only
+#               after all driver/firmware/app installs finish. Stops BIOS GUI from
+#               interrupting the rest of the install queue.
 # v1.8.0 - Lenovo: added consumer catalog support (per-machine-type XML used by Lenovo
 #           System Update). Fixes coverage for ThinkBook/IdeaPad/consumer models missing
 #           from catalogv2.xml (e.g. ThinkBook 14 G2 ITL / 20VD).
@@ -69,7 +79,7 @@ param(
 # Auto-enable headless when any override param is passed
 if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" -or $SkipInstall -or $SkipCleanup) { $Headless = $true }
 
-$ScriptVersion   = "1.8.0"
+$ScriptVersion   = "1.8.1"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -1590,6 +1600,204 @@ function Start-HpDriverInstall {
 # Lenovo's installer authors expect (%PACKAGEPATH% and %WINDOWS%).
 # =========================
 
+# =========================
+# LENOVO DETECTION HELPERS (used by consumer catalog flow)
+#
+# Test-LenovoDetectInstall walks a <DetectInstall> element and returns:
+#   $true  -> package is already installed -> caller should SKIP
+#   $false -> package is not installed     -> caller should INSTALL
+#   $null  -> indeterminate (unknown element / error) -> caller should INSTALL
+#             (fail-open: a redundant install is much cheaper than a missing one)
+#
+# Supported elements: _Bios, _File, _FileVersion, _Registry, _RegistryKey,
+# and the And / Or / Not combinators. Multiple direct children of <DetectInstall>
+# are AND'd together (Lenovo convention).
+# =========================
+
+function Test-LenovoBiosLevel {
+    param([System.Xml.XmlElement]$Node)
+    try {
+        $currentBios = [string](Get-CimInstance Win32_BIOS -EA Stop).SMBIOSBIOSVersion
+        if (-not $currentBios) { return $null }
+        foreach ($lvl in @($Node.Level)) {
+            $pat = ([string]$lvl).Trim()
+            if (-not $pat) { continue }
+            if ($currentBios -like $pat) { return $true }
+        }
+        return $false
+    } catch { return $null }
+}
+
+function Expand-LenovoPath {
+    param([string]$Path)
+    $Path = $Path.Replace('%WINDOWS%',          $env:WINDIR)
+    $Path = $Path.Replace('%PROGRAMFILES%',     ${env:ProgramFiles})
+    $Path = $Path.Replace('%PROGRAMFILES(X86)%', ${env:ProgramFiles(x86)})
+    $Path = $Path.Replace('%SYSTEMROOT%',       $env:SystemRoot)
+    $Path = $Path.Replace('%SYSTEMDRIVE%',      $env:SystemDrive)
+    return [System.Environment]::ExpandEnvironmentVariables($Path)
+}
+
+function Compare-LenovoVersionString {
+    # Returns: $true if currentVer satisfies expectedVer (with optional ^ suffix = ">=")
+    param([string]$Current, [string]$Expected)
+    if (-not $Current -or -not $Expected) { return $null }
+    $needsGE = $Expected.EndsWith('^')
+    $exp     = $Expected.TrimEnd('^').Trim()
+    try {
+        $cv = [version]$Current
+        $ev = [version]$exp
+        if ($needsGE) { return ($cv -ge $ev) } else { return ($cv -eq $ev) }
+    } catch {
+        # Fall back to string compare for non-dotted values
+        if ($needsGE) { return ($Current -ge $exp) } else { return ($Current -eq $exp) }
+    }
+}
+
+function Test-LenovoFileDetect {
+    param([System.Xml.XmlElement]$Node)
+    try {
+        # _File may carry the path in <Name>, <File>, or directly as inner text
+        $name = ""
+        if ($Node.Name)      { $name = [string]$Node.Name }
+        elseif ($Node.File)  { $name = [string]$Node.File }
+        elseif ($Node.InnerText) { $name = [string]$Node.InnerText.Trim() }
+        if (-not $name) { return $null }
+
+        $path = Expand-LenovoPath -Path $name
+        if (-not (Test-Path -LiteralPath $path)) { return $false }
+
+        $verNode = $Node.SelectSingleNode('Version')
+        if (-not $verNode) { return $true }   # file exists, no version constraint = match
+
+        $expected = [string]$verNode.InnerText.Trim()
+        $actual = ""
+        try { $actual = (Get-Item -LiteralPath $path).VersionInfo.FileVersion } catch {}
+        if (-not $actual) { return $null }
+        return (Compare-LenovoVersionString -Current $actual -Expected $expected)
+    } catch { return $null }
+}
+
+function Test-LenovoFileVersionDetect {
+    param([System.Xml.XmlElement]$Node)
+    try {
+        # Two shapes seen in the wild:
+        #   <_FileVersion><FileVersion><Name>X</Name><Version>Y</Version></FileVersion></_FileVersion>
+        #   <_FileVersion><Name>X</Name><Version>Y</Version></_FileVersion>
+        $fvNode = $Node.SelectSingleNode('FileVersion')
+        $src    = if ($fvNode) { $fvNode } else { $Node }
+        $name = [string]$src.Name
+        $ver  = [string]$src.Version
+        if (-not $name -or -not $ver) { return $null }
+
+        $path = Expand-LenovoPath -Path $name
+        if (-not (Test-Path -LiteralPath $path)) { return $false }
+
+        $actual = ""
+        try { $actual = (Get-Item -LiteralPath $path).VersionInfo.FileVersion } catch {}
+        if (-not $actual) { return $null }
+        return (Compare-LenovoVersionString -Current $actual -Expected $ver)
+    } catch { return $null }
+}
+
+function ConvertTo-LenovoRegPath {
+    param([string]$Raw)
+    if (-not $Raw) { return $null }
+    $r = $Raw.Trim()
+    if ($r -match '^HKEY_LOCAL_MACHINE\\') { return ($r -replace '^HKEY_LOCAL_MACHINE\\', 'HKLM:\') }
+    if ($r -match '^HKEY_CURRENT_USER\\')  { return ($r -replace '^HKEY_CURRENT_USER\\',  'HKCU:\') }
+    if ($r -match '^HKEY_CLASSES_ROOT\\')  { return ($r -replace '^HKEY_CLASSES_ROOT\\',  'HKCR:\') }
+    if ($r -match '^HKLM\\')               { return ($r -replace '^HKLM\\', 'HKLM:\') }
+    if ($r -match '^HKCU\\')               { return ($r -replace '^HKCU\\', 'HKCU:\') }
+    return "HKLM:\$r"   # Lenovo descriptors commonly omit the hive
+}
+
+function Test-LenovoRegistryDetect {
+    param([System.Xml.XmlElement]$Node)
+    try {
+        $keyPath = ConvertTo-LenovoRegPath -Raw ([string]$Node.Key)
+        $valName = [string]$Node.KeyName
+        $ver     = [string]$Node.Version
+        if (-not $keyPath) { return $null }
+        if (-not (Test-Path -LiteralPath $keyPath)) { return $false }
+        if (-not $valName) { return $true }
+
+        $actual = $null
+        try { $actual = (Get-ItemProperty -LiteralPath $keyPath -Name $valName -EA Stop).$valName } catch { return $false }
+        if ($null -eq $actual) { return $false }
+        if (-not $ver) { return $true }
+        return (Compare-LenovoVersionString -Current ([string]$actual) -Expected $ver)
+    } catch { return $null }
+}
+
+function Test-LenovoRegistryKeyDetect {
+    param([System.Xml.XmlElement]$Node)
+    try {
+        $keyPath = ConvertTo-LenovoRegPath -Raw ([string]$Node.InnerText)
+        if (-not $keyPath) { return $null }
+        return (Test-Path -LiteralPath $keyPath)
+    } catch { return $null }
+}
+
+function Test-LenovoDetectNode {
+    param([System.Xml.XmlElement]$Node)
+    if (-not $Node) { return $null }
+    $kids = @($Node.ChildNodes | Where-Object { $_.NodeType -eq [System.Xml.XmlNodeType]::Element })
+
+    switch ($Node.LocalName) {
+        'And' {
+            $sawNull = $false
+            foreach ($k in $kids) {
+                $r = Test-LenovoDetectNode -Node $k
+                if ($r -eq $false) { return $false }
+                if ($null -eq $r)  { $sawNull = $true }
+            }
+            if ($sawNull) { return $null }
+            return $true
+        }
+        'Or' {
+            $allNull = $true
+            foreach ($k in $kids) {
+                $r = Test-LenovoDetectNode -Node $k
+                if ($r -eq $true)  { return $true }
+                if ($null -ne $r)  { $allNull = $false }
+            }
+            if ($allNull) { return $null }
+            return $false
+        }
+        'Not' {
+            if ($kids.Count -ne 1) { return $null }
+            $r = Test-LenovoDetectNode -Node $kids[0]
+            if ($null -eq $r) { return $null }
+            return (-not $r)
+        }
+        '_Bios'         { return (Test-LenovoBiosLevel        -Node $Node) }
+        '_File'         { return (Test-LenovoFileDetect       -Node $Node) }
+        '_FileVersion'  { return (Test-LenovoFileVersionDetect -Node $Node) }
+        '_Registry'     { return (Test-LenovoRegistryDetect   -Node $Node) }
+        '_RegistryKey'  { return (Test-LenovoRegistryKeyDetect -Node $Node) }
+        default         { return $null }   # unknown element -> fail-open
+    }
+}
+
+function Test-LenovoDetectInstall {
+    param([System.Xml.XmlElement]$Node)
+    if (-not $Node) { return $null }
+    $kids = @($Node.ChildNodes | Where-Object { $_.NodeType -eq [System.Xml.XmlNodeType]::Element })
+    # Empty <DetectInstall/> means "no detection info" - tell caller to install.
+    if ($kids.Count -eq 0) { return $false }
+    # Multiple top-level children are AND'd (Lenovo convention).
+    if ($kids.Count -eq 1) { return (Test-LenovoDetectNode -Node $kids[0]) }
+    $sawNull = $false
+    foreach ($k in $kids) {
+        $r = Test-LenovoDetectNode -Node $k
+        if ($r -eq $false) { return $false }
+        if ($null -eq $r)  { $sawNull = $true }
+    }
+    if ($sawNull) { return $null }
+    return $true
+}
+
 function Invoke-LenovoPackageCommand {
     param(
         [string]$Command,
@@ -1676,8 +1884,12 @@ function Start-LenovoConsumerCatalogInstall {
     $okCount      = 0
     $failCount    = 0
     $skipCount    = 0
+    $alreadyInstalledCount = 0
     $rebootNeeded = $false
     $results      = New-Object System.Collections.Generic.List[object]
+    # BIOS (PackageType=3) installs are queued here and run AFTER everything else,
+    # so the BIOS GUI doesn't interrupt the driver/firmware install sequence.
+    $deferredBios = New-Object System.Collections.Generic.List[object]
 
     foreach ($pkg in $pkgNodes) {
         $pkgIdx++
@@ -1759,6 +1971,26 @@ function Start-LenovoConsumerCatalogInstall {
         Log "  $title"
         Log "  id=$pkgId  version=$pkgVer  released=$releaseDate"
         Log "  $typeName / $sevName  (reboot type $rebootType)"
+
+        # 2b. Evaluate <DetectInstall> - skip if package is already installed.
+        #     fail-open: $null (indeterminate) -> install anyway, log a note.
+        $detectNode = $null
+        try { $detectNode = $desc.Package.DetectInstall } catch {}
+        if ($detectNode -is [System.Xml.XmlElement]) {
+            $detectResult = Test-LenovoDetectInstall -Node $detectNode
+            if ($detectResult -eq $true) {
+                Log "  DetectInstall -> ALREADY INSTALLED. Skipping (no download)."
+                $alreadyInstalledCount++
+                $results.Add([pscustomobject]@{
+                    Index=$pkgIdx; Title=$title; Category=$category; Version=$pkgVer; Exit=$null; Status='ALREADY-INSTALLED'
+                })
+                continue
+            } elseif ($null -eq $detectResult) {
+                Log "  DetectInstall -> indeterminate (unsupported element). Will install."
+            } else {
+                Log "  DetectInstall -> not installed. Will install."
+            }
+        }
 
         # 3. Installer file metadata
         $installerNode = $null
@@ -1871,11 +2103,32 @@ function Start-LenovoConsumerCatalogInstall {
         }
 
         $installCmd = $installCmdRaw.Replace('%PACKAGEPATH%', $packagePath).Replace('%WINDOWS%', $env:WINDIR)
+
+        # BIOS packages (PackageType=3): download is done, but defer the install
+        # itself until after every other package has finished. BIOS updaters pop
+        # their own GUI which would otherwise stall the rest of the queue.
+        if ($packageType -eq '3') {
+            Log "  BIOS package - install deferred until end of run."
+            Log "  Deferred install: $installCmd"
+            $deferredBios.Add([pscustomobject]@{
+                Index       = $pkgIdx
+                Title       = $title
+                Category    = $category
+                Version     = $pkgVer
+                PackagePath = $packagePath
+                InstallCmd  = $installCmd
+                RcOk        = $rcOk
+                RebootType  = $rebootType
+                PackageType = $packageType
+            })
+            continue
+        }
+
         Log "  Install: $installCmd"
         SetExtract -Pct $overall -Label "Installing [$pkgIdx/$totalPkgs]: $title"
 
-        # BIOS updates take longer - give them more headroom
-        $timeout = if ($packageType -eq '3' -or $packageType -eq '4') { 1800 } else { 1200 }
+        # Driver / Firmware / App install. Extract already ran in step 6 if needed.
+        $timeout = if ($packageType -eq '4') { 1800 } else { 1200 }
         $exit = Invoke-LenovoPackageCommand -Command $installCmd -WorkingDir $packagePath -TimeoutSec $timeout
         $isOk = $rcOk.Contains([int64]$exit)
         $statusLabel = if ($isOk) { 'OK' } else { 'FAIL' }
@@ -1896,28 +2149,76 @@ function Start-LenovoConsumerCatalogInstall {
         Play-Sound -Event "DriverAdded"
     }
 
+    # ------------------------------------------------------------------
+    # Deferred phase: now run all BIOS installs that we queued above.
+    # By this point every driver/firmware/app has finished, so the BIOS
+    # GUI can take over the screen without interrupting anything.
+    # ------------------------------------------------------------------
+    if ($deferredBios.Count -gt 0 -and -not $SkipInstall -and -not (Test-Cancelled)) {
+        Log ""
+        Log "=== DEFERRED PHASE: $($deferredBios.Count) BIOS package(s) ==="
+        SetProgress 96
+        $biosIdx = 0
+        foreach ($b in $deferredBios) {
+            $biosIdx++
+            if (Test-Cancelled) { Log "Cancelled before BIOS install $biosIdx/$($deferredBios.Count)."; break }
+            Log ""
+            Log "----- DEFERRED BIOS [$biosIdx/$($deferredBios.Count)] $($b.Title) (v$($b.Version)) -----"
+            SetExtract -Pct 100 -Label "BIOS [$biosIdx/$($deferredBios.Count)]: $($b.Title)"
+
+            # Extract already ran during the main loop's step 6, so go straight to install.
+            Log "  Install: $($b.InstallCmd)"
+            $bExit = Invoke-LenovoPackageCommand -Command $b.InstallCmd -WorkingDir $b.PackagePath -TimeoutSec 1800
+            $bOk   = $b.RcOk.Contains([int64]$bExit)
+            $bStatus = if ($bOk) { 'OK' } else { 'FAIL' }
+            Log "  Install exit: $bExit  [$bStatus]"
+
+            if ($bOk) {
+                $okCount++
+                if ($bExit -eq 3010 -or $bExit -eq 1641 -or $b.RebootType -in @('1','3','4','5')) {
+                    $rebootNeeded = $true
+                }
+            } else {
+                $failCount++
+            }
+            $results.Add([pscustomobject]@{
+                Index=$b.Index; Title=$b.Title; Category=$b.Category; Version=$b.Version; Exit=$bExit; Status=$bStatus
+            })
+            Play-Sound -Event "DriverAdded"
+        }
+    }
+
     # Summary
     Log ""
     Log "=== LENOVO CONSUMER CATALOG SUMMARY ==="
     Log "Machine type: $MachineType  OS: $OsCode"
-    Log "Total:     $totalPkgs"
-    Log "Installed: $okCount"
-    Log "Failed:    $failCount"
-    Log "Skipped:   $skipCount"
+    Log "Total packages:     $totalPkgs"
+    Log "Installed:          $okCount"
+    Log "Already installed:  $alreadyInstalledCount  (detected via <DetectInstall>)"
+    Log "Failed:             $failCount"
+    Log "Skipped (no data):  $skipCount"
+    Log "BIOS deferred:      $($deferredBios.Count)"
     if ($rebootNeeded) { Log "*** REBOOT REQUIRED to finalize one or more updates ***" }
     foreach ($r in $results) {
-        $mark = if ($r.Status -eq 'OK' -or $r.Status -eq 'DOWNLOAD-ONLY') { '[OK]  ' } else { '[FAIL]' }
+        $mark = switch ($r.Status) {
+            'OK'                { '[OK]  ' }
+            'DOWNLOAD-ONLY'     { '[DL]  ' }
+            'ALREADY-INSTALLED' { '[SKIP]' }
+            default             { '[FAIL]' }
+        }
         $exitTxt = if ($null -eq $r.Exit) { '-' } else { "exit $($r.Exit)" }
         Log "  $mark [$($r.Index)/$totalPkgs] $($r.Category) - $($r.Title) (v$($r.Version)) $exitTxt"
     }
 
     $script:AnalyticsInfCount = $okCount
     SetProgress 100
-    SetExtract -Pct 100 -Label "Done - $okCount/$totalPkgs installed"
+    SetExtract -Pct 100 -Label "Done - $okCount installed, $alreadyInstalledCount already current"
     Stop-ExSpinner      -Success ($failCount -eq 0)
     Stop-OverallSpinner -Success ($failCount -eq 0)
 
-    return ($okCount -gt 0)
+    # Treat the run as a success if we either installed something OR confirmed
+    # everything was already up to date.
+    return (($okCount + $alreadyInstalledCount) -gt 0)
 }
 
 function Start-LenovoDriverInstall {
