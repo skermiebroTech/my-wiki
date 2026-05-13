@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.8.4
+# Version: 1.8.5
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -21,6 +21,19 @@
 # huh
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
 #
+# v1.8.5 - Lenovo consumer catalog: two fixes for the unbound-ACPI-device case.
+#           (1) Test-LenovoDPInstStaged bound-check bug: 0xFFFFFFFF parses as
+#               Int32 -1 in PowerShell, so the upper-bound test "rejected" every
+#               positive exit code and the DPInst fallback never fired. Replaced
+#               with a sign-aware check ($ExitCode -le 0 short-circuits, no
+#               upper bound needed since param is [int64]).
+#           (2) Invoke-LenovoForceBindUnbound final pass: after PnP rescan, if
+#               any Win32_PnPEntity still has ConfigManagerErrorCode != 0, run
+#               pnputil /add-driver /install on every INF under the consumer
+#               package root - including INFs from packages whose own installer
+#               reported success - then re-enumerate and log anything still
+#               unbound with its full DeviceID so we can see exactly which
+#               hardware IDs Lenovo's published drivers don't cover.
 # v1.8.4 - Lenovo consumer catalog: extended <DetectInstall> evaluator to skip
 #           downloads (not just installs) for two more common element types.
 #           (1) _DriverFileVersion: looks up the currently-bound driver for a
@@ -110,7 +123,7 @@ param(
 # Auto-enable headless when any override param is passed
 if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" -or $SkipInstall -or $SkipCleanup) { $Headless = $true }
 
-$ScriptVersion   = "1.8.4"
+$ScriptVersion   = "1.8.5"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -1932,7 +1945,13 @@ function Test-LenovoDPInstStaged {
     param([int64]$ExitCode)
     # DPInst packs: bits 0-7 = bound, bits 8-15 = staged, bits 16-23 = failed.
     # "Staged but not bound" = nothing bound, something staged, nothing failed.
-    if ($ExitCode -le 0 -or $ExitCode -gt 0xFFFFFFFF) { return $false }
+    # Short-circuit on <=0: success codes are 0 and negative codes are typically
+    # vendor-specific errors (e.g. NVIDIA's -436207360) that don't follow
+    # DPInst's packing convention. The HW-mismatch whitelist catches those.
+    # NOTE: do NOT bound-check against 0xFFFFFFFF - in PowerShell that literal
+    # parses as Int32 -1 (signed), which made the previous version of this
+    # function return $false for every positive exit code.
+    if ($ExitCode -le 0) { return $false }
     $bound  = $ExitCode -band 0xFF
     $staged = ($ExitCode -shr 8) -band 0xFF
     $failed = ($ExitCode -shr 16) -band 0xFF
@@ -1980,6 +1999,92 @@ function Invoke-LenovoPnpRescan {
         Log "  pnputil /scan-devices exit: $LASTEXITCODE"
     } catch {
         Log "  pnputil /scan-devices failed: $($_.Exception.Message)"
+    }
+}
+
+function Get-LenovoUnboundDevices {
+    # Match the script's existing Get-MissingDriverCount approach exactly so
+    # counts agree between the pre/post snapshot and this helper.
+    try {
+        return @(Get-CimInstance Win32_PnPEntity -EA Stop |
+                 Where-Object { $_.ConfigManagerErrorCode -ne 0 })
+    } catch { return @() }
+}
+
+function Invoke-LenovoForceBindUnbound {
+    # Final brute-force pass. If anything is still unbound after the rescan,
+    # walk every INF in the consumer-catalog package tree and run
+    # `pnputil /add-driver /install`. Catches the case where DPInst staged a
+    # driver but the binding never happened (or the install command was a
+    # vendor wrapper that bypassed proper INF registration).
+    param([string]$PkgRoot)
+
+    $before = Get-LenovoUnboundDevices
+    if ($before.Count -eq 0) {
+        Log "Force-bind check: no devices in problem state. Nothing to do."
+        return
+    }
+
+    Log ""
+    Log "Force-bind check: $($before.Count) device(s) still in problem state after rescan:"
+    foreach ($d in $before) {
+        $cap = if ($d.Caption) { $d.Caption } elseif ($d.Name) { $d.Name } else { '(unnamed)' }
+        Log "  - $cap"
+        if ($d.DeviceID)              { Log "      DeviceID: $($d.DeviceID)" }
+        if ($d.ConfigManagerErrorCode){ Log "      ErrorCode: $($d.ConfigManagerErrorCode)" }
+    }
+
+    if (-not (Test-Path $PkgRoot)) {
+        Log "  Consumer pkg root not found ($PkgRoot) - cannot retry."
+        return
+    }
+
+    $infs = @(Get-ChildItem -Path $PkgRoot -Recurse -Filter '*.inf' -EA SilentlyContinue)
+    if ($infs.Count -eq 0) {
+        Log "  No INF files under $PkgRoot - nothing to retry."
+        return
+    }
+
+    Log ""
+    Log "Force-bind pass: pnputil /add-driver /install on $($infs.Count) INF(s)..."
+    foreach ($inf in $infs) {
+        if (Test-Cancelled) { Log "  Cancelled."; break }
+        $out = pnputil /add-driver "`"$($inf.FullName)`"" /install 2>&1
+        # Filter pnputil's banner + blanks for log readability
+        foreach ($l in $out) {
+            $line = ([string]$l).Trim()
+            if (-not $line)                            { continue }
+            if ($line -like 'Microsoft PnP Utility*')  { continue }
+            Log "    [$($inf.Name)] $line"
+        }
+    }
+
+    # One more scan after the brute-force pass
+    Log ""
+    Log "Final scan-devices after force-bind..."
+    try {
+        $out = pnputil /scan-devices 2>&1
+        foreach ($l in $out) { Log "  $l" }
+    } catch {}
+
+    $after = Get-LenovoUnboundDevices
+    $delta = $before.Count - $after.Count
+    if ($delta -gt 0) {
+        Log "Force-bind resolved $delta device(s)."
+    }
+    if ($after.Count -gt 0) {
+        Log ""
+        Log "$($after.Count) device(s) STILL unbound:"
+        foreach ($d in $after) {
+            $cap = if ($d.Caption) { $d.Caption } elseif ($d.Name) { $d.Name } else { '(unnamed)' }
+            Log "  - $cap"
+            if ($d.DeviceID) { Log "      DeviceID: $($d.DeviceID)" }
+        }
+        Log ""
+        Log "These devices have no INF in the consumer catalog whose HardwareID or"
+        Log "CompatibleID list matches. Either Lenovo's per-MTM catalog does not"
+        Log "publish a driver for this hardware variant, or a system reboot is"
+        Log "required before binding can complete."
     }
 }
 
@@ -2417,6 +2522,9 @@ function Start-LenovoConsumerCatalogInstall {
     # fallback path, plus anything else) get matched to their devices.
     if (-not $SkipInstall -and -not (Test-Cancelled)) {
         Invoke-LenovoPnpRescan
+        # If anything still isn't bound, force-retry every INF in the consumer
+        # pkg tree to give Windows one more chance to find a match.
+        Invoke-LenovoForceBindUnbound -PkgRoot $pkgRoot
     }
 
     # Summary
