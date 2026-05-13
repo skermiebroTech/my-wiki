@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.8.2
+# Version: 1.8.4
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -21,6 +21,33 @@
 # huh
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
 #
+# v1.8.4 - Lenovo consumer catalog: extended <DetectInstall> evaluator to skip
+#           downloads (not just installs) for two more common element types.
+#           (1) _DriverFileVersion: looks up the currently-bound driver for a
+#               matching PnP hardware ID and compares its version against the
+#               target. If hardware isn't enumerated on this machine OR an
+#               equal/newer driver is already bound, the package is treated
+#               as already-installed (no download, no install).
+#           (2) _PnPID: checks for any PnP device whose hardware ID matches the
+#               pattern. Used by Lenovo to gate packages on per-SKU components.
+#           These two elements cover most of the v1.8.1 "indeterminate" cases.
+#           Saves bandwidth on dual-SKU MTMs (e.g. 20VD covers integrated and
+#           NVIDIA-discrete ThinkBook variants - the discrete-only drivers no
+#           longer get downloaded on integrated-only hardware).
+# v1.8.3 - Lenovo consumer catalog: three post-install reliability fixes.
+#           (1) DPInst "staged but not bound" handling: when an install exits with
+#               a DPInst-style packed code where bytes mean (0 bound, >0 staged,
+#               0 failed), retry by running pnputil /add-driver /install on every
+#               INF in the package dir. Fixes ThinkBook Fn-and-Function-Keys
+#               driver leaving ACPI\VPC2004 + ACPI\IDEA2004 unbound.
+#           (2) Hardware-not-present whitelist: nvsetup -436207360 (0xE6000100)
+#               and similar "no compatible NVIDIA hardware" codes are now logged
+#               as [N/A] (not present on this machine), not [FAIL]. Stops the
+#               catalog's discrete-GPU drivers being counted as failures on
+#               integrated-graphics-only variants of dual-SKU MTMs.
+#           (3) Final pnputil /scan-devices after everything (main loop +
+#               deferred BIOS phase) to bind any drivers that were staged but
+#               not yet matched to their devices.
 # v1.8.2 - Lenovo consumer catalog: skip dock-related packages entirely (no download,
 #           no install). Title-based match on '*Dock*' covers ThinkPad USB-C/Thunderbolt
 #           docks, hybrid docks, etc. - dock firmware doesn't belong in a one-shot
@@ -83,7 +110,7 @@ param(
 # Auto-enable headless when any override param is passed
 if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" -or $SkipInstall -or $SkipCleanup) { $Headless = $true }
 
-$ScriptVersion   = "1.8.2"
+$ScriptVersion   = "1.8.4"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -1743,6 +1770,88 @@ function Test-LenovoRegistryKeyDetect {
     } catch { return $null }
 }
 
+function Get-LenovoPnpDevicesByHwId {
+    # Returns @() of PnP devices whose HardwareID (or CompatibleID) contains the
+    # given pattern as a substring (case-insensitive). Cached per-call: callers
+    # in a hot loop should grab the device list once and filter manually if perf
+    # matters - but each <DetectInstall> only runs a couple of these.
+    param([string]$Pattern)
+    if (-not $Pattern) { return @() }
+    try {
+        $all = Get-PnpDevice -EA Stop
+    } catch { return @() }
+    return @($all | Where-Object {
+        $hit = $false
+        if ($_.HardwareID) {
+            foreach ($id in $_.HardwareID) { if ($id -like "*$Pattern*") { $hit = $true; break } }
+        }
+        if (-not $hit -and $_.CompatibleID) {
+            foreach ($id in $_.CompatibleID) { if ($id -like "*$Pattern*") { $hit = $true; break } }
+        }
+        $hit
+    })
+}
+
+function Test-LenovoDriverFileVersionDetect {
+    # <_DriverFileVersion>
+    #   <HardwareID>VEN_8086&DEV_xxxx</HardwareID>   (or <Hardware> / <PnPID>)
+    #   <Version>30.0.101.1960^</Version>
+    # </_DriverFileVersion>
+    # Semantics: returns TRUE (already installed) if either
+    #   (a) no PnP device matches the hardware ID on this machine (driver
+    #       not applicable - common on dual-SKU MTMs), OR
+    #   (b) at least one matching device already has a driver bound whose
+    #       version satisfies the constraint.
+    param([System.Xml.XmlElement]$Node)
+    try {
+        $hwId = $null
+        if ($Node.HardwareID)   { $hwId = [string]$Node.HardwareID }
+        elseif ($Node.Hardware) { $hwId = [string]$Node.Hardware }
+        elseif ($Node.PnPID)    { $hwId = [string]$Node.PnPID }
+        $hwId = if ($hwId) { $hwId.Trim() } else { "" }
+        $ver  = if ($Node.Version) { ([string]$Node.Version).Trim() } else { "" }
+        if (-not $hwId -or -not $ver) { return $null }
+
+        $matched = Get-LenovoPnpDevicesByHwId -Pattern $hwId
+        if ($matched.Count -eq 0) {
+            # Driver isn't applicable to this machine - treat as "already handled"
+            # so we skip download + install entirely.
+            return $true
+        }
+
+        # Find the highest installed driver version across all matched devices.
+        $highest = $null
+        foreach ($d in $matched) {
+            try {
+                $p = Get-PnpDeviceProperty -InstanceId $d.InstanceId -KeyName 'DEVPKEY_Device_DriverVersion' -EA SilentlyContinue
+                if (-not $p -or -not $p.Data) { continue }
+                $dv = [string]$p.Data
+                try {
+                    $vObj = [version]$dv
+                    if (-not $highest -or $vObj -gt $highest) { $highest = $vObj }
+                } catch {}
+            } catch {}
+        }
+        if (-not $highest) { return $null }
+        return (Compare-LenovoVersionString -Current $highest.ToString() -Expected $ver)
+    } catch { return $null }
+}
+
+function Test-LenovoPnPIDDetect {
+    # <_PnPID>VEN_xxxx&DEV_yyyy</_PnPID>
+    # In <DetectInstall>, Lenovo uses this to confirm the package's target
+    # PnP entry exists - which we read as "the package has already installed
+    # whatever PnP device it was supposed to install".
+    param([System.Xml.XmlElement]$Node)
+    try {
+        $pat = [string]$Node.InnerText
+        if ($pat) { $pat = $pat.Trim() }
+        if (-not $pat) { return $null }
+        $matched = Get-LenovoPnpDevicesByHwId -Pattern $pat
+        return ($matched.Count -gt 0)
+    } catch { return $null }
+}
+
 function Test-LenovoDetectNode {
     param([System.Xml.XmlElement]$Node)
     if (-not $Node) { return $null }
@@ -1775,12 +1884,14 @@ function Test-LenovoDetectNode {
             if ($null -eq $r) { return $null }
             return (-not $r)
         }
-        '_Bios'         { return (Test-LenovoBiosLevel        -Node $Node) }
-        '_File'         { return (Test-LenovoFileDetect       -Node $Node) }
-        '_FileVersion'  { return (Test-LenovoFileVersionDetect -Node $Node) }
-        '_Registry'     { return (Test-LenovoRegistryDetect   -Node $Node) }
-        '_RegistryKey'  { return (Test-LenovoRegistryKeyDetect -Node $Node) }
-        default         { return $null }   # unknown element -> fail-open
+        '_Bios'              { return (Test-LenovoBiosLevel              -Node $Node) }
+        '_File'              { return (Test-LenovoFileDetect             -Node $Node) }
+        '_FileVersion'       { return (Test-LenovoFileVersionDetect      -Node $Node) }
+        '_Registry'          { return (Test-LenovoRegistryDetect         -Node $Node) }
+        '_RegistryKey'       { return (Test-LenovoRegistryKeyDetect      -Node $Node) }
+        '_DriverFileVersion' { return (Test-LenovoDriverFileVersionDetect -Node $Node) }
+        '_PnPID'             { return (Test-LenovoPnPIDDetect            -Node $Node) }
+        default              { return $null }   # unknown element -> fail-open
     }
 }
 
@@ -1800,6 +1911,76 @@ function Test-LenovoDetectInstall {
     }
     if ($sawNull) { return $null }
     return $true
+}
+
+# =========================
+# LENOVO POST-INSTALL HELPERS (used by consumer catalog flow)
+#
+# Test-LenovoDPInstStaged   - True if exit code looks like "DPInst copied driver
+#                              to the store but didn't bind it to any device".
+# Test-LenovoHwMismatchCode - True if exit code looks like "the target hardware
+#                              isn't present" (NVIDIA installer on iGPU-only,
+#                              Realtek installer on non-Realtek, etc).
+# Invoke-LenovoPnputilInstall - Walks a package dir, runs `pnputil /add-driver
+#                              /install` on every INF. Used as a fallback when
+#                              DPInst stages but doesn't bind.
+# Invoke-LenovoPnpRescan    - Triggers `pnputil /scan-devices` to catch any
+#                              staged drivers still waiting for a device match.
+# =========================
+
+function Test-LenovoDPInstStaged {
+    param([int64]$ExitCode)
+    # DPInst packs: bits 0-7 = bound, bits 8-15 = staged, bits 16-23 = failed.
+    # "Staged but not bound" = nothing bound, something staged, nothing failed.
+    if ($ExitCode -le 0 -or $ExitCode -gt 0xFFFFFFFF) { return $false }
+    $bound  = $ExitCode -band 0xFF
+    $staged = ($ExitCode -shr 8) -band 0xFF
+    $failed = ($ExitCode -shr 16) -band 0xFF
+    return ($bound -eq 0 -and $staged -gt 0 -and $failed -eq 0)
+}
+
+# Codes that mean "target hardware not present on this machine". Lenovo's
+# per-MTM catalogs list every variant's drivers; on a single-GPU machine the
+# discrete-GPU installer correctly fails because there's nothing to install to.
+$script:LenovoHwMismatchCodes = @(
+    -436207360    # nvsetup.exe: 0xE6000100 - no compatible NVIDIA hardware
+)
+
+function Test-LenovoHwMismatchCode {
+    param([int64]$ExitCode, [string]$Title = "")
+    return ($script:LenovoHwMismatchCodes -contains [int]$ExitCode)
+}
+
+function Invoke-LenovoPnputilInstall {
+    param([string]$PackagePath)
+    # Returns $true if at least one INF was successfully added; $false otherwise.
+    $infs = @(Get-ChildItem -Path $PackagePath -Recurse -Filter '*.inf' -EA SilentlyContinue)
+    if ($infs.Count -eq 0) {
+        Log "    pnputil fallback: no .inf files under $PackagePath - nothing to do."
+        return $false
+    }
+    Log "    pnputil fallback: $($infs.Count) INF file(s) to add."
+    $anyOk = $false
+    foreach ($inf in $infs) {
+        Log "    pnputil /add-driver `"$($inf.Name)`" /install"
+        $out = pnputil /add-driver "`"$($inf.FullName)`"" /install 2>&1
+        foreach ($l in $out) { Log "      $l" }
+        # 0 = success, 259 = no more items (often benign), 3010 = success+reboot
+        if ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq 259 -or $LASTEXITCODE -eq 3010) { $anyOk = $true }
+    }
+    return $anyOk
+}
+
+function Invoke-LenovoPnpRescan {
+    Log ""
+    Log "Triggering PnP rescan (pnputil /scan-devices) to bind any staged drivers..."
+    try {
+        $out = pnputil /scan-devices 2>&1
+        foreach ($l in $out) { Log "  $l" }
+        Log "  pnputil /scan-devices exit: $LASTEXITCODE"
+    } catch {
+        Log "  pnputil /scan-devices failed: $($_.Exception.Message)"
+    }
 }
 
 function Invoke-LenovoPackageCommand {
@@ -1890,6 +2071,7 @@ function Start-LenovoConsumerCatalogInstall {
     $skipCount    = 0
     $alreadyInstalledCount = 0
     $dockSkipCount = 0
+    $naCount      = 0
     $rebootNeeded = $false
     $results      = New-Object System.Collections.Generic.List[object]
     # BIOS (PackageType=3) installs are queued here and run AFTER everything else,
@@ -2149,6 +2331,30 @@ function Start-LenovoConsumerCatalogInstall {
         $exit = Invoke-LenovoPackageCommand -Command $installCmd -WorkingDir $packagePath -TimeoutSec $timeout
         $isOk = $rcOk.Contains([int64]$exit)
         $statusLabel = if ($isOk) { 'OK' } else { 'FAIL' }
+
+        # Special case: DPInst exit indicates the driver was staged in the driver
+        # store but never bound to a device. Retry via pnputil, which explicitly
+        # tries to bind staged drivers to matching hardware.
+        if (-not $isOk -and (Test-LenovoDPInstStaged -ExitCode $exit)) {
+            Log "  Install exit $exit -> driver staged in store but not bound. Trying pnputil fallback..."
+            $fbOk = Invoke-LenovoPnputilInstall -PackagePath $packagePath
+            if ($fbOk) {
+                Log "  pnputil fallback succeeded - driver re-staged for binding at next PnP scan."
+                $isOk = $true
+                $statusLabel = 'OK-FALLBACK'
+            } else {
+                Log "  pnputil fallback did not succeed."
+            }
+        }
+
+        # Special case: known hardware-not-present codes (e.g. NVIDIA installer
+        # on iGPU-only machines). Lenovo's per-MTM catalog lists every variant's
+        # drivers; a mismatch here is expected, not a failure.
+        if (-not $isOk -and (Test-LenovoHwMismatchCode -ExitCode $exit -Title $title)) {
+            Log "  Install exit $exit -> target hardware not present on this machine."
+            $statusLabel = 'N/A'
+        }
+
         Log "  Install exit: $exit  [$statusLabel]"
 
         if ($isOk) {
@@ -2156,6 +2362,8 @@ function Start-LenovoConsumerCatalogInstall {
             if ($exit -eq 3010 -or $exit -eq 1641 -or $rebootType -in @('1','3','4','5')) {
                 $rebootNeeded = $true
             }
+        } elseif ($statusLabel -eq 'N/A') {
+            $naCount++
         } else {
             $failCount++
         }
@@ -2205,6 +2413,12 @@ function Start-LenovoConsumerCatalogInstall {
         }
     }
 
+    # Final pass: kick a PnP rescan so any drivers staged in the store (DPInst
+    # fallback path, plus anything else) get matched to their devices.
+    if (-not $SkipInstall -and -not (Test-Cancelled)) {
+        Invoke-LenovoPnpRescan
+    }
+
     # Summary
     Log ""
     Log "=== LENOVO CONSUMER CATALOG SUMMARY ==="
@@ -2213,6 +2427,7 @@ function Start-LenovoConsumerCatalogInstall {
     Log "Installed:          $okCount"
     Log "Already installed:  $alreadyInstalledCount  (detected via <DetectInstall>)"
     Log "Dock packages:      $dockSkipCount  (skipped by policy)"
+    Log "Not applicable:     $naCount  (hardware not present)"
     Log "Failed:             $failCount"
     Log "Skipped (no data):  $skipCount"
     Log "BIOS deferred:      $($deferredBios.Count)"
@@ -2220,9 +2435,11 @@ function Start-LenovoConsumerCatalogInstall {
     foreach ($r in $results) {
         $mark = switch ($r.Status) {
             'OK'                { '[OK]  ' }
+            'OK-FALLBACK'       { '[OK*] ' }
             'DOWNLOAD-ONLY'     { '[DL]  ' }
             'ALREADY-INSTALLED' { '[SKIP]' }
             'SKIPPED-DOCK'      { '[DOCK]' }
+            'N/A'               { '[N/A] ' }
             default             { '[FAIL]' }
         }
         $exitTxt = if ($null -eq $r.Exit) { '-' } else { "exit $($r.Exit)" }
@@ -2236,8 +2453,8 @@ function Start-LenovoConsumerCatalogInstall {
     Stop-OverallSpinner -Success ($failCount -eq 0)
 
     # Treat the run as a success if we either installed something OR confirmed
-    # everything was already up to date.
-    return (($okCount + $alreadyInstalledCount) -gt 0)
+    # everything was already up to date OR detected hardware-mismatch correctly.
+    return (($okCount + $alreadyInstalledCount + $naCount) -gt 0)
 }
 
 function Start-LenovoDriverInstall {
