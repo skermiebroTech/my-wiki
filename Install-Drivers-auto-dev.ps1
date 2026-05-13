@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.8.6
+# Version: 1.8.7
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -21,6 +21,14 @@
 # huh
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
 #
+# v1.8.7 - Lenovo consumer catalog: NVIDIA-on-non-NVIDIA-hardware short-circuit.
+#           Title-based skip (mirrors the dock-skip pattern from v1.8.2): if a
+#           package title matches *NVIDIA* but no Win32_VideoController on the
+#           machine reports an NVIDIA / GeForce / VEN_10DE adapter, skip before
+#           download. Saves 637MB+ on the integrated-only ThinkBook 14 G2 ITL
+#           variant. Coarse but correct - the proper per-descriptor fix waits
+#           on seeing one of Lenovo's "indeterminate" descriptors to know what
+#           XML element to support in <DetectInstall>.
 # v1.8.6 - End-of-run diagnostic: after the "Missing drivers AFTER install" count,
 #           print a detailed list of every device still in problem state with
 #           ErrorCode, Caption, DeviceID, HardwareID(s), and CompatibleID(s).
@@ -129,7 +137,7 @@ param(
 # Auto-enable headless when any override param is passed
 if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" -or $SkipInstall -or $SkipCleanup) { $Headless = $true }
 
-$ScriptVersion   = "1.8.6"
+$ScriptVersion   = "1.8.7"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -1831,6 +1839,22 @@ function Test-LenovoRegistryKeyDetect {
     } catch { return $null }
 }
 
+function Get-LenovoHasNvidiaGpu {
+    # True if any video controller looks like an NVIDIA GPU. Fail-open: if WMI
+    # query errors, return $true so we don't accidentally skip a needed driver.
+    try {
+        $gpus = Get-CimInstance Win32_VideoController -EA Stop
+        foreach ($g in $gpus) {
+            if ($g.PNPDeviceID          -like '*VEN_10DE*') { return $true }
+            if ($g.AdapterCompatibility -like '*NVIDIA*')   { return $true }
+            if ($g.Name                 -like '*NVIDIA*')   { return $true }
+            if ($g.Name                 -like '*GeForce*')  { return $true }
+            if ($g.Name                 -like '*Quadro*')   { return $true }
+        }
+        return $false
+    } catch { return $true }
+}
+
 function Get-LenovoPnpDevicesByHwId {
     # Returns @() of PnP devices whose HardwareID (or CompatibleID) contains the
     # given pattern as a substring (case-insensitive). Cached per-call: callers
@@ -2324,6 +2348,20 @@ function Start-LenovoConsumerCatalogInstall {
             continue
         }
 
+        # 2a2. NVIDIA driver packages on a machine with no NVIDIA GPU. The 20VD
+        #      MTM covers both integrated-only and integrated+MX450 variants;
+        #      Lenovo lists both sets of drivers per MTM. Catch this at catalog
+        #      parse time so we don't waste 600+ MB downloading a driver that
+        #      nvsetup will reject at install time anyway.
+        if ($title -like '*NVIDIA*' -and -not (Get-LenovoHasNvidiaGpu)) {
+            Log "  Package targets NVIDIA but no NVIDIA GPU detected on this machine. Skipping (no download)."
+            $naCount++
+            $results.Add([pscustomobject]@{
+                Index=$pkgIdx; Title=$title; Category=$category; Version=$pkgVer; Exit=$null; Status='N/A-NO-HW'
+            })
+            continue
+        }
+
         # 2b. Evaluate <DetectInstall> - skip if package is already installed.
         #     fail-open: $null (indeterminate) -> install anyway, log a note.
         $detectNode = $null
@@ -2596,6 +2634,7 @@ function Start-LenovoConsumerCatalogInstall {
             'ALREADY-INSTALLED' { '[SKIP]' }
             'SKIPPED-DOCK'      { '[DOCK]' }
             'N/A'               { '[N/A] ' }
+            'N/A-NO-HW'         { '[N/A] ' }
             default             { '[FAIL]' }
         }
         $exitTxt = if ($null -eq $r.Exit) { '-' } else { "exit $($r.Exit)" }
