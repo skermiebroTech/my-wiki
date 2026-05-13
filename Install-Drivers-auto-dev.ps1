@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.8.1
+# Version: 1.8.2
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -21,6 +21,10 @@
 # huh
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
 #
+# v1.8.2 - Lenovo consumer catalog: skip dock-related packages entirely (no download,
+#           no install). Title-based match on '*Dock*' covers ThinkPad USB-C/Thunderbolt
+#           docks, hybrid docks, etc. - dock firmware doesn't belong in a one-shot
+#           driver install run.
 # v1.8.1 - Lenovo consumer catalog: two behavioural improvements.
 #           (1) Evaluates each package's <DetectInstall> block - if the package
 #               is already installed, skip download + install entirely. Supports
@@ -79,7 +83,7 @@ param(
 # Auto-enable headless when any override param is passed
 if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" -or $SkipInstall -or $SkipCleanup) { $Headless = $true }
 
-$ScriptVersion   = "1.8.1"
+$ScriptVersion   = "1.8.2"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -1885,6 +1889,7 @@ function Start-LenovoConsumerCatalogInstall {
     $failCount    = 0
     $skipCount    = 0
     $alreadyInstalledCount = 0
+    $dockSkipCount = 0
     $rebootNeeded = $false
     $results      = New-Object System.Collections.Generic.List[object]
     # BIOS (PackageType=3) installs are queued here and run AFTER everything else,
@@ -1971,6 +1976,18 @@ function Start-LenovoConsumerCatalogInstall {
         Log "  $title"
         Log "  id=$pkgId  version=$pkgVer  released=$releaseDate"
         Log "  $typeName / $sevName  (reboot type $rebootType)"
+
+        # 2a. Skip dock-related packages entirely. Dock firmware/drivers don't
+        #     belong in a one-shot driver run - they're hardware-specific to whatever
+        #     dock the user has plugged in (or doesn't have plugged in).
+        if ($title -like '*Dock*') {
+            Log "  Dock package - skipping per script policy (no download, no install)."
+            $dockSkipCount++
+            $results.Add([pscustomobject]@{
+                Index=$pkgIdx; Title=$title; Category=$category; Version=$pkgVer; Exit=$null; Status='SKIPPED-DOCK'
+            })
+            continue
+        }
 
         # 2b. Evaluate <DetectInstall> - skip if package is already installed.
         #     fail-open: $null (indeterminate) -> install anyway, log a note.
@@ -2195,6 +2212,7 @@ function Start-LenovoConsumerCatalogInstall {
     Log "Total packages:     $totalPkgs"
     Log "Installed:          $okCount"
     Log "Already installed:  $alreadyInstalledCount  (detected via <DetectInstall>)"
+    Log "Dock packages:      $dockSkipCount  (skipped by policy)"
     Log "Failed:             $failCount"
     Log "Skipped (no data):  $skipCount"
     Log "BIOS deferred:      $($deferredBios.Count)"
@@ -2204,6 +2222,7 @@ function Start-LenovoConsumerCatalogInstall {
             'OK'                { '[OK]  ' }
             'DOWNLOAD-ONLY'     { '[DL]  ' }
             'ALREADY-INSTALLED' { '[SKIP]' }
+            'SKIPPED-DOCK'      { '[DOCK]' }
             default             { '[FAIL]' }
         }
         $exitTxt = if ($null -eq $r.Exit) { '-' } else { "exit $($r.Exit)" }
