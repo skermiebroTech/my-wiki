@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.9.0
+# Version: 1.9.2
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -21,6 +21,39 @@
 #
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
 #
+# v1.9.2 - Cancel: honour the cancel flag mid-download. In v1.9.1 and prior,
+#           Invoke-CurlDownload's poll loop only watched for $proc.HasExited
+#           and the 3.5-min stall timer - $script:CancelRequested was checked
+#           by callers but never inside the loop itself. So a user clicking
+#           Cancel during a 2 GB driver pack download would set the flag and
+#           log "Cancel requested by user", but curl kept streaming until it
+#           finished naturally (real case: ~60 MB and 3 seconds of additional
+#           download after the click in the 1.9.0 EliteBook 830 G8 log).
+#           Fix: poll loop now checks $script:CancelRequested every 700ms,
+#           kills the curl process via Process.Kill() with a 2-second join,
+#           deletes the partial output file (so a re-run doesn't accidentally
+#           resume a half-baked download via curl's --continue-at), and
+#           returns $false the same as a stall-abort would.
+# v1.9.1 - HP catalog: fix CAB extraction silently failing. On v1.9.0 a real
+#           EliteBook 830 G8 (SysID 880d) reached the catalog path, got a
+#           valid HEAD 200 + a 100 KB download, but expand.exe extracted
+#           nothing - log showed "Adding <cab> to Extraction Queue" then
+#           "Expanding Files Complete" with no XML produced. Two changes:
+#           (1) Pre-flight validation: check downloaded file >=1 KB and that
+#               its first 4 bytes are the CAB magic 'MSCF'. This catches CDN
+#               edges returning small text/HTML error bodies with a 200 OK.
+#           (2) Three-tier extraction with fallback chain:
+#               - Attempt 1: bare `expand <src> <dst-dir>` (canonical MS form)
+#               - Attempt 2: `expand -F:* <src> <dst-dir>` (multi-file CABs)
+#               - Attempt 3: Shell.Application COM CopyHere() (works on any
+#                 Windows with Explorer regardless of expand quirks)
+#           Each attempt clears the dest dir first so we can tell which one
+#           produced the XML. If all three fail, dest contents are dumped to
+#           the log for diagnosis before falling back to the full-pack scraper.
+#           Also: now invoking expand.exe via Start-Process with split
+#           -ArgumentList instead of PowerShell's quote-stuffed `& expand ...`,
+#           which avoids the quoting confusion that contributed to v1.9.0's
+#           silent failure.
 # v1.9.0 - HP: per-machine reference catalog (HPIA backend) for selective driver
 #           downloads. Mirrors the Dell CatalogPC and Lenovo consumer-catalog
 #           patterns. Catalog lives at
@@ -194,7 +227,7 @@ param(
 # Auto-enable headless when any override param is passed
 if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" -or $SkipInstall -or $SkipCleanup) { $Headless = $true }
 
-$ScriptVersion   = "1.9.0"
+$ScriptVersion   = "1.9.2"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -864,6 +897,22 @@ function Invoke-CurlDownload {
     $lastSize = 0; $stall = 0; $prevSize = 0
     while (-not $proc.HasExited) {
         Start-Sleep -Milliseconds 700
+        # Honour cancel mid-download: kill curl immediately so the next ~10MB
+        # don't keep streaming after the user clicked Cancel. Without this,
+        # curl runs to completion (potentially hundreds of MB) while the
+        # caller's Test-Cancelled check just sits waiting for HasExited.
+        if ($script:CancelRequested) {
+            Log "  Cancel detected - killing curl."
+            try { $proc.Kill() } catch {}
+            try { $proc.WaitForExit(2000) | Out-Null } catch {}
+            # Remove the partial file so a retry doesn't try to resume from a
+            # half-baked download (curl --continue-at would otherwise pick it
+            # up and possibly succeed on a Range request from byte N).
+            Remove-Item $OutFile -EA SilentlyContinue
+            SetDownload -Pct 0 -Label "Cancelled."
+            Stop-DlSpinner -Success $false
+            return $false
+        }
         $sz = if (Test-Path $OutFile) { (Get-Item $OutFile -EA SilentlyContinue).Length } else { 0 }
         if ($sz -gt $lastSize) { $stall = 0; $lastSize = $sz } else { $stall++ }
         $mbDone    = [math]::Round($sz / 1MB, 1)
@@ -1785,12 +1834,102 @@ function Get-HpReferenceCatalogXml {
     }
     if (Test-Cancelled) { return $null }
 
+    # Validate the download before trying to expand it. Some HP CDN edges return
+    # a small HTML/text error body with a 200 status code (e.g. geo-blocking
+    # surrogates). Quick sanity: a real reference CAB starts with "MSCF" magic.
+    $cabSize = (Get-Item $cabPath).Length
+    Log "    Downloaded $([math]::Round($cabSize/1KB,1)) KB"
+    if ($cabSize -lt 1024) {
+        $preview = ''
+        try { $preview = (Get-Content $cabPath -TotalCount 1 -EA SilentlyContinue) -as [string] } catch {}
+        Log "  HP catalog: download too small to be a real CAB (got $cabSize bytes). Preview: '$preview'"
+        Log "  Skipping catalog path."
+        return $null
+    }
+    $magic = $null
+    try {
+        $fs = [System.IO.File]::OpenRead($cabPath)
+        $buf = New-Object byte[] 4
+        [void]$fs.Read($buf, 0, 4)
+        $fs.Close()
+        $magic = -join ($buf | ForEach-Object { [char]$_ })
+    } catch {}
+    if ($magic -ne 'MSCF') {
+        Log "  HP catalog: downloaded file isn't a CAB (magic='$magic', expected 'MSCF'). Skipping catalog path."
+        return $null
+    }
+
     New-Item -ItemType Directory -Path $xmlDir -Force | Out-Null
-    $expandOut = & expand.exe "`"$cabPath`"" -F:* "`"$xmlDir`"" 2>&1
-    foreach ($l in $expandOut) { Log "    expand: $l" }
-    $xmlFile = Get-ChildItem $xmlDir -Filter "*.xml" -EA SilentlyContinue | Select-Object -First 1
+    # expand.exe is notoriously fussy about argument passing. Different
+    # combinations work depending on PowerShell quoting behavior. Try the
+    # cleanest form first (Start-Process with split args, no -F filter),
+    # check for output, then fall back to alternative forms if needed.
+    function _TryExpand {
+        param([string[]]$Args)
+        $expandLog = Join-Path $env:TEMP "hp_expand_${SysId}.log"
+        Remove-Item $expandLog -EA SilentlyContinue
+        try {
+            $proc = Start-Process -FilePath "expand.exe" -ArgumentList $Args `
+                -NoNewWindow -Wait -PassThru `
+                -RedirectStandardOutput $expandLog -EA Stop
+            if (Test-Path $expandLog) {
+                foreach ($l in (Get-Content $expandLog)) { Log "    expand: $l" }
+                Remove-Item $expandLog -EA SilentlyContinue
+            }
+            return $proc.ExitCode
+        } catch {
+            Log "    expand error: $($_.Exception.Message)"
+            return -1
+        }
+    }
+
+    # Attempt 1: bare "expand <src> <dst-dir>" - the canonical form per MS docs.
+    Log "    Extracting via: expand <src> <dst-dir>"
+    $null = _TryExpand @($cabPath, $xmlDir)
+    $xmlFile = Get-ChildItem $xmlDir -Filter "*.xml" -Recurse -EA SilentlyContinue | Select-Object -First 1
+
+    # Attempt 2: with -F:* filter (some Windows builds need it for multi-file CABs).
     if (-not $xmlFile) {
-        Log "  HP catalog: CAB extracted but no XML found in $xmlDir - skipping catalog path."
+        Log "    Retrying with: expand -F:* <src> <dst-dir>"
+        Get-ChildItem $xmlDir -EA SilentlyContinue | Remove-Item -Recurse -Force -EA SilentlyContinue
+        $null = _TryExpand @("-F:*", $cabPath, $xmlDir)
+        $xmlFile = Get-ChildItem $xmlDir -Filter "*.xml" -Recurse -EA SilentlyContinue | Select-Object -First 1
+    }
+
+    # Attempt 3: Shell.Application COM (works on any Windows with Explorer).
+    # CABs are valid Shell namespaces; CopyHere extracts contents to a folder.
+    if (-not $xmlFile) {
+        Log "    Retrying via Shell.Application COM..."
+        Get-ChildItem $xmlDir -EA SilentlyContinue | Remove-Item -Recurse -Force -EA SilentlyContinue
+        try {
+            $shell = New-Object -ComObject Shell.Application
+            $srcFolder = $shell.NameSpace($cabPath)
+            $dstFolder = $shell.NameSpace($xmlDir)
+            if ($srcFolder -and $dstFolder) {
+                # 0x14 = no progress UI + auto-overwrite
+                $dstFolder.CopyHere($srcFolder.Items(), 0x14)
+                # CopyHere is async even when sync'd; wait briefly for files.
+                $wait = 0
+                while (-not (Get-ChildItem $xmlDir -EA SilentlyContinue) -and $wait -lt 30) {
+                    Start-Sleep -Milliseconds 250
+                    $wait++
+                }
+            }
+            [System.Runtime.InteropServices.Marshal]::ReleaseComObject($shell) | Out-Null
+        } catch {
+            Log "    Shell.Application error: $($_.Exception.Message)"
+        }
+        $xmlFile = Get-ChildItem $xmlDir -Filter "*.xml" -Recurse -EA SilentlyContinue | Select-Object -First 1
+    }
+
+    if (-not $xmlFile) {
+        # All three methods failed - log directory contents for diagnosis.
+        $contents = @(Get-ChildItem $xmlDir -Recurse -EA SilentlyContinue)
+        Log "  HP catalog: extraction failed by all methods. Dest dir contains $($contents.Count) item(s):"
+        foreach ($f in $contents | Select-Object -First 10) {
+            Log "    - $($f.FullName)  ($([math]::Round($f.Length/1KB,1)) KB)"
+        }
+        Log "  Skipping catalog path."
         return $null
     }
     Log "  Parsing reference XML: $($xmlFile.Name) ($([math]::Round($xmlFile.Length/1MB,1)) MB)"
