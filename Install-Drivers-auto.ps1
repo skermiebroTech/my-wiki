@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.8.7
+# Version: 1.8.8
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -21,6 +21,20 @@
 # huh
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
 #
+# v1.8.8 - Analytics: capture which drivers were actually installed, not just the
+#           count. New $script:AnalyticsInstalledDrivers list is populated from
+#           all three install paths:
+#           (1) Install-DriversFromPath (Dell/HP/Surface): appends the INF filename
+#               when pnputil exits 0, 1641, or 3010 (success, reboot-initiated,
+#               reboot-required). Code 259 ("newer driver already installed") and
+#               other failure codes are not recorded.
+#           (2) Lenovo consumer catalog main loop: appends the package Title when
+#               the install passes the per-package RcOk check.
+#           (3) Lenovo consumer catalog deferred BIOS phase: same Title append on
+#               successful exit.
+#           Sent to the webhook as a comma-separated "installed_drivers" string;
+#           Google Sheet gets a matching "Installed Drivers" column at the end so
+#           existing column positions don't shift.
 # v1.8.7 - Lenovo consumer catalog: NVIDIA-on-non-NVIDIA-hardware short-circuit.
 #           Title-based skip (mirrors the dock-skip pattern from v1.8.2): if a
 #           package title matches *NVIDIA* but no Win32_VideoController on the
@@ -137,7 +151,7 @@ param(
 # Auto-enable headless when any override param is passed
 if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" -or $SkipInstall -or $SkipCleanup) { $Headless = $true }
 
-$ScriptVersion   = "1.8.7"
+$ScriptVersion   = "1.8.8"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -684,6 +698,7 @@ $script:AnalyticsDownloadMB      = 0.0
 $script:AnalyticsStartTime       = $null
 $script:AnalyticsMissingBefore   = -1
 $script:AnalyticsMissingAfter    = -1
+$script:AnalyticsInstalledDrivers = New-Object System.Collections.Generic.List[string]
 
 function Send-AnalyticsEvent {
     param(
@@ -694,23 +709,41 @@ function Send-AnalyticsEvent {
     if ($script:AnalyticsStartTime) {
         $durationSec = [int]((Get-Date) - $script:AnalyticsStartTime).TotalSeconds
     }
+    # Build comma-separated list of installed driver/package names.
+    # Strip embedded control chars + escape JSON-special chars, then join.
+    $installedDriversStr = ""
+    if ($script:AnalyticsInstalledDrivers -and $script:AnalyticsInstalledDrivers.Count -gt 0) {
+        $cleaned = foreach ($d in $script:AnalyticsInstalledDrivers) {
+            if ([string]::IsNullOrWhiteSpace($d)) { continue }
+            $t = ($d -replace '[\r\n\t]', ' ').Trim()
+            $t = $t -replace '\\', '\\'      # backslash-escape backslashes for JSON
+            $t = $t -replace '"',  '\"'      # escape embedded double-quotes
+            $t
+        }
+        $installedDriversStr = ($cleaned -join ', ')
+        # Hard cap to keep the payload (and the spreadsheet cell) sane.
+        if ($installedDriversStr.Length -gt 8000) {
+            $installedDriversStr = $installedDriversStr.Substring(0, 8000) + '...[truncated]'
+        }
+    }
     $payload = @"
 {
-  "result":         "$Result",
-  "manufacturer":   "$($script:AnalyticsManufacturer -replace '"','\"')",
-  "model":          "$($script:AnalyticsModel -replace '"','\"')",
-  "serial":         "$($script:AnalyticsSerial -replace '"','\"')",
-  "os_version":     "$($script:AnalyticsOsVersion -replace '"','\"')",
-  "os_build":       $($script:AnalyticsOsBuild),
-  "inf_count":      $($script:AnalyticsInfCount),
-  "download_mb":    $($script:AnalyticsDownloadMB),
-  "missing_before": $($script:AnalyticsMissingBefore),
-  "missing_after":  $($script:AnalyticsMissingAfter),
-  "duration_sec":   $durationSec,
-  "script_version": "$ScriptVersion"
+  "result":            "$Result",
+  "manufacturer":      "$($script:AnalyticsManufacturer -replace '"','\"')",
+  "model":             "$($script:AnalyticsModel -replace '"','\"')",
+  "serial":            "$($script:AnalyticsSerial -replace '"','\"')",
+  "os_version":        "$($script:AnalyticsOsVersion -replace '"','\"')",
+  "os_build":          $($script:AnalyticsOsBuild),
+  "inf_count":         $($script:AnalyticsInfCount),
+  "download_mb":       $($script:AnalyticsDownloadMB),
+  "missing_before":    $($script:AnalyticsMissingBefore),
+  "missing_after":     $($script:AnalyticsMissingAfter),
+  "duration_sec":      $durationSec,
+  "script_version":    "$ScriptVersion",
+  "installed_drivers": "$installedDriversStr"
 }
 "@
-    Log "Sending analytics (result=$Result, model=$($script:AnalyticsModel), infs=$($script:AnalyticsInfCount), dl=$($script:AnalyticsDownloadMB)MB, missing=$($script:AnalyticsMissingBefore)->$($script:AnalyticsMissingAfter), duration=${durationSec}s)..."
+    Log "Sending analytics (result=$Result, model=$($script:AnalyticsModel), infs=$($script:AnalyticsInfCount), dl=$($script:AnalyticsDownloadMB)MB, missing=$($script:AnalyticsMissingBefore)->$($script:AnalyticsMissingAfter), installed=$($script:AnalyticsInstalledDrivers.Count), duration=${durationSec}s)..."
     try {
         $payloadFile = Join-Path $env:TEMP "analytics_payload_$(Get-Date -Format 'HHmmss').json"
         $utf8NoBom   = New-Object System.Text.UTF8Encoding $false
@@ -923,7 +956,13 @@ function Install-DriversFromPath {
         SetExtract -Pct $infPct -Label "$i / $total INFs  ($remaining remaining) - $($inf.Name)"
         Log "[$i/$total] $($inf.Name)"
         $out = pnputil /add-driver "`"$($inf.FullName)`"" /install 2>&1
+        $infExit = $LASTEXITCODE
         foreach ($l in $out) { Log "  $l" }
+        # Treat success (0), reboot-initiated (1641), and reboot-required (3010)
+        # as "installed". 259 = "newer driver already installed" - don't record.
+        if ($infExit -in @(0, 1641, 3010)) {
+            $null = $script:AnalyticsInstalledDrivers.Add($inf.Name)
+        }
         Play-Sound -Event "DriverAdded"
         Step-ExSpinner
         Step-OverallSpinner
@@ -2553,6 +2592,7 @@ function Start-LenovoConsumerCatalogInstall {
             if ($exit -eq 3010 -or $exit -eq 1641 -or $rebootType -in @('1','3','4','5')) {
                 $rebootNeeded = $true
             }
+            $null = $script:AnalyticsInstalledDrivers.Add($title)
         } elseif ($statusLabel -eq 'N/A') {
             $naCount++
         } else {
@@ -2594,6 +2634,7 @@ function Start-LenovoConsumerCatalogInstall {
                 if ($bExit -eq 3010 -or $bExit -eq 1641 -or $b.RebootType -in @('1','3','4','5')) {
                     $rebootNeeded = $true
                 }
+                $null = $script:AnalyticsInstalledDrivers.Add($b.Title)
             } else {
                 $failCount++
             }
@@ -3369,6 +3410,7 @@ function Start-Install {
     $script:AnalyticsOsBuild         = 0
     $script:AnalyticsMissingBefore   = -1
     $script:AnalyticsMissingAfter    = -1
+    $script:AnalyticsInstalledDrivers = New-Object System.Collections.Generic.List[string]
     $script:AnalyticsStartTime       = Get-Date
     $script:7zInstalled              = $false
     $script:Headless                 = [bool]$Headless
