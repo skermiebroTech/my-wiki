@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.7.3
+# Version: 1.8.7
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -21,6 +21,83 @@
 # huh
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
 #
+# v1.8.7 - Lenovo consumer catalog: NVIDIA-on-non-NVIDIA-hardware short-circuit.
+#           Title-based skip (mirrors the dock-skip pattern from v1.8.2): if a
+#           package title matches *NVIDIA* but no Win32_VideoController on the
+#           machine reports an NVIDIA / GeForce / VEN_10DE adapter, skip before
+#           download. Saves 637MB+ on the integrated-only ThinkBook 14 G2 ITL
+#           variant. Coarse but correct - the proper per-descriptor fix waits
+#           on seeing one of Lenovo's "indeterminate" descriptors to know what
+#           XML element to support in <DetectInstall>.
+# v1.8.6 - End-of-run diagnostic: after the "Missing drivers AFTER install" count,
+#           print a detailed list of every device still in problem state with
+#           ErrorCode, Caption, DeviceID, HardwareID(s), and CompatibleID(s).
+#           Works for all manufacturers (Dell/HP/Lenovo/Surface), not just the
+#           Lenovo consumer-catalog path. Makes "still missing N drivers" runs
+#           debuggable without a follow-up Get-PnpDevice query.
+# v1.8.5 - Lenovo consumer catalog: two fixes for the unbound-ACPI-device case.
+#           (1) Test-LenovoDPInstStaged bound-check bug: 0xFFFFFFFF parses as
+#               Int32 -1 in PowerShell, so the upper-bound test "rejected" every
+#               positive exit code and the DPInst fallback never fired. Replaced
+#               with a sign-aware check ($ExitCode -le 0 short-circuits, no
+#               upper bound needed since param is [int64]).
+#           (2) Invoke-LenovoForceBindUnbound final pass: after PnP rescan, if
+#               any Win32_PnPEntity still has ConfigManagerErrorCode != 0, run
+#               pnputil /add-driver /install on every INF under the consumer
+#               package root - including INFs from packages whose own installer
+#               reported success - then re-enumerate and log anything still
+#               unbound with its full DeviceID so we can see exactly which
+#               hardware IDs Lenovo's published drivers don't cover.
+# v1.8.4 - Lenovo consumer catalog: extended <DetectInstall> evaluator to skip
+#           downloads (not just installs) for two more common element types.
+#           (1) _DriverFileVersion: looks up the currently-bound driver for a
+#               matching PnP hardware ID and compares its version against the
+#               target. If hardware isn't enumerated on this machine OR an
+#               equal/newer driver is already bound, the package is treated
+#               as already-installed (no download, no install).
+#           (2) _PnPID: checks for any PnP device whose hardware ID matches the
+#               pattern. Used by Lenovo to gate packages on per-SKU components.
+#           These two elements cover most of the v1.8.1 "indeterminate" cases.
+#           Saves bandwidth on dual-SKU MTMs (e.g. 20VD covers integrated and
+#           NVIDIA-discrete ThinkBook variants - the discrete-only drivers no
+#           longer get downloaded on integrated-only hardware).
+# v1.8.3 - Lenovo consumer catalog: three post-install reliability fixes.
+#           (1) DPInst "staged but not bound" handling: when an install exits with
+#               a DPInst-style packed code where bytes mean (0 bound, >0 staged,
+#               0 failed), retry by running pnputil /add-driver /install on every
+#               INF in the package dir. Fixes ThinkBook Fn-and-Function-Keys
+#               driver leaving ACPI\VPC2004 + ACPI\IDEA2004 unbound.
+#           (2) Hardware-not-present whitelist: nvsetup -436207360 (0xE6000100)
+#               and similar "no compatible NVIDIA hardware" codes are now logged
+#               as [N/A] (not present on this machine), not [FAIL]. Stops the
+#               catalog's discrete-GPU drivers being counted as failures on
+#               integrated-graphics-only variants of dual-SKU MTMs.
+#           (3) Final pnputil /scan-devices after everything (main loop +
+#               deferred BIOS phase) to bind any drivers that were staged but
+#               not yet matched to their devices.
+# v1.8.2 - Lenovo consumer catalog: skip dock-related packages entirely (no download,
+#           no install). Title-based match on '*Dock*' covers ThinkPad USB-C/Thunderbolt
+#           docks, hybrid docks, etc. - dock firmware doesn't belong in a one-shot
+#           driver install run.
+# v1.8.1 - Lenovo consumer catalog: two behavioural improvements.
+#           (1) Evaluates each package's <DetectInstall> block - if the package
+#               is already installed, skip download + install entirely. Supports
+#               _Bios (BIOS level glob), _File (path + optional version), _FileVersion,
+#               _Registry, _RegistryKey, and And/Or/Not combinators. Anything we can't
+#               evaluate is fail-open (install anyway) for safety.
+#           (2) BIOS packages (PackageType=3) are now deferred: downloaded + verified
+#               in the main loop with everything else, but their install runs only
+#               after all driver/firmware/app installs finish. Stops BIOS GUI from
+#               interrupting the rest of the install queue.
+# v1.8.0 - Lenovo: added consumer catalog support (per-machine-type XML used by Lenovo
+#           System Update). Fixes coverage for ThinkBook/IdeaPad/consumer models missing
+#           from catalogv2.xml (e.g. ThinkBook 14 G2 ITL / 20VD).
+#           Flow: try https://download.lenovo.com/catalog/<MTM>_<Win10|Win11>.xml first,
+#           parse each package descriptor, SHA256-verify, run vendor install commands
+#           (with %PACKAGEPATH% / %WINDOWS% substitution). Falls back to legacy SCCM
+#           driver pack via catalogv2.xml when consumer catalog has no entries.
+#           Installs everything offered (drivers, firmware, BIOS); -SkipInstall still
+#           honoured for download-only runs.
 # v1.7.3 - Surface: removed OSDCatalog JSON path entirely (unreliable); Download Center is now
 #           the sole method; MSI URL extracted from window.__DLCDetails__ JSON blob first
 #           (reliable primary file), with href regex as fallback; driver version secondary sort;
@@ -60,7 +137,7 @@ param(
 # Auto-enable headless when any override param is passed
 if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" -or $SkipInstall -or $SkipCleanup) { $Headless = $true }
 
-$ScriptVersion   = "1.7.3"
+$ScriptVersion   = "1.8.7"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -473,6 +550,48 @@ function Get-MissingDriverCount {
     } catch {
         Log "  WARNING: Could not query PnP device status: $($_.Exception.Message)"
         return -1
+    }
+}
+
+function Write-MissingDriverDetails {
+    # Detailed end-of-run dump of every device still in problem state.
+    # Pulls HardwareID + CompatibleID arrays from Get-PnpDevice (Win32_PnPEntity
+    # alone doesn't expose those) so the log shows exactly which IDs an INF
+    # would need to claim to bind to each device.
+    try {
+        $missing = @(Get-CimInstance Win32_PnPEntity -EA Stop |
+                     Where-Object { $_.ConfigManagerErrorCode -ne 0 })
+    } catch {
+        Log "-- Missing drivers AFTER install (enumeration error: $($_.Exception.Message)) --"
+        return
+    }
+    if ($missing.Count -eq 0) {
+        Log "-- Missing drivers AFTER install (0 - all present devices are bound) --"
+        return
+    }
+    Log "-- Missing drivers AFTER install ($($missing.Count)) --"
+    foreach ($m in $missing) {
+        $name = if ($m.Name)         { $m.Name }
+                elseif ($m.Caption)  { $m.Caption }
+                else                 { '(unnamed device)' }
+        Log "  [ERR $($m.ConfigManagerErrorCode)] $name"
+        Log "    DeviceID:    $($m.DeviceID)"
+        try {
+            $pnp = Get-PnpDevice -InstanceId $m.DeviceID -EA Stop
+            if ($pnp.HardwareID) {
+                $ids = @($pnp.HardwareID)
+                Log "    HardwareID:  $($ids[0])"
+                for ($i = 1; $i -lt $ids.Count; $i++) { Log "                 $($ids[$i])" }
+            }
+            if ($pnp.CompatibleID) {
+                $ids = @($pnp.CompatibleID)
+                Log "    CompatID:    $($ids[0])"
+                for ($i = 1; $i -lt $ids.Count; $i++) { Log "                 $($ids[$i])" }
+            }
+        } catch {
+            # Get-PnpDevice failed for this InstanceId - DeviceID line above is
+            # still enough to identify the device; skip the extra detail.
+        }
     }
 }
 
@@ -1564,6 +1683,975 @@ function Start-HpDriverInstall {
 # =========================
 # LENOVO
 # =========================
+# Two-path Lenovo flow:
+#
+#   Path 1: Consumer catalog (https://download.lenovo.com/catalog/<MTM>_<OS>.xml)
+#     Same catalog Lenovo System Update uses. Covers ThinkBook/IdeaPad consumer
+#     plus most ThinkPad/ThinkCentre. Returns a list of individual <package>
+#     entries; each package has a descriptor XML containing the silent install
+#     command + SHA256 checksums. We run each package's own installer.
+#
+#   Path 2 (fallback): catalogv2.xml SCCM driver pack
+#     One monolithic .exe -> Inno Setup extract -> pnputil INFs. Only used if
+#     Path 1 returned nothing (very old / niche commercial models).
+#
+# Helper Invoke-LenovoPackageCommand runs each package's <ExtractCommand>
+# and <Install><Cmdline> via cmd.exe with the placeholder substitutions
+# Lenovo's installer authors expect (%PACKAGEPATH% and %WINDOWS%).
+# =========================
+
+# =========================
+# LENOVO DETECTION HELPERS (used by consumer catalog flow)
+#
+# Test-LenovoDetectInstall walks a <DetectInstall> element and returns:
+#   $true  -> package is already installed -> caller should SKIP
+#   $false -> package is not installed     -> caller should INSTALL
+#   $null  -> indeterminate (unknown element / error) -> caller should INSTALL
+#             (fail-open: a redundant install is much cheaper than a missing one)
+#
+# Supported elements: _Bios, _File, _FileVersion, _Registry, _RegistryKey,
+# and the And / Or / Not combinators. Multiple direct children of <DetectInstall>
+# are AND'd together (Lenovo convention).
+# =========================
+
+function Test-LenovoBiosLevel {
+    param([System.Xml.XmlElement]$Node)
+    try {
+        $currentBios = [string](Get-CimInstance Win32_BIOS -EA Stop).SMBIOSBIOSVersion
+        if (-not $currentBios) { return $null }
+        foreach ($lvl in @($Node.Level)) {
+            $pat = ([string]$lvl).Trim()
+            if (-not $pat) { continue }
+            if ($currentBios -like $pat) { return $true }
+        }
+        return $false
+    } catch { return $null }
+}
+
+function Expand-LenovoPath {
+    param([string]$Path)
+    $Path = $Path.Replace('%WINDOWS%',          $env:WINDIR)
+    $Path = $Path.Replace('%PROGRAMFILES%',     ${env:ProgramFiles})
+    $Path = $Path.Replace('%PROGRAMFILES(X86)%', ${env:ProgramFiles(x86)})
+    $Path = $Path.Replace('%SYSTEMROOT%',       $env:SystemRoot)
+    $Path = $Path.Replace('%SYSTEMDRIVE%',      $env:SystemDrive)
+    return [System.Environment]::ExpandEnvironmentVariables($Path)
+}
+
+function Compare-LenovoVersionString {
+    # Returns: $true if currentVer satisfies expectedVer (with optional ^ suffix = ">=")
+    param([string]$Current, [string]$Expected)
+    if (-not $Current -or -not $Expected) { return $null }
+    $needsGE = $Expected.EndsWith('^')
+    $exp     = $Expected.TrimEnd('^').Trim()
+    try {
+        $cv = [version]$Current
+        $ev = [version]$exp
+        if ($needsGE) { return ($cv -ge $ev) } else { return ($cv -eq $ev) }
+    } catch {
+        # Fall back to string compare for non-dotted values
+        if ($needsGE) { return ($Current -ge $exp) } else { return ($Current -eq $exp) }
+    }
+}
+
+function Test-LenovoFileDetect {
+    param([System.Xml.XmlElement]$Node)
+    try {
+        # _File may carry the path in <Name>, <File>, or directly as inner text
+        $name = ""
+        if ($Node.Name)      { $name = [string]$Node.Name }
+        elseif ($Node.File)  { $name = [string]$Node.File }
+        elseif ($Node.InnerText) { $name = [string]$Node.InnerText.Trim() }
+        if (-not $name) { return $null }
+
+        $path = Expand-LenovoPath -Path $name
+        if (-not (Test-Path -LiteralPath $path)) { return $false }
+
+        $verNode = $Node.SelectSingleNode('Version')
+        if (-not $verNode) { return $true }   # file exists, no version constraint = match
+
+        $expected = [string]$verNode.InnerText.Trim()
+        $actual = ""
+        try { $actual = (Get-Item -LiteralPath $path).VersionInfo.FileVersion } catch {}
+        if (-not $actual) { return $null }
+        return (Compare-LenovoVersionString -Current $actual -Expected $expected)
+    } catch { return $null }
+}
+
+function Test-LenovoFileVersionDetect {
+    param([System.Xml.XmlElement]$Node)
+    try {
+        # Two shapes seen in the wild:
+        #   <_FileVersion><FileVersion><Name>X</Name><Version>Y</Version></FileVersion></_FileVersion>
+        #   <_FileVersion><Name>X</Name><Version>Y</Version></_FileVersion>
+        $fvNode = $Node.SelectSingleNode('FileVersion')
+        $src    = if ($fvNode) { $fvNode } else { $Node }
+        $name = [string]$src.Name
+        $ver  = [string]$src.Version
+        if (-not $name -or -not $ver) { return $null }
+
+        $path = Expand-LenovoPath -Path $name
+        if (-not (Test-Path -LiteralPath $path)) { return $false }
+
+        $actual = ""
+        try { $actual = (Get-Item -LiteralPath $path).VersionInfo.FileVersion } catch {}
+        if (-not $actual) { return $null }
+        return (Compare-LenovoVersionString -Current $actual -Expected $ver)
+    } catch { return $null }
+}
+
+function ConvertTo-LenovoRegPath {
+    param([string]$Raw)
+    if (-not $Raw) { return $null }
+    $r = $Raw.Trim()
+    if ($r -match '^HKEY_LOCAL_MACHINE\\') { return ($r -replace '^HKEY_LOCAL_MACHINE\\', 'HKLM:\') }
+    if ($r -match '^HKEY_CURRENT_USER\\')  { return ($r -replace '^HKEY_CURRENT_USER\\',  'HKCU:\') }
+    if ($r -match '^HKEY_CLASSES_ROOT\\')  { return ($r -replace '^HKEY_CLASSES_ROOT\\',  'HKCR:\') }
+    if ($r -match '^HKLM\\')               { return ($r -replace '^HKLM\\', 'HKLM:\') }
+    if ($r -match '^HKCU\\')               { return ($r -replace '^HKCU\\', 'HKCU:\') }
+    return "HKLM:\$r"   # Lenovo descriptors commonly omit the hive
+}
+
+function Test-LenovoRegistryDetect {
+    param([System.Xml.XmlElement]$Node)
+    try {
+        $keyPath = ConvertTo-LenovoRegPath -Raw ([string]$Node.Key)
+        $valName = [string]$Node.KeyName
+        $ver     = [string]$Node.Version
+        if (-not $keyPath) { return $null }
+        if (-not (Test-Path -LiteralPath $keyPath)) { return $false }
+        if (-not $valName) { return $true }
+
+        $actual = $null
+        try { $actual = (Get-ItemProperty -LiteralPath $keyPath -Name $valName -EA Stop).$valName } catch { return $false }
+        if ($null -eq $actual) { return $false }
+        if (-not $ver) { return $true }
+        return (Compare-LenovoVersionString -Current ([string]$actual) -Expected $ver)
+    } catch { return $null }
+}
+
+function Test-LenovoRegistryKeyDetect {
+    param([System.Xml.XmlElement]$Node)
+    try {
+        $keyPath = ConvertTo-LenovoRegPath -Raw ([string]$Node.InnerText)
+        if (-not $keyPath) { return $null }
+        return (Test-Path -LiteralPath $keyPath)
+    } catch { return $null }
+}
+
+function Get-LenovoHasNvidiaGpu {
+    # True if any video controller looks like an NVIDIA GPU. Fail-open: if WMI
+    # query errors, return $true so we don't accidentally skip a needed driver.
+    try {
+        $gpus = Get-CimInstance Win32_VideoController -EA Stop
+        foreach ($g in $gpus) {
+            if ($g.PNPDeviceID          -like '*VEN_10DE*') { return $true }
+            if ($g.AdapterCompatibility -like '*NVIDIA*')   { return $true }
+            if ($g.Name                 -like '*NVIDIA*')   { return $true }
+            if ($g.Name                 -like '*GeForce*')  { return $true }
+            if ($g.Name                 -like '*Quadro*')   { return $true }
+        }
+        return $false
+    } catch { return $true }
+}
+
+function Get-LenovoPnpDevicesByHwId {
+    # Returns @() of PnP devices whose HardwareID (or CompatibleID) contains the
+    # given pattern as a substring (case-insensitive). Cached per-call: callers
+    # in a hot loop should grab the device list once and filter manually if perf
+    # matters - but each <DetectInstall> only runs a couple of these.
+    param([string]$Pattern)
+    if (-not $Pattern) { return @() }
+    try {
+        $all = Get-PnpDevice -EA Stop
+    } catch { return @() }
+    return @($all | Where-Object {
+        $hit = $false
+        if ($_.HardwareID) {
+            foreach ($id in $_.HardwareID) { if ($id -like "*$Pattern*") { $hit = $true; break } }
+        }
+        if (-not $hit -and $_.CompatibleID) {
+            foreach ($id in $_.CompatibleID) { if ($id -like "*$Pattern*") { $hit = $true; break } }
+        }
+        $hit
+    })
+}
+
+function Test-LenovoDriverFileVersionDetect {
+    # <_DriverFileVersion>
+    #   <HardwareID>VEN_8086&DEV_xxxx</HardwareID>   (or <Hardware> / <PnPID>)
+    #   <Version>30.0.101.1960^</Version>
+    # </_DriverFileVersion>
+    # Semantics: returns TRUE (already installed) if either
+    #   (a) no PnP device matches the hardware ID on this machine (driver
+    #       not applicable - common on dual-SKU MTMs), OR
+    #   (b) at least one matching device already has a driver bound whose
+    #       version satisfies the constraint.
+    param([System.Xml.XmlElement]$Node)
+    try {
+        $hwId = $null
+        if ($Node.HardwareID)   { $hwId = [string]$Node.HardwareID }
+        elseif ($Node.Hardware) { $hwId = [string]$Node.Hardware }
+        elseif ($Node.PnPID)    { $hwId = [string]$Node.PnPID }
+        $hwId = if ($hwId) { $hwId.Trim() } else { "" }
+        $ver  = if ($Node.Version) { ([string]$Node.Version).Trim() } else { "" }
+        if (-not $hwId -or -not $ver) { return $null }
+
+        $matched = Get-LenovoPnpDevicesByHwId -Pattern $hwId
+        if ($matched.Count -eq 0) {
+            # Driver isn't applicable to this machine - treat as "already handled"
+            # so we skip download + install entirely.
+            return $true
+        }
+
+        # Find the highest installed driver version across all matched devices.
+        $highest = $null
+        foreach ($d in $matched) {
+            try {
+                $p = Get-PnpDeviceProperty -InstanceId $d.InstanceId -KeyName 'DEVPKEY_Device_DriverVersion' -EA SilentlyContinue
+                if (-not $p -or -not $p.Data) { continue }
+                $dv = [string]$p.Data
+                try {
+                    $vObj = [version]$dv
+                    if (-not $highest -or $vObj -gt $highest) { $highest = $vObj }
+                } catch {}
+            } catch {}
+        }
+        if (-not $highest) { return $null }
+        return (Compare-LenovoVersionString -Current $highest.ToString() -Expected $ver)
+    } catch { return $null }
+}
+
+function Test-LenovoPnPIDDetect {
+    # <_PnPID>VEN_xxxx&DEV_yyyy</_PnPID>
+    # In <DetectInstall>, Lenovo uses this to confirm the package's target
+    # PnP entry exists - which we read as "the package has already installed
+    # whatever PnP device it was supposed to install".
+    param([System.Xml.XmlElement]$Node)
+    try {
+        $pat = [string]$Node.InnerText
+        if ($pat) { $pat = $pat.Trim() }
+        if (-not $pat) { return $null }
+        $matched = Get-LenovoPnpDevicesByHwId -Pattern $pat
+        return ($matched.Count -gt 0)
+    } catch { return $null }
+}
+
+function Test-LenovoDetectNode {
+    param([System.Xml.XmlElement]$Node)
+    if (-not $Node) { return $null }
+    $kids = @($Node.ChildNodes | Where-Object { $_.NodeType -eq [System.Xml.XmlNodeType]::Element })
+
+    switch ($Node.LocalName) {
+        'And' {
+            $sawNull = $false
+            foreach ($k in $kids) {
+                $r = Test-LenovoDetectNode -Node $k
+                if ($r -eq $false) { return $false }
+                if ($null -eq $r)  { $sawNull = $true }
+            }
+            if ($sawNull) { return $null }
+            return $true
+        }
+        'Or' {
+            $allNull = $true
+            foreach ($k in $kids) {
+                $r = Test-LenovoDetectNode -Node $k
+                if ($r -eq $true)  { return $true }
+                if ($null -ne $r)  { $allNull = $false }
+            }
+            if ($allNull) { return $null }
+            return $false
+        }
+        'Not' {
+            if ($kids.Count -ne 1) { return $null }
+            $r = Test-LenovoDetectNode -Node $kids[0]
+            if ($null -eq $r) { return $null }
+            return (-not $r)
+        }
+        '_Bios'              { return (Test-LenovoBiosLevel              -Node $Node) }
+        '_File'              { return (Test-LenovoFileDetect             -Node $Node) }
+        '_FileVersion'       { return (Test-LenovoFileVersionDetect      -Node $Node) }
+        '_Registry'          { return (Test-LenovoRegistryDetect         -Node $Node) }
+        '_RegistryKey'       { return (Test-LenovoRegistryKeyDetect      -Node $Node) }
+        '_DriverFileVersion' { return (Test-LenovoDriverFileVersionDetect -Node $Node) }
+        '_PnPID'             { return (Test-LenovoPnPIDDetect            -Node $Node) }
+        default              { return $null }   # unknown element -> fail-open
+    }
+}
+
+function Test-LenovoDetectInstall {
+    param([System.Xml.XmlElement]$Node)
+    if (-not $Node) { return $null }
+    $kids = @($Node.ChildNodes | Where-Object { $_.NodeType -eq [System.Xml.XmlNodeType]::Element })
+    # Empty <DetectInstall/> means "no detection info" - tell caller to install.
+    if ($kids.Count -eq 0) { return $false }
+    # Multiple top-level children are AND'd (Lenovo convention).
+    if ($kids.Count -eq 1) { return (Test-LenovoDetectNode -Node $kids[0]) }
+    $sawNull = $false
+    foreach ($k in $kids) {
+        $r = Test-LenovoDetectNode -Node $k
+        if ($r -eq $false) { return $false }
+        if ($null -eq $r)  { $sawNull = $true }
+    }
+    if ($sawNull) { return $null }
+    return $true
+}
+
+# =========================
+# LENOVO POST-INSTALL HELPERS (used by consumer catalog flow)
+#
+# Test-LenovoDPInstStaged   - True if exit code looks like "DPInst copied driver
+#                              to the store but didn't bind it to any device".
+# Test-LenovoHwMismatchCode - True if exit code looks like "the target hardware
+#                              isn't present" (NVIDIA installer on iGPU-only,
+#                              Realtek installer on non-Realtek, etc).
+# Invoke-LenovoPnputilInstall - Walks a package dir, runs `pnputil /add-driver
+#                              /install` on every INF. Used as a fallback when
+#                              DPInst stages but doesn't bind.
+# Invoke-LenovoPnpRescan    - Triggers `pnputil /scan-devices` to catch any
+#                              staged drivers still waiting for a device match.
+# =========================
+
+function Test-LenovoDPInstStaged {
+    param([int64]$ExitCode)
+    # DPInst packs: bits 0-7 = bound, bits 8-15 = staged, bits 16-23 = failed.
+    # "Staged but not bound" = nothing bound, something staged, nothing failed.
+    # Short-circuit on <=0: success codes are 0 and negative codes are typically
+    # vendor-specific errors (e.g. NVIDIA's -436207360) that don't follow
+    # DPInst's packing convention. The HW-mismatch whitelist catches those.
+    # NOTE: do NOT bound-check against 0xFFFFFFFF - in PowerShell that literal
+    # parses as Int32 -1 (signed), which made the previous version of this
+    # function return $false for every positive exit code.
+    if ($ExitCode -le 0) { return $false }
+    $bound  = $ExitCode -band 0xFF
+    $staged = ($ExitCode -shr 8) -band 0xFF
+    $failed = ($ExitCode -shr 16) -band 0xFF
+    return ($bound -eq 0 -and $staged -gt 0 -and $failed -eq 0)
+}
+
+# Codes that mean "target hardware not present on this machine". Lenovo's
+# per-MTM catalogs list every variant's drivers; on a single-GPU machine the
+# discrete-GPU installer correctly fails because there's nothing to install to.
+$script:LenovoHwMismatchCodes = @(
+    -436207360    # nvsetup.exe: 0xE6000100 - no compatible NVIDIA hardware
+)
+
+function Test-LenovoHwMismatchCode {
+    param([int64]$ExitCode, [string]$Title = "")
+    return ($script:LenovoHwMismatchCodes -contains [int]$ExitCode)
+}
+
+function Invoke-LenovoPnputilInstall {
+    param([string]$PackagePath)
+    # Returns $true if at least one INF was successfully added; $false otherwise.
+    $infs = @(Get-ChildItem -Path $PackagePath -Recurse -Filter '*.inf' -EA SilentlyContinue)
+    if ($infs.Count -eq 0) {
+        Log "    pnputil fallback: no .inf files under $PackagePath - nothing to do."
+        return $false
+    }
+    Log "    pnputil fallback: $($infs.Count) INF file(s) to add."
+    $anyOk = $false
+    foreach ($inf in $infs) {
+        Log "    pnputil /add-driver `"$($inf.Name)`" /install"
+        $out = pnputil /add-driver "`"$($inf.FullName)`"" /install 2>&1
+        foreach ($l in $out) { Log "      $l" }
+        # 0 = success, 259 = no more items (often benign), 3010 = success+reboot
+        if ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq 259 -or $LASTEXITCODE -eq 3010) { $anyOk = $true }
+    }
+    return $anyOk
+}
+
+function Invoke-LenovoPnpRescan {
+    Log ""
+    Log "Triggering PnP rescan (pnputil /scan-devices) to bind any staged drivers..."
+    try {
+        $out = pnputil /scan-devices 2>&1
+        foreach ($l in $out) { Log "  $l" }
+        Log "  pnputil /scan-devices exit: $LASTEXITCODE"
+    } catch {
+        Log "  pnputil /scan-devices failed: $($_.Exception.Message)"
+    }
+}
+
+function Get-LenovoUnboundDevices {
+    # Match the script's existing Get-MissingDriverCount approach exactly so
+    # counts agree between the pre/post snapshot and this helper.
+    try {
+        return @(Get-CimInstance Win32_PnPEntity -EA Stop |
+                 Where-Object { $_.ConfigManagerErrorCode -ne 0 })
+    } catch { return @() }
+}
+
+function Invoke-LenovoForceBindUnbound {
+    # Final brute-force pass. If anything is still unbound after the rescan,
+    # walk every INF in the consumer-catalog package tree and run
+    # `pnputil /add-driver /install`. Catches the case where DPInst staged a
+    # driver but the binding never happened (or the install command was a
+    # vendor wrapper that bypassed proper INF registration).
+    param([string]$PkgRoot)
+
+    $before = Get-LenovoUnboundDevices
+    if ($before.Count -eq 0) {
+        Log "Force-bind check: no devices in problem state. Nothing to do."
+        return
+    }
+
+    Log ""
+    Log "Force-bind check: $($before.Count) device(s) still in problem state after rescan:"
+    foreach ($d in $before) {
+        $cap = if ($d.Caption) { $d.Caption } elseif ($d.Name) { $d.Name } else { '(unnamed)' }
+        Log "  - $cap"
+        if ($d.DeviceID)              { Log "      DeviceID: $($d.DeviceID)" }
+        if ($d.ConfigManagerErrorCode){ Log "      ErrorCode: $($d.ConfigManagerErrorCode)" }
+    }
+
+    if (-not (Test-Path $PkgRoot)) {
+        Log "  Consumer pkg root not found ($PkgRoot) - cannot retry."
+        return
+    }
+
+    $infs = @(Get-ChildItem -Path $PkgRoot -Recurse -Filter '*.inf' -EA SilentlyContinue)
+    if ($infs.Count -eq 0) {
+        Log "  No INF files under $PkgRoot - nothing to retry."
+        return
+    }
+
+    Log ""
+    Log "Force-bind pass: pnputil /add-driver /install on $($infs.Count) INF(s)..."
+    foreach ($inf in $infs) {
+        if (Test-Cancelled) { Log "  Cancelled."; break }
+        $out = pnputil /add-driver "`"$($inf.FullName)`"" /install 2>&1
+        # Filter pnputil's banner + blanks for log readability
+        foreach ($l in $out) {
+            $line = ([string]$l).Trim()
+            if (-not $line)                            { continue }
+            if ($line -like 'Microsoft PnP Utility*')  { continue }
+            Log "    [$($inf.Name)] $line"
+        }
+    }
+
+    # One more scan after the brute-force pass
+    Log ""
+    Log "Final scan-devices after force-bind..."
+    try {
+        $out = pnputil /scan-devices 2>&1
+        foreach ($l in $out) { Log "  $l" }
+    } catch {}
+
+    $after = Get-LenovoUnboundDevices
+    $delta = $before.Count - $after.Count
+    if ($delta -gt 0) {
+        Log "Force-bind resolved $delta device(s)."
+    }
+    if ($after.Count -gt 0) {
+        Log ""
+        Log "$($after.Count) device(s) STILL unbound:"
+        foreach ($d in $after) {
+            $cap = if ($d.Caption) { $d.Caption } elseif ($d.Name) { $d.Name } else { '(unnamed)' }
+            Log "  - $cap"
+            if ($d.DeviceID) { Log "      DeviceID: $($d.DeviceID)" }
+        }
+        Log ""
+        Log "These devices have no INF in the consumer catalog whose HardwareID or"
+        Log "CompatibleID list matches. Either Lenovo's per-MTM catalog does not"
+        Log "publish a driver for this hardware variant, or a system reboot is"
+        Log "required before binding can complete."
+    }
+}
+
+function Invoke-LenovoPackageCommand {
+    param(
+        [string]$Command,
+        [string]$WorkingDir,
+        [int]$TimeoutSec = 1200
+    )
+    # cmd.exe /c handles quoting + path-with-spaces cleanly. The downside is
+    # cmd swallows '^' as escape - Lenovo install lines do not use it, so safe.
+    try {
+        $psi                  = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName         = $env:ComSpec
+        $psi.Arguments        = "/c $Command"
+        $psi.WorkingDirectory = $WorkingDir
+        $psi.UseShellExecute  = $false
+        $psi.CreateNoWindow   = $true
+        $proc                 = New-Object System.Diagnostics.Process
+        $proc.StartInfo       = $psi
+        $proc.Start() | Out-Null
+
+        $deadline = (Get-Date).AddSeconds($TimeoutSec)
+        while (-not $proc.HasExited) {
+            Start-Sleep -Milliseconds 500
+            Step-AllSpinners
+            [System.Windows.Forms.Application]::DoEvents()
+            if ((Get-Date) -gt $deadline) {
+                Log "  WARNING: process exceeded $TimeoutSec s - killing."
+                try { $proc.Kill() } catch {}
+                return -9999
+            }
+            if ($script:CancelRequested) {
+                try { $proc.Kill() } catch {}
+                return -9998
+            }
+        }
+        return $proc.ExitCode
+    } catch {
+        Log "  Command exec error: $($_.Exception.Message)"
+        return -9997
+    }
+}
+
+function Start-LenovoConsumerCatalogInstall {
+    param(
+        [string]$MachineType,   # 4-char (e.g. "20VD")
+        [string]$OsCode,        # "Win10" or "Win11"
+        [string]$DriverRoot
+    )
+
+    Log "--- Lenovo consumer catalog (System Update mechanism) ---"
+    $catalogUrl  = "https://download.lenovo.com/catalog/${MachineType}_${OsCode}.xml"
+    $catalogFile = Join-Path $env:TEMP "lenovo_${MachineType}_${OsCode}.xml"
+    Log "Catalog URL: $catalogUrl"
+
+    if (-not (Invoke-CurlDownload -Url $catalogUrl -OutFile $catalogFile)) {
+        Log "Consumer catalog not available for ${MachineType}_${OsCode} (404 or fetch failed)."
+        return $false
+    }
+    if (Test-Cancelled) { return $false }
+
+    # Parse catalog (BOM-safe)
+    try {
+        $bytes    = [System.IO.File]::ReadAllBytes($catalogFile)
+        $rawText  = [System.Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0xFEFF)
+        [xml]$cat = $rawText
+    } catch {
+        Log "Consumer catalog parse failed: $($_.Exception.Message)"
+        return $false
+    }
+
+    $pkgNodes = @($cat.packages.package)
+    if ($pkgNodes.Count -eq 0) {
+        Log "Consumer catalog has 0 packages - cannot proceed."
+        return $false
+    }
+    Log "Consumer catalog lists $($pkgNodes.Count) package(s)."
+    SetProgress 10
+
+    # Working dir for all consumer-catalog payloads
+    $pkgRoot = Join-Path $DriverRoot "Lenovo_Consumer"
+    if (-not (Test-Path $pkgRoot)) { New-Item -ItemType Directory -Path $pkgRoot -Force | Out-Null }
+
+    $totalPkgs    = $pkgNodes.Count
+    $pkgIdx       = 0
+    $okCount      = 0
+    $failCount    = 0
+    $skipCount    = 0
+    $alreadyInstalledCount = 0
+    $dockSkipCount = 0
+    $naCount      = 0
+    $rebootNeeded = $false
+    $results      = New-Object System.Collections.Generic.List[object]
+    # BIOS (PackageType=3) installs are queued here and run AFTER everything else,
+    # so the BIOS GUI doesn't interrupt the driver/firmware install sequence.
+    $deferredBios = New-Object System.Collections.Generic.List[object]
+
+    foreach ($pkg in $pkgNodes) {
+        $pkgIdx++
+        if (Test-Cancelled) { Log "Cancelled at package $pkgIdx/$totalPkgs."; break }
+
+        $descUrl         = ([string]$pkg.location).Trim()
+        $category        = if ($pkg.category) { ([string]$pkg.category).Trim() } else { "" }
+        $expectedDescSha = ""
+        if ($pkg.checksum) {
+            $expectedDescSha = if ($pkg.checksum.'#text') { $pkg.checksum.'#text' } else { [string]$pkg.checksum }
+            $expectedDescSha = $expectedDescSha.Trim().ToLower()
+        }
+
+        # Map overall progress 15-95 across packages
+        $overall = 15 + [int](($pkgIdx / $totalPkgs) * 80)
+        SetProgress $overall
+        Log ""
+        Log "----- [$pkgIdx/$totalPkgs] $category -----"
+
+        # 1. Descriptor XML
+        $descName = [System.IO.Path]::GetFileName(([System.Uri]$descUrl).LocalPath)
+        $descFile = Join-Path $pkgRoot $descName
+        if (-not (Invoke-CurlDownload -Url $descUrl -OutFile $descFile)) {
+            Log "  Descriptor download failed - skipping."
+            $failCount++; continue
+        }
+        if ($expectedDescSha) {
+            $actualSha = (Get-FileHash -Path $descFile -Algorithm SHA256).Hash.ToLower()
+            if ($actualSha -ne $expectedDescSha) {
+                Log "  Descriptor SHA256 mismatch - skipping."
+                Log "    expected: $expectedDescSha"
+                Log "    actual:   $actualSha"
+                $failCount++; continue
+            }
+        }
+
+        # 2. Parse descriptor (BOM-safe)
+        try {
+            $descBytes = [System.IO.File]::ReadAllBytes($descFile)
+            $descText  = [System.Text.Encoding]::UTF8.GetString($descBytes).TrimStart([char]0xFEFF)
+            [xml]$desc = $descText
+        } catch {
+            Log "  Descriptor parse failed: $($_.Exception.Message)"
+            $failCount++; continue
+        }
+
+        $pkgName     = [string]$desc.Package.name
+        $pkgId       = [string]$desc.Package.id
+        $pkgVer      = [string]$desc.Package.version
+        $releaseDate = [string]$desc.Package.ReleaseDate
+        $severity    = if ($desc.Package.Severity)    { [string]$desc.Package.Severity.type }    else { '?' }
+        $packageType = if ($desc.Package.PackageType) { [string]$desc.Package.PackageType.type } else { '?' }
+        $rebootType  = if ($desc.Package.Reboot)      { [string]$desc.Package.Reboot.type }      else { '0' }
+
+        # Title (EN preferred)
+        $title = ""
+        try {
+            $descNodes = @($desc.Package.Title.Desc)
+            $enDesc = $descNodes | Where-Object { $_.id -eq 'EN' } | Select-Object -First 1
+            if (-not $enDesc) { $enDesc = $descNodes | Select-Object -First 1 }
+            if ($enDesc) { $title = [string]$enDesc.InnerText }
+        } catch {}
+        if (-not $title) { $title = $pkgName }
+
+        $typeName = switch ($packageType) {
+            '1' { 'Application' }
+            '2' { 'Driver' }
+            '3' { 'BIOS' }
+            '4' { 'Firmware' }
+            default { "Type$packageType" }
+        }
+        $sevName = switch ($severity) {
+            '1' { 'Critical' }
+            '2' { 'Recommended' }
+            '3' { 'Optional' }
+            default { "Sev$severity" }
+        }
+
+        Log "  $title"
+        Log "  id=$pkgId  version=$pkgVer  released=$releaseDate"
+        Log "  $typeName / $sevName  (reboot type $rebootType)"
+
+        # 2a. Skip dock-related packages entirely. Dock firmware/drivers don't
+        #     belong in a one-shot driver run - they're hardware-specific to whatever
+        #     dock the user has plugged in (or doesn't have plugged in).
+        if ($title -like '*Dock*') {
+            Log "  Dock package - skipping per script policy (no download, no install)."
+            $dockSkipCount++
+            $results.Add([pscustomobject]@{
+                Index=$pkgIdx; Title=$title; Category=$category; Version=$pkgVer; Exit=$null; Status='SKIPPED-DOCK'
+            })
+            continue
+        }
+
+        # 2a2. NVIDIA driver packages on a machine with no NVIDIA GPU. The 20VD
+        #      MTM covers both integrated-only and integrated+MX450 variants;
+        #      Lenovo lists both sets of drivers per MTM. Catch this at catalog
+        #      parse time so we don't waste 600+ MB downloading a driver that
+        #      nvsetup will reject at install time anyway.
+        if ($title -like '*NVIDIA*' -and -not (Get-LenovoHasNvidiaGpu)) {
+            Log "  Package targets NVIDIA but no NVIDIA GPU detected on this machine. Skipping (no download)."
+            $naCount++
+            $results.Add([pscustomobject]@{
+                Index=$pkgIdx; Title=$title; Category=$category; Version=$pkgVer; Exit=$null; Status='N/A-NO-HW'
+            })
+            continue
+        }
+
+        # 2b. Evaluate <DetectInstall> - skip if package is already installed.
+        #     fail-open: $null (indeterminate) -> install anyway, log a note.
+        $detectNode = $null
+        try { $detectNode = $desc.Package.DetectInstall } catch {}
+        if ($detectNode -is [System.Xml.XmlElement]) {
+            $detectResult = Test-LenovoDetectInstall -Node $detectNode
+            if ($detectResult -eq $true) {
+                Log "  DetectInstall -> ALREADY INSTALLED. Skipping (no download)."
+                $alreadyInstalledCount++
+                $results.Add([pscustomobject]@{
+                    Index=$pkgIdx; Title=$title; Category=$category; Version=$pkgVer; Exit=$null; Status='ALREADY-INSTALLED'
+                })
+                continue
+            } elseif ($null -eq $detectResult) {
+                Log "  DetectInstall -> indeterminate (unsupported element). Will install."
+            } else {
+                Log "  DetectInstall -> not installed. Will install."
+            }
+        }
+
+        # 3. Installer file metadata
+        $installerNode = $null
+        try { $installerNode = $desc.Package.Files.Installer.File } catch {}
+        if (-not $installerNode -or -not $installerNode.Name) {
+            Log "  No <Installer><File> entry - cannot install. Skipping."
+            $skipCount++; continue
+        }
+        $installerName = [string]$installerNode.Name
+        $expectedCrc   = if ($installerNode.CRC) { ([string]$installerNode.CRC).ToLower() } else { "" }
+
+        # Installer URL = same directory as descriptor URL + installer filename
+        $descDir      = $descUrl.Substring(0, $descUrl.LastIndexOf('/') + 1)
+        $installerUrl = $descDir + $installerName
+
+        # Per-package extract directory == %PACKAGEPATH%
+        $packagePath   = Join-Path $pkgRoot $pkgId
+        if (-not (Test-Path $packagePath)) { New-Item -ItemType Directory -Path $packagePath -Force | Out-Null }
+        $installerFile = Join-Path $packagePath $installerName
+
+        # 4. Download installer
+        if (-not (Invoke-CurlDownload -Url $installerUrl -OutFile $installerFile)) {
+            Log "  Installer download failed - skipping."
+            $failCount++; continue
+        }
+        if ($expectedCrc) {
+            $actualCrc = (Get-FileHash -Path $installerFile -Algorithm SHA256).Hash.ToLower()
+            if ($actualCrc -ne $expectedCrc) {
+                Log "  Installer SHA256 mismatch - skipping."
+                Log "    expected: $expectedCrc"
+                Log "    actual:   $actualCrc"
+                $failCount++; continue
+            }
+            Log "  SHA256 OK."
+        }
+
+        # 5. Download External helpers (version checkers etc.) if present
+        try {
+            if ($desc.Package.Files.External) {
+                foreach ($ext in @($desc.Package.Files.External.File)) {
+                    if (-not $ext -or -not $ext.Name) { continue }
+                    $extName = [string]$ext.Name
+                    $extUrl  = $descDir + $extName
+                    $extFile = Join-Path $packagePath $extName
+                    Log "  External helper: $extName"
+                    if (-not (Invoke-CurlDownload -Url $extUrl -OutFile $extFile)) {
+                        Log "  WARNING: external helper download failed (continuing)."
+                        continue
+                    }
+                    if ($ext.CRC) {
+                        $extSha    = (Get-FileHash -Path $extFile -Algorithm SHA256).Hash.ToLower()
+                        $extExpect = ([string]$ext.CRC).ToLower()
+                        if ($extSha -ne $extExpect) { Log "  WARNING: external helper SHA256 mismatch (continuing)." }
+                    }
+                }
+            }
+        } catch { Log "  External helper handling error: $($_.Exception.Message)" }
+
+        if ($SkipInstall) {
+            Log "  -SkipInstall set: download + verify only."
+            $okCount++
+            $results.Add([pscustomobject]@{
+                Index=$pkgIdx; Title=$title; Category=$category; Version=$pkgVer; Exit=$null; Status='DOWNLOAD-ONLY'
+            })
+            continue
+        }
+
+        # 6. Run extract command (if present) - unpacks payload into %PACKAGEPATH%
+        $extractCmd = [string]$desc.Package.ExtractCommand
+        if ($extractCmd) {
+            $cmd = $extractCmd.Replace('%PACKAGEPATH%', $packagePath).Replace('%WINDOWS%', $env:WINDIR)
+            Log "  Extract: $cmd"
+            SetExtract -Pct $overall -Label "Extracting [$pkgIdx/$totalPkgs]: $title"
+            $extExit = Invoke-LenovoPackageCommand -Command $cmd -WorkingDir $packagePath -TimeoutSec 600
+            Log "  Extract exit code: $extExit"
+            # Extract exit codes vary by vendor - non-zero isn't necessarily failure, continue regardless.
+        }
+
+        # 7. Run install command
+        $installNode = $null
+        try { $installNode = $desc.Package.Install } catch {}
+        if (-not $installNode) {
+            Log "  No <Install> block - skipping."
+            $skipCount++; continue
+        }
+
+        # Cmdline: prefer id="EN", else first one
+        $installCmdRaw = ""
+        try {
+            $cmdNodes = @($installNode.Cmdline)
+            $enCmd = $cmdNodes | Where-Object { $_.id -eq 'EN' } | Select-Object -First 1
+            if (-not $enCmd) { $enCmd = $cmdNodes | Select-Object -First 1 }
+            if ($enCmd) {
+                $installCmdRaw = if ($enCmd -is [System.Xml.XmlElement]) { $enCmd.InnerText } else { [string]$enCmd }
+            }
+        } catch {}
+        if (-not $installCmdRaw) {
+            Log "  No <Cmdline> text - skipping."
+            $skipCount++; continue
+        }
+
+        # Acceptable exit codes: 0 plus Windows reboot codes plus whatever rc="" lists
+        $rcOk = New-Object System.Collections.Generic.HashSet[int64]
+        [void]$rcOk.Add(0); [void]$rcOk.Add(3010); [void]$rcOk.Add(1641)
+        if ($installNode.rc) {
+            foreach ($r in (([string]$installNode.rc) -split ',')) {
+                $r = $r.Trim()
+                if ($r -match '^-?\d+$') { [void]$rcOk.Add([int64]$r) }
+            }
+        }
+
+        $installCmd = $installCmdRaw.Replace('%PACKAGEPATH%', $packagePath).Replace('%WINDOWS%', $env:WINDIR)
+
+        # BIOS packages (PackageType=3): download is done, but defer the install
+        # itself until after every other package has finished. BIOS updaters pop
+        # their own GUI which would otherwise stall the rest of the queue.
+        if ($packageType -eq '3') {
+            Log "  BIOS package - install deferred until end of run."
+            Log "  Deferred install: $installCmd"
+            $deferredBios.Add([pscustomobject]@{
+                Index       = $pkgIdx
+                Title       = $title
+                Category    = $category
+                Version     = $pkgVer
+                PackagePath = $packagePath
+                InstallCmd  = $installCmd
+                RcOk        = $rcOk
+                RebootType  = $rebootType
+                PackageType = $packageType
+            })
+            continue
+        }
+
+        Log "  Install: $installCmd"
+        SetExtract -Pct $overall -Label "Installing [$pkgIdx/$totalPkgs]: $title"
+
+        # Driver / Firmware / App install. Extract already ran in step 6 if needed.
+        $timeout = if ($packageType -eq '4') { 1800 } else { 1200 }
+        $exit = Invoke-LenovoPackageCommand -Command $installCmd -WorkingDir $packagePath -TimeoutSec $timeout
+        $isOk = $rcOk.Contains([int64]$exit)
+        $statusLabel = if ($isOk) { 'OK' } else { 'FAIL' }
+
+        # Special case: DPInst exit indicates the driver was staged in the driver
+        # store but never bound to a device. Retry via pnputil, which explicitly
+        # tries to bind staged drivers to matching hardware.
+        if (-not $isOk -and (Test-LenovoDPInstStaged -ExitCode $exit)) {
+            Log "  Install exit $exit -> driver staged in store but not bound. Trying pnputil fallback..."
+            $fbOk = Invoke-LenovoPnputilInstall -PackagePath $packagePath
+            if ($fbOk) {
+                Log "  pnputil fallback succeeded - driver re-staged for binding at next PnP scan."
+                $isOk = $true
+                $statusLabel = 'OK-FALLBACK'
+            } else {
+                Log "  pnputil fallback did not succeed."
+            }
+        }
+
+        # Special case: known hardware-not-present codes (e.g. NVIDIA installer
+        # on iGPU-only machines). Lenovo's per-MTM catalog lists every variant's
+        # drivers; a mismatch here is expected, not a failure.
+        if (-not $isOk -and (Test-LenovoHwMismatchCode -ExitCode $exit -Title $title)) {
+            Log "  Install exit $exit -> target hardware not present on this machine."
+            $statusLabel = 'N/A'
+        }
+
+        Log "  Install exit: $exit  [$statusLabel]"
+
+        if ($isOk) {
+            $okCount++
+            if ($exit -eq 3010 -or $exit -eq 1641 -or $rebootType -in @('1','3','4','5')) {
+                $rebootNeeded = $true
+            }
+        } elseif ($statusLabel -eq 'N/A') {
+            $naCount++
+        } else {
+            $failCount++
+        }
+        $results.Add([pscustomobject]@{
+            Index=$pkgIdx; Title=$title; Category=$category; Version=$pkgVer; Exit=$exit; Status=$statusLabel
+        })
+
+        Play-Sound -Event "DriverAdded"
+    }
+
+    # ------------------------------------------------------------------
+    # Deferred phase: now run all BIOS installs that we queued above.
+    # By this point every driver/firmware/app has finished, so the BIOS
+    # GUI can take over the screen without interrupting anything.
+    # ------------------------------------------------------------------
+    if ($deferredBios.Count -gt 0 -and -not $SkipInstall -and -not (Test-Cancelled)) {
+        Log ""
+        Log "=== DEFERRED PHASE: $($deferredBios.Count) BIOS package(s) ==="
+        SetProgress 96
+        $biosIdx = 0
+        foreach ($b in $deferredBios) {
+            $biosIdx++
+            if (Test-Cancelled) { Log "Cancelled before BIOS install $biosIdx/$($deferredBios.Count)."; break }
+            Log ""
+            Log "----- DEFERRED BIOS [$biosIdx/$($deferredBios.Count)] $($b.Title) (v$($b.Version)) -----"
+            SetExtract -Pct 100 -Label "BIOS [$biosIdx/$($deferredBios.Count)]: $($b.Title)"
+
+            # Extract already ran during the main loop's step 6, so go straight to install.
+            Log "  Install: $($b.InstallCmd)"
+            $bExit = Invoke-LenovoPackageCommand -Command $b.InstallCmd -WorkingDir $b.PackagePath -TimeoutSec 1800
+            $bOk   = $b.RcOk.Contains([int64]$bExit)
+            $bStatus = if ($bOk) { 'OK' } else { 'FAIL' }
+            Log "  Install exit: $bExit  [$bStatus]"
+
+            if ($bOk) {
+                $okCount++
+                if ($bExit -eq 3010 -or $bExit -eq 1641 -or $b.RebootType -in @('1','3','4','5')) {
+                    $rebootNeeded = $true
+                }
+            } else {
+                $failCount++
+            }
+            $results.Add([pscustomobject]@{
+                Index=$b.Index; Title=$b.Title; Category=$b.Category; Version=$b.Version; Exit=$bExit; Status=$bStatus
+            })
+            Play-Sound -Event "DriverAdded"
+        }
+    }
+
+    # Final pass: kick a PnP rescan so any drivers staged in the store (DPInst
+    # fallback path, plus anything else) get matched to their devices.
+    if (-not $SkipInstall -and -not (Test-Cancelled)) {
+        Invoke-LenovoPnpRescan
+        # If anything still isn't bound, force-retry every INF in the consumer
+        # pkg tree to give Windows one more chance to find a match.
+        Invoke-LenovoForceBindUnbound -PkgRoot $pkgRoot
+    }
+
+    # Summary
+    Log ""
+    Log "=== LENOVO CONSUMER CATALOG SUMMARY ==="
+    Log "Machine type: $MachineType  OS: $OsCode"
+    Log "Total packages:     $totalPkgs"
+    Log "Installed:          $okCount"
+    Log "Already installed:  $alreadyInstalledCount  (detected via <DetectInstall>)"
+    Log "Dock packages:      $dockSkipCount  (skipped by policy)"
+    Log "Not applicable:     $naCount  (hardware not present)"
+    Log "Failed:             $failCount"
+    Log "Skipped (no data):  $skipCount"
+    Log "BIOS deferred:      $($deferredBios.Count)"
+    if ($rebootNeeded) { Log "*** REBOOT REQUIRED to finalize one or more updates ***" }
+    foreach ($r in $results) {
+        $mark = switch ($r.Status) {
+            'OK'                { '[OK]  ' }
+            'OK-FALLBACK'       { '[OK*] ' }
+            'DOWNLOAD-ONLY'     { '[DL]  ' }
+            'ALREADY-INSTALLED' { '[SKIP]' }
+            'SKIPPED-DOCK'      { '[DOCK]' }
+            'N/A'               { '[N/A] ' }
+            'N/A-NO-HW'         { '[N/A] ' }
+            default             { '[FAIL]' }
+        }
+        $exitTxt = if ($null -eq $r.Exit) { '-' } else { "exit $($r.Exit)" }
+        Log "  $mark [$($r.Index)/$totalPkgs] $($r.Category) - $($r.Title) (v$($r.Version)) $exitTxt"
+    }
+
+    $script:AnalyticsInfCount = $okCount
+    SetProgress 100
+    SetExtract -Pct 100 -Label "Done - $okCount installed, $alreadyInstalledCount already current"
+    Stop-ExSpinner      -Success ($failCount -eq 0)
+    Stop-OverallSpinner -Success ($failCount -eq 0)
+
+    # Treat the run as a success if we either installed something OR confirmed
+    # everything was already up to date OR detected hardware-mismatch correctly.
+    return (($okCount + $alreadyInstalledCount + $naCount) -gt 0)
+}
+
 function Start-LenovoDriverInstall {
     param([string]$DriverRoot)
 
@@ -1589,11 +2677,32 @@ function Start-LenovoDriverInstall {
 
     try { $script:AnalyticsSerial = (Get-CimInstance Win32_BIOS).SerialNumber.Trim() } catch {}
 
-    $winVer     = (Get-CimInstance Win32_OperatingSystem).Version
-    $osAttr     = if ($winVer -match "^10\.0\.2") { "win11" } else { "win10" }
-    $osFallback = if ($osAttr -eq "win11") { "win10" } else { "win11" }
-    Log "Detected OS tag: $osAttr"
+    # BuildNumber is the unambiguous Win10 vs Win11 discriminator (>=22000 = Win11).
+    $buildNum = 0
+    try { $buildNum = [int](Get-CimInstance Win32_OperatingSystem).BuildNumber } catch {}
+    $osCode     = if ($buildNum -ge 22000) { 'Win11' } else { 'Win10' }
+    $osAttr     = $osCode.ToLower()  # 'win10' or 'win11' for the legacy SCCM-pack code below
+    $osFallback = if ($osAttr -eq 'win11') { 'win10' } else { 'win11' }
+    Log "Detected OS: $osCode (build $buildNum)"
 
+    # ------------------------------------------------------------------
+    # PATH 1: Consumer catalog (Lenovo System Update mechanism)
+    #   This is the catalog that ALSO covers ThinkBook/IdeaPad/consumer
+    #   models missing from catalogv2.xml. Try it first.
+    # ------------------------------------------------------------------
+    SetProgress 5
+    $consumerOK = Start-LenovoConsumerCatalogInstall -MachineType $machineType -OsCode $osCode -DriverRoot $DriverRoot
+    if ($consumerOK) {
+        Log "Consumer catalog flow succeeded - skipping legacy SCCM pack path."
+        return $true
+    }
+    Log "Consumer catalog yielded nothing - falling back to legacy SCCM driver pack..."
+    SetProgress 15
+
+    # ------------------------------------------------------------------
+    # PATH 2: Legacy SCCM driver pack (catalogv2.xml)
+    #   Original behaviour - kept as fallback for older / niche models.
+    # ------------------------------------------------------------------
     Log "Fetching Lenovo catalogv2.xml..."
     $catalogFile = Join-Path $env:TEMP "lenovo_catalogv2.xml"
     if (-not (Invoke-CurlDownload -Url "https://download.lenovo.com/cdrt/td/catalogv2.xml" -OutFile $catalogFile)) {
@@ -2426,6 +3535,7 @@ function Start-Install {
     } else { 0 }
     Log "Missing drivers AFTER  install: $($script:AnalyticsMissingAfter)"
     Log "Devices resolved by this install: $missingDelta"
+    Write-MissingDriverDetails
 
     if ($script:CancelRequested) { Send-AnalyticsEvent -Result "cancelled" }
 
