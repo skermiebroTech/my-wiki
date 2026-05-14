@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.8.9
+# Version: 1.9.2
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -18,9 +18,66 @@
 #   -Headless      Skip GUI, write to console only (auto-set when any param is passed)
 #   -SkipInstall   Download and extract only, skip pnputil driver installation
 #   -SkipCleanup   Keep C:\DRIVERS after run for inspection
-# huh
+#
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
 #
+# v1.9.2 - Cancel: honour the cancel flag mid-download. In v1.9.1 and prior,
+#           Invoke-CurlDownload's poll loop only watched for $proc.HasExited
+#           and the 3.5-min stall timer - $script:CancelRequested was checked
+#           by callers but never inside the loop itself. So a user clicking
+#           Cancel during a 2 GB driver pack download would set the flag and
+#           log "Cancel requested by user", but curl kept streaming until it
+#           finished naturally (real case: ~60 MB and 3 seconds of additional
+#           download after the click in the 1.9.0 EliteBook 830 G8 log).
+#           Fix: poll loop now checks $script:CancelRequested every 700ms,
+#           kills the curl process via Process.Kill() with a 2-second join,
+#           deletes the partial output file (so a re-run doesn't accidentally
+#           resume a half-baked download via curl's --continue-at), and
+#           returns $false the same as a stall-abort would.
+# v1.9.1 - HP catalog: fix CAB extraction silently failing. On v1.9.0 a real
+#           EliteBook 830 G8 (SysID 880d) reached the catalog path, got a
+#           valid HEAD 200 + a 100 KB download, but expand.exe extracted
+#           nothing - log showed "Adding <cab> to Extraction Queue" then
+#           "Expanding Files Complete" with no XML produced. Two changes:
+#           (1) Pre-flight validation: check downloaded file >=1 KB and that
+#               its first 4 bytes are the CAB magic 'MSCF'. This catches CDN
+#               edges returning small text/HTML error bodies with a 200 OK.
+#           (2) Three-tier extraction with fallback chain:
+#               - Attempt 1: bare `expand <src> <dst-dir>` (canonical MS form)
+#               - Attempt 2: `expand -F:* <src> <dst-dir>` (multi-file CABs)
+#               - Attempt 3: Shell.Application COM CopyHere() (works on any
+#                 Windows with Explorer regardless of expand quirks)
+#           Each attempt clears the dest dir first so we can tell which one
+#           produced the XML. If all three fail, dest contents are dumped to
+#           the log for diagnosis before falling back to the full-pack scraper.
+#           Also: now invoking expand.exe via Start-Process with split
+#           -ArgumentList instead of PowerShell's quote-stuffed `& expand ...`,
+#           which avoids the quoting confusion that contributed to v1.9.0's
+#           silent failure.
+# v1.9.0 - HP: per-machine reference catalog (HPIA backend) for selective driver
+#           downloads. Mirrors the Dell CatalogPC and Lenovo consumer-catalog
+#           patterns. Catalog lives at
+#               https://hpia.hpcloud.hp.com/ref/<sysid>/<sysid>_64_<10|11>.0.<ver>.cab
+#           where <sysid> is the 4-char hex Win32_BaseBoard.Product (e.g. 8B41
+#           covers all G10 EliteBook/ZBook variants). Inside is a single XML
+#           with two key sections: <Devices> (every supported PnP DeviceId on
+#           that platform, each referencing one or more Softpaqs) and
+#           <Solutions> (every Softpaq with direct URL, SHA256, file size, and
+#           SilentInstall command).
+#           Flow: SysID -> fetch CAB w/ OS version fallback chain (25h2 ->
+#           24h2 -> 23h2 -> ...) -> expand.exe -> build O(1) DeviceId and SP
+#           indexes -> enumerate missing devices (ConfigManagerErrorCode != 0)
+#           -> walk each device's HardwareID/CompatibleID array (most-specific
+#           first), also stripping &REV_XX, against the DeviceId index -> filter
+#           matched SPs to "Driver - *" categories only -> total-size guardrail
+#           (HpCatalogBudgetMB, default 800) -> download/SHA256-verify/extract/
+#           SilentInstall each matched SP -> record into AnalyticsInstalledDrivers.
+#           Returns $null on any of: no SystemID, no reference CAB at any tested
+#           OS version, no missing devices, no catalog matches, total exceeds
+#           budget, or zero softpaqs installed. $null falls through to the
+#           existing HP_Driverpack_Matrix scraper (full-pack path) unchanged.
+#           Bonus: SHA256 verification on every download (matrix-path full pack
+#           still uses curl integrity only - could be unified in a future rev).
 # v1.8.9 - Analytics: fix massive over-count of "Installed Drivers" in the
 #           Dell/HP/Surface pnputil path. Lenovo path is already accurate
 #           because it uses per-package vendor exit codes, not pnputil.
@@ -170,7 +227,7 @@ param(
 # Auto-enable headless when any override param is passed
 if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" -or $SkipInstall -or $SkipCleanup) { $Headless = $true }
 
-$ScriptVersion   = "1.8.9"
+$ScriptVersion   = "1.9.2"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -840,6 +897,22 @@ function Invoke-CurlDownload {
     $lastSize = 0; $stall = 0; $prevSize = 0
     while (-not $proc.HasExited) {
         Start-Sleep -Milliseconds 700
+        # Honour cancel mid-download: kill curl immediately so the next ~10MB
+        # don't keep streaming after the user clicked Cancel. Without this,
+        # curl runs to completion (potentially hundreds of MB) while the
+        # caller's Test-Cancelled check just sits waiting for HasExited.
+        if ($script:CancelRequested) {
+            Log "  Cancel detected - killing curl."
+            try { $proc.Kill() } catch {}
+            try { $proc.WaitForExit(2000) | Out-Null } catch {}
+            # Remove the partial file so a retry doesn't try to resume from a
+            # half-baked download (curl --continue-at would otherwise pick it
+            # up and possibly succeed on a Range request from byte N).
+            Remove-Item $OutFile -EA SilentlyContinue
+            SetDownload -Pct 0 -Label "Cancelled."
+            Stop-DlSpinner -Success $false
+            return $false
+        }
         $sz = if (Test-Path $OutFile) { (Get-Item $OutFile -EA SilentlyContinue).Length } else { 0 }
         if ($sz -gt $lastSize) { $stall = 0; $lastSize = $sz } else { $stall++ }
         $mbDone    = [math]::Round($sz / 1MB, 1)
@@ -1638,6 +1711,578 @@ function Start-DellDriverInstall {
 }
 
 # =========================
+# HP REFERENCE CATALOG (HPIA backend)
+# =========================
+# v1.9.0+: per-machine reference XML from HP's HPIA backend, used to download
+# only the Softpaqs that match this machine's missing devices.
+#
+# Pipeline:
+#   1. SystemID via Win32_BaseBoard.Product (4-char hex, e.g. "8B41").
+#   2. Fetch https://hpia.hpcloud.hp.com/ref/<sysid>/<sysid>_64_<10|11>.0.<ver>.cab
+#      with a fallback chain on the OS code (25h2 -> 24h2 -> 23h2 -> ...).
+#   3. expand.exe the CAB to a single XML.
+#   4. Build O(1) lookup tables: catalog DeviceId -> SP IDs, SP ID -> metadata.
+#   5. Enumerate missing devices (ConfigManagerErrorCode != 0), match each
+#      device's HardwareID/CompatibleID array against the DeviceId index.
+#   6. Filter matched SPs to "Driver - *" categories (skip dock firmware,
+#      security software, BIOS, diagnostics - these aren't what a missing-driver
+#      run is for, and they're huge).
+#   7. Total download budget guardrail: if matched SPs exceed
+#      HP_CATALOG_BUDGET_MB, fall back to the full driver pack (it'll usually
+#      be smaller). Defaults to 800 MB.
+#   8. Download each SP, SHA256-verify, extract via 7-Zip (HP softpaqs are
+#      self-extracting), run the SilentInstall command from the catalog.
+#   9. Record each successfully-installed SP into AnalyticsInstalledDrivers.
+#
+# Returns: $true on success, $null to signal "fall back to full driver pack".
+# Caller (Start-HpDriverInstall) treats $null as fall-through.
+
+$script:HpCatalogBudgetMB = 800   # tuning knob - over this, prefer full pack
+$script:HpHpUpSuccessCodes = @(0, 1, 1641, 3010)  # HPUP/HpFirmwareUpdRec exit-OK set
+
+function Get-HpSystemId {
+    # The 4-char hex platform ID is in Win32_BaseBoard.Product per HPIA docs.
+    try {
+        $sysid = (Get-CimInstance Win32_BaseBoard -EA Stop).Product.Trim().ToLower()
+        if ($sysid -match '^[0-9a-f]{4}$') { return $sysid }
+        Log "  HP catalog: BaseBoard.Product '$sysid' isn't a 4-char hex SystemID - skipping catalog path."
+        return $null
+    } catch {
+        Log "  HP catalog: cannot read BaseBoard.Product - $($_.Exception.Message)"
+        return $null
+    }
+}
+
+function Get-HpCatalogUrlCandidates {
+    param([string]$SysId)
+    # Win32_OperatingSystem.Version reports 10.0.x for both Win10 AND Win11.
+    # HPIA's URL prefix is split by build (>=22000 = Win11 = "11.0.").
+    $build = 0
+    $display = $null
+    try {
+        $build = [int](Get-CimInstance Win32_OperatingSystem -EA Stop).BuildNumber
+    } catch {}
+    try {
+        $display = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -EA Stop).DisplayVersion
+    } catch {}
+    $prefix = if ($build -ge 22000) { '11.0' } else { '10.0' }
+
+    # Build fallback chain: machine's DisplayVersion first, then progressively
+    # older Win11 / Win10 codes. Lowercase to match observed naming.
+    $candidates = @()
+    if ($display) {
+        $dv = $display.ToLower()
+        $candidates += "https://hpia.hpcloud.hp.com/ref/$SysId/${SysId}_64_${prefix}.${dv}.cab"
+    }
+    $win11Versions = @('25h2','24h2','23h2','22h2','21h2')
+    $win10Versions = @('22h2','21h2','21h1','20h2','2004','1909','1903','1809','1803')
+    $list = if ($build -ge 22000) { $win11Versions } else { $win10Versions }
+    foreach ($v in $list) {
+        $u = "https://hpia.hpcloud.hp.com/ref/$SysId/${SysId}_64_${prefix}.${v}.cab"
+        if ($candidates -notcontains $u) { $candidates += $u }
+    }
+    return $candidates
+}
+
+function Get-HpReferenceCatalogXml {
+    param(
+        [string]$SysId,
+        [string]$DriverRoot
+    )
+    # Returns parsed [xml] or $null. Probes candidate URLs with cheap HEAD
+    # requests (Invoke-CurlDownload retries 10 times, way too slow for
+    # probing), then full-downloads only the first one that returns 2xx.
+    $candidates = Get-HpCatalogUrlCandidates -SysId $SysId
+    if (-not $candidates -or $candidates.Count -eq 0) {
+        Log "  HP catalog: no candidate URLs built - skipping."
+        return $null
+    }
+
+    $cabPath = Join-Path $env:TEMP "hp_ref_${SysId}.cab"
+    $xmlDir  = Join-Path $env:TEMP "hp_ref_${SysId}_x"
+    Remove-Item $cabPath -EA SilentlyContinue
+    if (Test-Path $xmlDir) { Remove-Item $xmlDir -Recurse -Force -EA SilentlyContinue }
+
+    $winnerUrl = $null
+    foreach ($u in $candidates) {
+        if (Test-Cancelled) { return $null }
+        # HEAD probe: --head + --fail makes a 404 exit non-zero immediately;
+        # --max-time bounds the worst case per URL to 10 seconds total.
+        $code = & curl.exe --silent --head --fail --location `
+                           --max-time 10 --connect-timeout 5 `
+                           --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" `
+                           --output NUL `
+                           --write-out "%{http_code}" "$u" 2>$null
+        $exitOk = ($LASTEXITCODE -eq 0)
+        if ($exitOk -and $code -match '^2\d\d$') {
+            Log "  HEAD 200: $u"
+            $winnerUrl = $u
+            break
+        } else {
+            Log "  HEAD ${code}: $u"
+        }
+    }
+    if (-not $winnerUrl) {
+        Log "  HP catalog: no reference CAB found for SystemID $SysId at any tested OS version."
+        return $null
+    }
+
+    Log "  Downloading reference CAB..."
+    if (-not (Invoke-CurlDownload -Url $winnerUrl -OutFile $cabPath)) {
+        Log "  HP catalog: HEAD succeeded but full download failed - skipping."
+        return $null
+    }
+    if (Test-Cancelled) { return $null }
+
+    # Validate the download before trying to expand it. Some HP CDN edges return
+    # a small HTML/text error body with a 200 status code (e.g. geo-blocking
+    # surrogates). Quick sanity: a real reference CAB starts with "MSCF" magic.
+    $cabSize = (Get-Item $cabPath).Length
+    Log "    Downloaded $([math]::Round($cabSize/1KB,1)) KB"
+    if ($cabSize -lt 1024) {
+        $preview = ''
+        try { $preview = (Get-Content $cabPath -TotalCount 1 -EA SilentlyContinue) -as [string] } catch {}
+        Log "  HP catalog: download too small to be a real CAB (got $cabSize bytes). Preview: '$preview'"
+        Log "  Skipping catalog path."
+        return $null
+    }
+    $magic = $null
+    try {
+        $fs = [System.IO.File]::OpenRead($cabPath)
+        $buf = New-Object byte[] 4
+        [void]$fs.Read($buf, 0, 4)
+        $fs.Close()
+        $magic = -join ($buf | ForEach-Object { [char]$_ })
+    } catch {}
+    if ($magic -ne 'MSCF') {
+        Log "  HP catalog: downloaded file isn't a CAB (magic='$magic', expected 'MSCF'). Skipping catalog path."
+        return $null
+    }
+
+    New-Item -ItemType Directory -Path $xmlDir -Force | Out-Null
+    # expand.exe is notoriously fussy about argument passing. Different
+    # combinations work depending on PowerShell quoting behavior. Try the
+    # cleanest form first (Start-Process with split args, no -F filter),
+    # check for output, then fall back to alternative forms if needed.
+    function _TryExpand {
+        param([string[]]$Args)
+        $expandLog = Join-Path $env:TEMP "hp_expand_${SysId}.log"
+        Remove-Item $expandLog -EA SilentlyContinue
+        try {
+            $proc = Start-Process -FilePath "expand.exe" -ArgumentList $Args `
+                -NoNewWindow -Wait -PassThru `
+                -RedirectStandardOutput $expandLog -EA Stop
+            if (Test-Path $expandLog) {
+                foreach ($l in (Get-Content $expandLog)) { Log "    expand: $l" }
+                Remove-Item $expandLog -EA SilentlyContinue
+            }
+            return $proc.ExitCode
+        } catch {
+            Log "    expand error: $($_.Exception.Message)"
+            return -1
+        }
+    }
+
+    # Attempt 1: bare "expand <src> <dst-dir>" - the canonical form per MS docs.
+    Log "    Extracting via: expand <src> <dst-dir>"
+    $null = _TryExpand @($cabPath, $xmlDir)
+    $xmlFile = Get-ChildItem $xmlDir -Filter "*.xml" -Recurse -EA SilentlyContinue | Select-Object -First 1
+
+    # Attempt 2: with -F:* filter (some Windows builds need it for multi-file CABs).
+    if (-not $xmlFile) {
+        Log "    Retrying with: expand -F:* <src> <dst-dir>"
+        Get-ChildItem $xmlDir -EA SilentlyContinue | Remove-Item -Recurse -Force -EA SilentlyContinue
+        $null = _TryExpand @("-F:*", $cabPath, $xmlDir)
+        $xmlFile = Get-ChildItem $xmlDir -Filter "*.xml" -Recurse -EA SilentlyContinue | Select-Object -First 1
+    }
+
+    # Attempt 3: Shell.Application COM (works on any Windows with Explorer).
+    # CABs are valid Shell namespaces; CopyHere extracts contents to a folder.
+    if (-not $xmlFile) {
+        Log "    Retrying via Shell.Application COM..."
+        Get-ChildItem $xmlDir -EA SilentlyContinue | Remove-Item -Recurse -Force -EA SilentlyContinue
+        try {
+            $shell = New-Object -ComObject Shell.Application
+            $srcFolder = $shell.NameSpace($cabPath)
+            $dstFolder = $shell.NameSpace($xmlDir)
+            if ($srcFolder -and $dstFolder) {
+                # 0x14 = no progress UI + auto-overwrite
+                $dstFolder.CopyHere($srcFolder.Items(), 0x14)
+                # CopyHere is async even when sync'd; wait briefly for files.
+                $wait = 0
+                while (-not (Get-ChildItem $xmlDir -EA SilentlyContinue) -and $wait -lt 30) {
+                    Start-Sleep -Milliseconds 250
+                    $wait++
+                }
+            }
+            [System.Runtime.InteropServices.Marshal]::ReleaseComObject($shell) | Out-Null
+        } catch {
+            Log "    Shell.Application error: $($_.Exception.Message)"
+        }
+        $xmlFile = Get-ChildItem $xmlDir -Filter "*.xml" -Recurse -EA SilentlyContinue | Select-Object -First 1
+    }
+
+    if (-not $xmlFile) {
+        # All three methods failed - log directory contents for diagnosis.
+        $contents = @(Get-ChildItem $xmlDir -Recurse -EA SilentlyContinue)
+        Log "  HP catalog: extraction failed by all methods. Dest dir contains $($contents.Count) item(s):"
+        foreach ($f in $contents | Select-Object -First 10) {
+            Log "    - $($f.FullName)  ($([math]::Round($f.Length/1KB,1)) KB)"
+        }
+        Log "  Skipping catalog path."
+        return $null
+    }
+    Log "  Parsing reference XML: $($xmlFile.Name) ($([math]::Round($xmlFile.Length/1MB,1)) MB)"
+    try {
+        [xml]$catalog = Get-Content $xmlFile.FullName -Raw -Encoding UTF8
+        return $catalog
+    } catch {
+        Log "  HP catalog: XML parse failed - $($_.Exception.Message)"
+        return $null
+    }
+}
+
+function Get-HpMissingDevicesWithHwIds {
+    # Same enum approach as Start-DellIndividualDriverInstall, but we keep the
+    # full HardwareID + CompatibleID arrays since HP matches by full DeviceId
+    # string rather than just VEN/DEV.
+    $list = New-Object System.Collections.Generic.List[object]
+    try {
+        $entities = @(Get-CimInstance Win32_PnPEntity -EA Stop |
+            Where-Object { $_.ConfigManagerErrorCode -ne 0 })
+    } catch {
+        Log "  HP catalog: cannot enumerate Win32_PnPEntity - $($_.Exception.Message)"
+        return $list
+    }
+    foreach ($e in $entities) {
+        $hwIds   = @()
+        $compIds = @()
+        try {
+            $pnp = Get-PnpDevice -InstanceId $e.DeviceID -EA Stop
+            if ($pnp.HardwareID)   { $hwIds   = @($pnp.HardwareID) }
+            if ($pnp.CompatibleID) { $compIds = @($pnp.CompatibleID) }
+        } catch {
+            # Get-PnpDevice can fail for some phantom entries; fall back to
+            # registry like the Dell path does for max compatibility.
+            try {
+                $reg = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Enum\$($e.DeviceID)" -EA Stop
+                if ($reg.HardwareID)   { $hwIds   = @($reg.HardwareID) }
+                if ($reg.CompatibleIDs) { $compIds = @($reg.CompatibleIDs) }
+            } catch {}
+        }
+        $list.Add([pscustomobject]@{
+            Name         = if ($e.Name)    { $e.Name }    elseif ($e.Caption) { $e.Caption } else { '(unnamed)' }
+            DeviceID     = $e.DeviceID
+            HardwareIDs  = $hwIds
+            CompatibleIDs = $compIds
+        })
+    }
+    return $list
+}
+
+function Build-HpDeviceIndex {
+    param([xml]$Catalog)
+    # Map: upper(DeviceId) -> list of SP IDs.
+    # [xml] auto-decodes &amp; to & so we get the raw form Windows uses.
+    $index = @{}
+    foreach ($dev in $Catalog.SelectNodes('/ImagePal/Devices/Device')) {
+        $did = $dev.SelectSingleNode('DeviceId')
+        if (-not $did -or [string]::IsNullOrWhiteSpace($did.InnerText)) { continue }
+        $key = $did.InnerText.Trim().ToUpper()
+        $sps = New-Object System.Collections.Generic.List[string]
+        foreach ($u in $dev.SelectNodes('Solutions/UpdateInfo')) {
+            $idref = $u.GetAttribute('IdRef')
+            if ($idref) { $sps.Add($idref) }
+        }
+        if ($sps.Count -gt 0) {
+            if ($index.ContainsKey($key)) {
+                foreach ($s in $sps) { if ($index[$key] -notcontains $s) { $index[$key] += $s } }
+            } else {
+                $index[$key] = @($sps)
+            }
+        }
+    }
+    return $index
+}
+
+function Build-HpSolutionIndex {
+    param([xml]$Catalog)
+    # Map: SP ID -> properties hashtable. Defensive on null fields - if the
+    # catalog schema drifts or an entry is malformed, skip that one entry
+    # rather than crashing the whole index build.
+    $index = @{}
+    $skipped = 0
+    foreach ($sol in $Catalog.SelectNodes('/ImagePal/Solutions/UpdateInfo')) {
+        try {
+            $id = $sol.SelectSingleNode('Id')
+            if (-not $id -or [string]::IsNullOrWhiteSpace($id.InnerText)) { $skipped++; continue }
+            $sp = $id.InnerText.Trim()
+
+            $urlNode  = $sol.SelectSingleNode('Url')
+            $shaNode  = $sol.SelectSingleNode('SHA256')
+            $sizeNode = $sol.SelectSingleNode('Size')
+            $instNode = $sol.SelectSingleNode('SilentInstall')
+            $nameNode = $sol.SelectSingleNode('Name')
+            $catNode  = $sol.SelectSingleNode('Category')
+            $verNode  = $sol.SelectSingleNode('Version')
+
+            $url = if ($urlNode) { $urlNode.InnerText } else { '' }
+            # Catalog URLs are schemeless: prepend https:// (HP serves both HTTP and HTTPS).
+            if ($url -and -not ($url -match '^https?://')) { $url = "https://$url" }
+
+            $size = 0
+            if ($sizeNode -and $sizeNode.InnerText -match '^\d+$') {
+                $size = [int64]$sizeNode.InnerText
+            }
+
+            $index[$sp] = @{
+                Name          = if ($nameNode) { $nameNode.InnerText } else { '(unnamed)' }
+                Category      = if ($catNode)  { $catNode.InnerText  } else { '' }
+                Version       = if ($verNode)  { $verNode.InnerText  } else { '' }
+                Url           = $url
+                SHA256        = if ($shaNode)  { $shaNode.InnerText  } else { '' }
+                Size          = $size
+                SilentInstall = if ($instNode) { $instNode.InnerText } else { '' }
+            }
+        } catch {
+            $skipped++
+        }
+    }
+    if ($skipped -gt 0) {
+        Log "  HP catalog: skipped $skipped malformed Solutions entries during indexing."
+    }
+    return $index
+}
+
+function Find-HpApplicableSoftpaqs {
+    param(
+        [object[]]$MissingDevices,
+        [hashtable]$DeviceIndex,
+        [hashtable]$SolutionIndex
+    )
+    # For each missing device, walk its HardwareID + CompatibleID arrays in order
+    # (most-specific first - that's how Windows presents them) and look up each
+    # in the catalog's DeviceId index. First match per device wins.
+    #
+    # Returns deduplicated list of SP entries, only Driver categories.
+    $matched = [ordered]@{}   # SP ID -> SP entry
+    $unmatchedDevices = New-Object System.Collections.Generic.List[string]
+
+    foreach ($dev in $MissingDevices) {
+        $deviceHit = $false
+        $allIds = @()
+        if ($dev.HardwareIDs)   { $allIds += @($dev.HardwareIDs) }
+        if ($dev.CompatibleIDs) { $allIds += @($dev.CompatibleIDs) }
+        # Also try the bare DeviceID (e.g. "ACPI\HPIC000C" type entries match this directly).
+        if ($dev.DeviceID) { $allIds += $dev.DeviceID }
+
+        foreach ($rawId in $allIds) {
+            if ([string]::IsNullOrWhiteSpace($rawId)) { continue }
+            $candidates = @($rawId.Trim().ToUpper())
+            # Also try stripping the &REV_XX suffix - catalog often omits it.
+            $stripped = $candidates[0] -replace '&REV_[0-9A-F]+$', ''
+            if ($stripped -ne $candidates[0]) { $candidates += $stripped }
+
+            foreach ($key in $candidates) {
+                if ($DeviceIndex.ContainsKey($key)) {
+                    foreach ($spId in $DeviceIndex[$key]) {
+                        if (-not $matched.Contains($spId) -and $SolutionIndex.ContainsKey($spId)) {
+                            $entry = $SolutionIndex[$spId]
+                            # Filter: only "Driver - *" categories. Skip docks, BIOS,
+                            # security software, diagnostics, etc. They're either
+                            # huge or not what a missing-driver run is for.
+                            if ($entry.Category -like 'Driver - *') {
+                                $matched[$spId] = $entry + @{ Id = $spId; MatchedDevice = $dev.Name }
+                            }
+                        }
+                    }
+                    Log "    Matched device '$($dev.Name)' via '$key'"
+                    $deviceHit = $true
+                    break
+                }
+            }
+            if ($deviceHit) { break }
+        }
+        if (-not $deviceHit) {
+            $unmatchedDevices.Add("$($dev.Name) [$($dev.DeviceID)]")
+        }
+    }
+    return @{
+        Softpaqs   = @($matched.Values)
+        Unmatched  = $unmatchedDevices
+    }
+}
+
+function Install-HpSoftpaq {
+    param(
+        [hashtable]$Sp,
+        [string]$DriverRoot,
+        [int]$Index,
+        [int]$Total
+    )
+    # Download -> SHA256 verify -> extract -> run SilentInstall.
+    # Returns $true on success, $false on any failure.
+    Log ""
+    Log "----- HP CATALOG [$Index/$Total] $($Sp.Name) (v$($Sp.Version)) -----"
+    Log "  SP ID:   $($Sp.Id)"
+    Log "  Category:$($Sp.Category)"
+    Log "  Size:    $([math]::Round($Sp.Size/1MB,1)) MB"
+    Log "  Install: $($Sp.SilentInstall)"
+
+    if (-not $Sp.Url) { Log "  ERROR: no URL in catalog - skipping."; return $false }
+    if (-not $Sp.SilentInstall -or $Sp.SilentInstall -eq 'NA') {
+        Log "  No SilentInstall command - skipping (would need user interaction)."
+        return $false
+    }
+
+    $spFile = Join-Path $DriverRoot "$($Sp.Id).exe"
+    if (-not (Invoke-CurlDownload -Url $Sp.Url -OutFile $spFile)) {
+        Log "  Download failed."
+        return $false
+    }
+    if (Test-Cancelled) { return $false }
+
+    Log "  Verifying SHA256..."
+    $actual = (Get-FileHash -Path $spFile -Algorithm SHA256).Hash.ToUpper()
+    $expect = ($Sp.SHA256).ToUpper()
+    if ($actual -ne $expect) {
+        Log "  SHA256 mismatch: got $actual  expected $expect - skipping."
+        return $false
+    }
+    Log "  SHA256 OK."
+
+    # Extract via 7-Zip pass-1 (works on HP self-extracting softpaqs).
+    $extractDir = Join-Path $DriverRoot "$($Sp.Id)_x"
+    if (Test-Path $extractDir) { Remove-Item $extractDir -Recurse -Force -EA SilentlyContinue }
+    Log "  Extracting to $extractDir..."
+    Start-PackExtraction -PackFile $spFile -DestPath $extractDir -StallLimitSec 180 -Vendor "HP"
+    if (-not (Test-Path $extractDir) -or @(Get-ChildItem $extractDir -EA SilentlyContinue).Count -eq 0) {
+        Log "  Extraction produced no files - skipping."
+        return $false
+    }
+
+    # Resolve SilentInstall command. Most HP softpaqs use HPUP.exe at the
+    # extraction root; some put the installer in a subdir. If the exact command
+    # binary isn't at the root, search recursively for it.
+    $cmdBinary = $Sp.SilentInstall.Trim()
+    if ($cmdBinary -match '^"([^"]+)"') { $cmdBinary = $matches[1] }
+    elseif ($cmdBinary -match '^(\S+)')  { $cmdBinary = $matches[1] }
+    $cmdBinName = [System.IO.Path]::GetFileName($cmdBinary)
+    $cmdRoot    = $extractDir
+    if (-not (Test-Path (Join-Path $cmdRoot $cmdBinName))) {
+        $found = Get-ChildItem $extractDir -Recurse -Filter $cmdBinName -EA SilentlyContinue | Select-Object -First 1
+        if ($found) {
+            $cmdRoot = $found.Directory.FullName
+            Log "  Note: $cmdBinName not at root, running from subdir: $cmdRoot"
+        } else {
+            Log "  WARNING: $cmdBinName not found in extraction - install will likely fail."
+        }
+    }
+
+    Log "  Running: $($Sp.SilentInstall)"
+    $exit = Invoke-LenovoPackageCommand -Command $Sp.SilentInstall -WorkingDir $cmdRoot -TimeoutSec 900
+    Log "  Exit: $exit"
+    if ($script:HpHpUpSuccessCodes -contains $exit) {
+        Log "  Install OK."
+        $null = $script:AnalyticsInstalledDrivers.Add("$($Sp.Name) (v$($Sp.Version))")
+        if ($exit -eq 3010 -or $exit -eq 1641) { Log "  (reboot required to finalize)" }
+        return $true
+    }
+    Log "  Install reported failure (exit $exit)."
+    return $false
+}
+
+function Start-HpReferenceCatalogInstall {
+    param([string]$DriverRoot)
+    # Returns:
+    #   $true  - catalog path handled the install (full or partial)
+    #   $null  - couldn't use catalog path; caller should fall back to full pack
+    # Never returns $false - any in-catalog failure still counts as "handled" if
+    # at least one SP installed. If zero installed, we return $null to give the
+    # full-pack fallback a chance.
+    #
+    # Whole flow is wrapped in try/catch: anything unexpected (schema drift,
+    # network hiccup mid-parse, etc.) returns $null so the caller can fall
+    # through to the legacy scraper rather than dying.
+    Log "--- HP reference catalog (HPIA backend) ---"
+    try {
+        $sysid = Get-HpSystemId
+        if (-not $sysid) { return $null }
+        Log "SystemID: $sysid"
+
+        $catalog = Get-HpReferenceCatalogXml -SysId $sysid -DriverRoot $DriverRoot
+        if (-not $catalog) { return $null }
+
+        Log "Indexing catalog..."
+        $devIdx = Build-HpDeviceIndex   -Catalog $catalog
+        $solIdx = Build-HpSolutionIndex -Catalog $catalog
+        Log "  Devices in catalog:   $($devIdx.Count)"
+        Log "  Solutions in catalog: $($solIdx.Count)"
+
+        Log "Enumerating missing devices on this machine..."
+        $missing = Get-HpMissingDevicesWithHwIds
+        Log "  Missing devices: $($missing.Count)"
+        if ($missing.Count -eq 0) {
+            Log "  No missing devices - nothing for the catalog path to do."
+            return $null    # let full-pack path handle "no missing drivers" prompt
+        }
+        foreach ($m in $missing) {
+            Log "  - $($m.Name) [$($m.DeviceID)]"
+        }
+
+        Log "Matching missing devices against catalog..."
+        $result   = Find-HpApplicableSoftpaqs -MissingDevices $missing -DeviceIndex $devIdx -SolutionIndex $solIdx
+        $softpaqs = @($result.Softpaqs)
+        if ($softpaqs.Count -eq 0) {
+            Log "  No catalog matches for any missing device - falling back to full pack."
+            return $null
+        }
+
+        $totalMB = [math]::Round((($softpaqs | Measure-Object -Property Size -Sum).Sum) / 1MB, 1)
+        Log "Matched $($softpaqs.Count) driver Softpaq(s), total $totalMB MB:"
+        foreach ($sp in $softpaqs) {
+            Log "  $($sp.Id)  $([math]::Round($sp.Size/1MB,1).ToString().PadLeft(7)) MB  $($sp.Category) - $($sp.Name)"
+        }
+        if ($result.Unmatched.Count -gt 0) {
+            Log "Unmatched missing devices ($($result.Unmatched.Count)): catalog has no driver for these"
+            foreach ($u in $result.Unmatched) { Log "  - $u" }
+        }
+        if ($totalMB -gt $script:HpCatalogBudgetMB) {
+            Log "Catalog total ($totalMB MB) exceeds budget ($($script:HpCatalogBudgetMB) MB) - falling back to full pack."
+            return $null
+        }
+
+        if (-not (Test-Path $DriverRoot)) { New-Item -Path $DriverRoot -ItemType Directory -Force | Out-Null }
+
+        $okCount = 0
+        $i = 0
+        foreach ($sp in $softpaqs) {
+            $i++
+            if (Test-Cancelled) { return $false }
+            SetProgress (30 + [int](($i / $softpaqs.Count) * 65))
+            SetExtract -Pct ([int](($i / $softpaqs.Count) * 100)) -Label "Catalog SP [$i/$($softpaqs.Count)]: $($sp.Name)"
+            if (Install-HpSoftpaq -Sp $sp -DriverRoot $DriverRoot -Index $i -Total $softpaqs.Count) {
+                $okCount++
+            }
+        }
+
+        Log ""
+        Log "=== HP CATALOG SUMMARY ==="
+        Log "Installed: $okCount / $($softpaqs.Count)"
+
+        if ($okCount -eq 0) {
+            Log "No softpaqs installed via catalog - falling back to full pack."
+            return $null
+        }
+        return $true
+    } catch {
+        Log "  HP catalog: unexpected error - $($_.Exception.Message)"
+        Log "  Falling back to full pack."
+        return $null
+    }
+}
+
+# =========================
 # HP
 # =========================
 function Start-HpDriverInstall {
@@ -1648,6 +2293,14 @@ function Start-HpDriverInstall {
     SetExtract  -Pct 0 -Label "Waiting..."
 
     try { $script:AnalyticsSerial = (Get-CimInstance Win32_BIOS).SerialNumber.Trim() } catch {}
+
+    # v1.9.0: try the HPIA reference catalog first.
+    # Returns $true if it handled the install, $null to fall through to the
+    # full-pack matrix scraper below. $false reserved for explicit cancellation.
+    $catalogResult = Start-HpReferenceCatalogInstall -DriverRoot $DriverRoot
+    if ($catalogResult -eq $true)  { return $true }
+    if ($catalogResult -eq $false) { return $false }
+    Log "Falling back to full-pack driver matrix..."
 
     $osBuild = $null; $isWin11 = $false
     try {
