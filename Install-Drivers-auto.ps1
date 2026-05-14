@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.8.8
+# Version: 1.8.9
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -21,6 +21,25 @@
 # huh
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
 #
+# v1.8.9 - Analytics: fix massive over-count of "Installed Drivers" in the
+#           Dell/HP/Surface pnputil path. Lenovo path is already accurate
+#           because it uses per-package vendor exit codes, not pnputil.
+#           Root cause: pnputil /add-driver /install returns exit 0 for BOTH
+#           "added to driver store" AND "actually bound to a matching device".
+#           OEM packs include drivers for every SKU/CPU variant, so on any
+#           given machine the majority of INFs are staged-but-unbound. v1.8.8
+#           logged all of them. Example: HP EliteBook 830 G10 reported 331
+#           "installed" with only 1 missing-driver resolved.
+#           Fix: parse pnputil stdout for an explicit device-bind marker
+#           before appending the INF name. Looks for one of three known
+#           variations: "Installed driver package on matching", "Installed on
+#           N device(s)" (N > 0), or "Successfully installed driver". INFs
+#           added to the store but never bound are no longer recorded. The
+#           total now tracks much closer to the missing-driver delta.
+#           Caveat: pnputil's exact output strings have varied across Windows
+#           versions; the parser uses a lenient OR of known patterns. If a
+#           future Windows version changes the wording, we may under-count
+#           rather than over-count (the failure mode is now safe).
 # v1.8.8 - Analytics: capture which drivers were actually installed, not just the
 #           count. New $script:AnalyticsInstalledDrivers list is populated from
 #           all three install paths:
@@ -151,7 +170,7 @@ param(
 # Auto-enable headless when any override param is passed
 if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" -or $SkipInstall -or $SkipCleanup) { $Headless = $true }
 
-$ScriptVersion   = "1.8.8"
+$ScriptVersion   = "1.8.9"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -958,10 +977,16 @@ function Install-DriversFromPath {
         $out = pnputil /add-driver "`"$($inf.FullName)`"" /install 2>&1
         $infExit = $LASTEXITCODE
         foreach ($l in $out) { Log "  $l" }
-        # Treat success (0), reboot-initiated (1641), and reboot-required (3010)
-        # as "installed". 259 = "newer driver already installed" - don't record.
+        # pnputil returns exit 0 for both "added to driver store" AND "installed
+        # on a matching device". Most INFs in an OEM pack get added to the store
+        # but never bind to a device on this machine - we don't want those in
+        # the analytics. Parse stdout for an explicit device-bind marker; the
+        # exact wording varies by Windows version so we accept any of three.
         if ($infExit -in @(0, 1641, 3010)) {
-            $null = $script:AnalyticsInstalledDrivers.Add($inf.Name)
+            $outText = ($out | Out-String)
+            if ($outText -match 'Installed driver package on matching|Installed on\s+[1-9]\d*\s+device|Successfully installed driver') {
+                $null = $script:AnalyticsInstalledDrivers.Add($inf.Name)
+            }
         }
         Play-Sound -Event "DriverAdded"
         Step-ExSpinner
