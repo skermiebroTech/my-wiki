@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.9.2
+# Version: 1.12.0
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -11,16 +11,112 @@
 #   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -Manufacturer Dell
 #   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -Manufacturer HP -Model "EliteBook x360 1030 G8 Notebook PC"
 #   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -Manufacturer Lenovo -MachineType 20XX -SkipInstall -SkipCleanup
+#   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -TestMode -Diagnostic
+#   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -Silent -NoAnalytics
+#   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -MaxParallelDownloads 5
 #
 # Parameters:
 #   -Manufacturer  Override WMI manufacturer detection (Dell, HP, Lenovo, Microsoft)
 #   -Model         Override WMI model detection
 #   -Headless      Skip GUI, write to console only (auto-set when any param is passed)
+#   -Silent        Like -Headless but ALSO suppresses console output (log file only).
+#                  Forces -Headless on. Useful when launched from another script that
+#                  shouldn't have its stdout polluted, or for unattended scheduled tasks.
+#   -TestMode      Dry-run: detect manufacturer, snapshot missing drivers, fetch catalog
+#                  metadata, but DO NOT download, extract, or install anything that
+#                  mutates the system. Analytics still sent with result="testmode"
+#                  (unless -NoAnalytics). Safe to run on production machines.
+#   -Diagnostic    Verbose logging: extra environment dump, expanded network timings,
+#                  per-step duration logging, full pnputil enum on entry. Doubles log
+#                  size but is invaluable for triaging vendor-catalog regressions.
+#   -NoAnalytics   Disable the Google Sheets webhook entirely. Local analytics JSON
+#                  export is still written to Downloads. Use for offline / air-gapped
+#                  machines or when testing without polluting production telemetry.
+#   -MaxParallelDownloads <int>  v1.11.0 - concurrency cap for parallel downloads
+#                  in the HP per-machine catalog and Dell CatalogPC individual-driver
+#                  paths. Default 3. Clamped to 1..6 (above 6 just thrashes the CDN
+#                  and triggers rate limiting). Has no effect on single-file full
+#                  driver pack downloads.
 #   -SkipInstall   Download and extract only, skip pnputil driver installation
 #   -SkipCleanup   Keep C:\DRIVERS after run for inspection
 #
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
 #
+# Output files written to %USERPROFILE%\Downloads\ (timestamped, one set per run):
+#   DriverInstaller_<ts>.log         - human-readable text log (always)
+#   DriverInstaller_<ts>.events.json - NDJSON structured event log (always)
+#   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
+#   DriverInstaller_<ts>.report.html - install summary report (on completion)
+#
+# v1.11.0 - Parallel downloads + Lenovo Recipe Card priority restored.
+#           (1) Parallel curl downloads via new Invoke-CurlDownloadParallel helper.
+#               Takes an array of {Url, OutFile, Label} items and runs up to
+#               $MaxParallelDownloads curl.exe processes concurrently, polling
+#               them together with the same per-process stall detection
+#               (~3.5 min) and cancel handling as the serial download. On cancel:
+#               every active curl is killed and every partial file deleted in one
+#               pass before returning - same "no broken state" guarantee as the
+#               v1.9.2 serial cancel fix.
+#               Wired into TWO call sites where it actually helps:
+#               - HP per-machine catalog softpaq loop (was the worst serial
+#                 offender - N small softpaqs each from a fresh CDN connection,
+#                 paying TCP slow-start N times)
+#               - Dell CatalogPC individual-driver loop (same shape: 1-3 small
+#                 INF cabinets each from a separate CDN edge)
+#               NOT wired into: full driver pack downloads (single file, nothing
+#               to parallelise), descriptor XMLs, BIOS update CABs (those are
+#               one-shot and need to finish before anything else can plan).
+#               Analytics: parallel batches SUM their bytes into AnalyticsDownloadMB
+#               (more accurate for multi-file paths). Serial Invoke-CurlDownload
+#               keeps its long-standing MAX semantics so existing single-pack
+#               analytics rows don't change shape - documented quirk, not unified
+#               to avoid changing downstream sheet/dashboard semantics.
+#           (2) Lenovo: PATH PRIORITY REVERSED.
+#               Pre-v1.11.0:  consumer catalog (PATH 1) -> catalogv2.xml (PATH 2 fallback)
+#               v1.11.0+:    catalogv2.xml / Recipe Card (PATH 1) -> consumer catalog (PATH 2 fallback)
+#               The consumer-catalog stack (v1.8.0 onwards: DetectInstall evaluator,
+#               NVIDIA short-circuit, BIOS deferral, force-bind unbound, dock skip)
+#               is ALL preserved; it just only runs now when the machine type
+#               has no Recipe Card / catalogv2.xml entry.
+#               Motivation: ThinkPad / ThinkCentre / commercial models that DO
+#               have Recipe Card packs are far more reliable on the single-pack
+#               path (one Inno Setup extract -> pnputil INFs) than the consumer
+#               flow's per-package descriptor dance. The consumer path stays the
+#               only option for ThinkBook / IdeaPad / consumer models that
+#               aren't in catalogv2.xml (the use case v1.8.0 originally added).
+#               Last-resort fallback unchanged: if neither catalog has the
+#               machine type, opens RecipeCardWeb.html in a browser for manual
+#               selection (skipped in headless mode, URL logged instead).
+#               Refactor: factored the v1.7.x inline catalogv2.xml fetch+parse
+#               into Get-LenovoFullPackUrl, and the download+extract+install into
+#               Install-LenovoFullPack. Start-LenovoDriverInstall is now ~30
+#               lines of clear dispatch logic instead of two interleaved paths.
+# v1.10.0 - New switches and observability layer (additive; no vendor logic changed):
+#           (1) -Silent: log-only mode. Disables both GUI and console output; the log
+#               file is still written. Implies -Headless. Internally, the Log() helper
+#               now respects $script:Silent and short-circuits the Write-Host branch.
+#           (2) -TestMode: dry-run. Start-Install short-circuits before each vendor
+#               install function and reports what WOULD be done. Analytics records
+#               result="testmode" so dry-runs are distinguishable in the Sheet.
+#           (3) -Diagnostic: verbose mode. Existing Write-DeviceInfo is unchanged;
+#               new Write-VerboseDiagnostics adds per-run timings, expanded curl/
+#               network info, and a final perf summary. Controlled by $script:Diagnostic.
+#           (4) -NoAnalytics: skips the Sheets webhook POST. Local
+#               .analytics.json is still written so the data isn't lost if you
+#               later decide to backfill.
+#           (5) Structured NDJSON event log (DriverInstaller_<ts>.events.json):
+#               every Log() call also writes a {ts, level, event, msg, ...ctx} JSON
+#               line. Makes downstream tooling (jq, log shipping, anomaly detection)
+#               trivial without disturbing the existing human log format.
+#           (6) Analytics JSON saved to Downloads (previously written to %TEMP%
+#               and deleted after the curl POST). Now persists alongside the log.
+#           (7) HTML install report (DriverInstaller_<ts>.report.html) generated
+#               at end-of-run. Self-contained single file - useful for tech-stack
+#               sign-off, customer hand-over, or as an artifact attached to a
+#               support ticket.
+#           No changes to: Dell/HP/Lenovo/Surface vendor logic, curl download loop,
+#           extraction watchers, pnputil bind-marker parser, or DetectInstall
+#           evaluator. The new features compose with all existing behaviour.
 # v1.9.2 - Cancel: honour the cancel flag mid-download. In v1.9.1 and prior,
 #           Invoke-CurlDownload's poll loop only watched for $proc.HasExited
 #           and the 3.5-min stall timer - $script:CancelRequested was checked
@@ -220,14 +316,24 @@ param(
     [string]$MachineType  = "",   # Lenovo only: override 4-char machine type prefix (e.g. 20XX)
     [string]$DriverRoot   = "C:\DRIVERS",  # Override default driver root (useful for parallel testing)
     [switch]$Headless,
+    [switch]$Silent,        # v1.10.0 - log-only mode (no GUI, no console). Implies -Headless.
+    [switch]$TestMode,      # v1.10.0 - dry-run: detect + report but do not mutate system.
+    [switch]$Diagnostic,    # v1.10.0 - verbose logging (per-step timings, env extras).
+    [switch]$NoAnalytics,   # v1.10.0 - skip the Sheets webhook (local JSON still written).
+    [int]$MaxParallelDownloads = 3,  # v1.11.0 - cap for parallel downloads in HP catalog / Dell individual paths.
     [switch]$SkipInstall,
     [switch]$SkipCleanup
 )
 
-# Auto-enable headless when any override param is passed
-if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" -or $SkipInstall -or $SkipCleanup) { $Headless = $true }
+# Auto-enable headless when any override param is passed.
+# Silent always implies Headless (no GUI is even more "headless" than -Headless alone).
+if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" `
+    -or $SkipInstall -or $SkipCleanup -or $Silent -or $TestMode -or $Diagnostic -or $NoAnalytics) {
+    $Headless = $true
+}
+if ($Silent) { $Headless = $true }
 
-$ScriptVersion   = "1.9.2"
+$ScriptVersion   = "1.12.0"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -247,10 +353,52 @@ w32tm /resync /force | Out-Null
 
 # =========================
 # LOG FILE SETUP
+# v1.10.0 - three sibling files share a common timestamp/base:
+#   <base>.log              - the canonical human-readable log (unchanged)
+#   <base>.events.json      - NDJSON structured events (one JSON object per line)
+#   <base>.analytics.json   - the final analytics payload (written at end-of-run)
+#   <base>.report.html      - end-of-run HTML report (written on completion)
 # =========================
-$LogFile = Join-Path ([Environment]::GetFolderPath("UserProfile")) `
-    ("Downloads\DriverInstaller_" + (Get-Date -Format 'yyyyMMdd_HHmmss') + ".log")
-New-Item -ItemType File -Path $LogFile -Force | Out-Null
+$LogStamp        = Get-Date -Format 'yyyyMMdd_HHmmss'
+$DownloadsDir    = Join-Path ([Environment]::GetFolderPath("UserProfile")) "Downloads"
+$LogBase         = Join-Path $DownloadsDir ("DriverInstaller_" + $LogStamp)
+$LogFile         = "$LogBase.log"
+$EventsLogFile   = "$LogBase.events.json"
+$AnalyticsFile   = "$LogBase.analytics.json"
+$ReportFile      = "$LogBase.report.html"
+New-Item -ItemType File -Path $LogFile       -Force | Out-Null
+New-Item -ItemType File -Path $EventsLogFile -Force | Out-Null
+
+# Mode flags lifted to script scope so helpers below can see them without
+# parameter plumbing. Set in Start-Install as well (covers irm|iex re-entry).
+$script:Silent     = [bool]$Silent
+$script:TestMode   = [bool]$TestMode
+$script:Diagnostic = [bool]$Diagnostic
+$script:NoAnalytics = [bool]$NoAnalytics
+$script:MaxParallelDownloads = $MaxParallelDownloads  # v1.11.0
+
+# =========================
+# v1.12.0 - RESPONSIVE UI HELPERS
+# =========================
+function Invoke-ResponsiveSleep {
+    <#
+    Sleep while keeping the UI responsive by processing events in small chunks.
+    Instead of sleeping for 700ms straight (blocking the UI), this breaks it into
+    50ms chunks with DoEvents calls, making the interface feel snappy.
+    #>
+    param(
+        [int]$MillisecondsTotal = 700,
+        [int]$ChunkSize = 50
+    )
+    $elapsed = 0
+    while ($elapsed -lt $MillisecondsTotal) {
+        [System.Windows.Forms.Application]::DoEvents()
+        $remaining = $MillisecondsTotal - $elapsed
+        $sleepMs = if ($remaining -lt $ChunkSize) { $remaining } else { $ChunkSize }
+        Start-Sleep -Milliseconds $sleepMs
+        $elapsed += $sleepMs
+    }
+}
 
 # =========================
 # FONT CONSTANTS
@@ -264,21 +412,22 @@ $FontUISmall   = New-Object System.Drawing.Font("Segoe UI",    7.5, [System.Draw
 $FontTitleBold = New-Object System.Drawing.Font("Segoe UI",    13,  [System.Drawing.FontStyle]::Bold)
 
 # =========================
-# FORM SETUP
+# FORM SETUP - Enhanced Modern UI
 # =========================
 $form                 = New-Object System.Windows.Forms.Form
 $form.Text            = "Driver Installer Tool  v$ScriptVersion"
-$form.Size            = New-Object System.Drawing.Size(580, 560)
+$form.Size            = New-Object System.Drawing.Size(620, 600)
 $form.StartPosition   = "CenterScreen"
 $form.FormBorderStyle = "FixedSingle"
 $form.MaximizeBox     = $false
-$form.BackColor       = [System.Drawing.Color]::FromArgb(245, 245, 245)
+$form.BackColor       = [System.Drawing.Color]::FromArgb(16, 20, 28)  # Dark slate background
+$form.ForeColor       = [System.Drawing.Color]::FromArgb(229, 230, 235)
 
 $title           = New-Object System.Windows.Forms.Label
 $title.AutoSize  = $true
 $title.Font      = $FontTitleBold
-$title.ForeColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
-$title.Location  = New-Object System.Drawing.Point(20, 15)
+$title.ForeColor = [System.Drawing.Color]::FromArgb(255, 255, 255)
+$title.Location  = New-Object System.Drawing.Point(25, 20)
 $title.Text      = "Driver Installer"
 $title.UseCompatibleTextRendering = $false
 $form.Controls.Add($title)
@@ -286,46 +435,55 @@ $form.Controls.Add($title)
 $versionLabel           = New-Object System.Windows.Forms.Label
 $versionLabel.AutoSize  = $true
 $versionLabel.Font      = $FontUISmall
-$versionLabel.ForeColor = [System.Drawing.Color]::Gray
+$versionLabel.ForeColor = [System.Drawing.Color]::FromArgb(107, 114, 128)
 $versionLabel.Text      = "v$ScriptVersion"
-$versionLabel.Location  = New-Object System.Drawing.Point(510, 20)
+$versionLabel.Location  = New-Object System.Drawing.Point(555, 25)
 $versionLabel.UseCompatibleTextRendering = $false
 $form.Controls.Add($versionLabel)
+
+# Subtle separator line
+$separatorLine           = New-Object System.Windows.Forms.Panel
+$separatorLine.BackColor = [System.Drawing.Color]::FromArgb(31, 41, 55)
+$separatorLine.Size      = New-Object System.Drawing.Size(600, 1)
+$separatorLine.Location  = New-Object System.Drawing.Point(0, 50)
+$form.Controls.Add($separatorLine)
 
 $statusBox             = New-Object System.Windows.Forms.RichTextBox
 $statusBox.Multiline   = $true
 $statusBox.ScrollBars  = "Vertical"
-$statusBox.Size        = New-Object System.Drawing.Size(536, 200)
-$statusBox.Location    = New-Object System.Drawing.Point(20, 55)
+$statusBox.Size        = New-Object System.Drawing.Size(570, 190)
+$statusBox.Location    = New-Object System.Drawing.Point(25, 65)
 $statusBox.ReadOnly    = $true
-$statusBox.BackColor   = [System.Drawing.Color]::FromArgb(22, 22, 22)
-$statusBox.ForeColor   = [System.Drawing.Color]::FromArgb(190, 255, 190)
+$statusBox.BackColor   = [System.Drawing.Color]::FromArgb(8, 12, 18)  # Deeper dark background
+$statusBox.ForeColor   = [System.Drawing.Color]::FromArgb(132, 204, 22)  # Vibrant green text
 $statusBox.Font        = $FontMono
 $statusBox.BorderStyle = "FixedSingle"
+$statusBox.Margin      = New-Object System.Windows.Forms.Padding(0)
 $form.Controls.Add($statusBox)
 
 # ---- DOWNLOAD group ----
 $dlGroupBox           = New-Object System.Windows.Forms.GroupBox
-$dlGroupBox.Text      = "Download"
+$dlGroupBox.Text      = "⬇ Download"
 $dlGroupBox.Font      = $FontUIBoldSm
-$dlGroupBox.ForeColor = [System.Drawing.Color]::FromArgb(0, 100, 180)
-$dlGroupBox.Size      = New-Object System.Drawing.Size(536, 68)
-$dlGroupBox.Location  = New-Object System.Drawing.Point(20, 265)
+$dlGroupBox.ForeColor = [System.Drawing.Color]::FromArgb(59, 130, 246)  # Bright blue
+$dlGroupBox.BackColor = [System.Drawing.Color]::FromArgb(16, 20, 28)
+$dlGroupBox.Size      = New-Object System.Drawing.Size(570, 72)
+$dlGroupBox.Location  = New-Object System.Drawing.Point(25, 265)
 $form.Controls.Add($dlGroupBox)
 
 $dlSpinnerLabel           = New-Object System.Windows.Forms.Label
 $dlSpinnerLabel.AutoSize  = $true
 $dlSpinnerLabel.Font      = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
-$dlSpinnerLabel.ForeColor = [System.Drawing.Color]::FromArgb(0, 100, 180)
-$dlSpinnerLabel.BackColor = [System.Drawing.Color]::FromArgb(245, 245, 245)
-$dlSpinnerLabel.Location  = New-Object System.Drawing.Point(72, 0)
+$dlSpinnerLabel.ForeColor = [System.Drawing.Color]::FromArgb(59, 130, 246)
+$dlSpinnerLabel.BackColor = [System.Drawing.Color]::FromArgb(16, 20, 28)
+$dlSpinnerLabel.Location  = New-Object System.Drawing.Point(72, -2)
 $dlSpinnerLabel.Text      = ""
 $dlSpinnerLabel.UseCompatibleTextRendering = $false
 $dlGroupBox.Controls.Add($dlSpinnerLabel)
 
 $dlBar                       = New-Object System.Windows.Forms.ProgressBar
-$dlBar.Size                  = New-Object System.Drawing.Size(508, 18)
-$dlBar.Location              = New-Object System.Drawing.Point(12, 20)
+$dlBar.Size                  = New-Object System.Drawing.Size(540, 16)
+$dlBar.Location              = New-Object System.Drawing.Point(15, 22)
 $dlBar.Style                 = "Marquee"
 $dlBar.MarqueeAnimationSpeed = 25
 $dlBar.Minimum               = 0
@@ -334,36 +492,38 @@ $dlGroupBox.Controls.Add($dlBar)
 
 $dlLabel           = New-Object System.Windows.Forms.Label
 $dlLabel.AutoSize  = $false
-$dlLabel.Size      = New-Object System.Drawing.Size(508, 17)
-$dlLabel.Location  = New-Object System.Drawing.Point(12, 42)
+$dlLabel.Size      = New-Object System.Drawing.Size(540, 16)
+$dlLabel.Location  = New-Object System.Drawing.Point(15, 44)
 $dlLabel.Font      = $FontMonoSm
-$dlLabel.ForeColor = [System.Drawing.Color]::FromArgb(50, 50, 50)
+$dlLabel.ForeColor = [System.Drawing.Color]::FromArgb(156, 163, 175)
+$dlLabel.BackColor = [System.Drawing.Color]::FromArgb(16, 20, 28)
 $dlLabel.Text      = "Waiting..."
 $dlLabel.UseCompatibleTextRendering = $false
 $dlGroupBox.Controls.Add($dlLabel)
 
 # ---- EXTRACT group ----
 $exGroupBox           = New-Object System.Windows.Forms.GroupBox
-$exGroupBox.Text      = "Extract"
+$exGroupBox.Text      = "📦 Extract"
 $exGroupBox.Font      = $FontUIBoldSm
-$exGroupBox.ForeColor = [System.Drawing.Color]::FromArgb(0, 140, 80)
-$exGroupBox.Size      = New-Object System.Drawing.Size(536, 68)
-$exGroupBox.Location  = New-Object System.Drawing.Point(20, 340)
+$exGroupBox.ForeColor = [System.Drawing.Color]::FromArgb(34, 197, 94)  # Bright green
+$exGroupBox.BackColor = [System.Drawing.Color]::FromArgb(16, 20, 28)
+$exGroupBox.Size      = New-Object System.Drawing.Size(570, 72)
+$exGroupBox.Location  = New-Object System.Drawing.Point(25, 345)
 $form.Controls.Add($exGroupBox)
 
 $exSpinnerLabel           = New-Object System.Windows.Forms.Label
 $exSpinnerLabel.AutoSize  = $true
 $exSpinnerLabel.Font      = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
-$exSpinnerLabel.ForeColor = [System.Drawing.Color]::FromArgb(0, 140, 80)
-$exSpinnerLabel.BackColor = [System.Drawing.Color]::FromArgb(245, 245, 245)
-$exSpinnerLabel.Location  = New-Object System.Drawing.Point(58, 0)
+$exSpinnerLabel.ForeColor = [System.Drawing.Color]::FromArgb(34, 197, 94)
+$exSpinnerLabel.BackColor = [System.Drawing.Color]::FromArgb(16, 20, 28)
+$exSpinnerLabel.Location  = New-Object System.Drawing.Point(58, -2)
 $exSpinnerLabel.Text      = ""
 $exSpinnerLabel.UseCompatibleTextRendering = $false
 $exGroupBox.Controls.Add($exSpinnerLabel)
 
 $exBar                       = New-Object System.Windows.Forms.ProgressBar
-$exBar.Size                  = New-Object System.Drawing.Size(508, 18)
-$exBar.Location              = New-Object System.Drawing.Point(12, 20)
+$exBar.Size                  = New-Object System.Drawing.Size(540, 16)
+$exBar.Location              = New-Object System.Drawing.Point(15, 22)
 $exBar.Style                 = "Marquee"
 $exBar.MarqueeAnimationSpeed = 30
 $exBar.Minimum               = 0
@@ -372,7 +532,14 @@ $exGroupBox.Controls.Add($exBar)
 
 $exLabel           = New-Object System.Windows.Forms.Label
 $exLabel.AutoSize  = $false
-$exLabel.Size      = New-Object System.Drawing.Size(508, 17)
+$exLabel.Size      = New-Object System.Drawing.Size(540, 16)
+$exLabel.Location  = New-Object System.Drawing.Point(15, 44)
+$exLabel.Font      = $FontMonoSm
+$exLabel.ForeColor = [System.Drawing.Color]::FromArgb(156, 163, 175)
+$exLabel.BackColor = [System.Drawing.Color]::FromArgb(16, 20, 28)
+$exLabel.Text      = "Waiting..."
+$exLabel.UseCompatibleTextRendering = $false
+$exGroupBox.Controls.Add($exLabel)
 $exLabel.Location  = New-Object System.Drawing.Point(12, 42)
 $exLabel.Font      = $FontMonoSm
 $exLabel.ForeColor = [System.Drawing.Color]::FromArgb(50, 50, 50)
@@ -382,26 +549,27 @@ $exGroupBox.Controls.Add($exLabel)
 
 # ---- OVERALL group ----
 $overallGroupBox           = New-Object System.Windows.Forms.GroupBox
-$overallGroupBox.Text      = "Overall"
+$overallGroupBox.Text      = "⚡ Overall Progress"
 $overallGroupBox.Font      = $FontUIBoldSm
-$overallGroupBox.ForeColor = [System.Drawing.Color]::FromArgb(80, 80, 80)
-$overallGroupBox.Size      = New-Object System.Drawing.Size(536, 48)
-$overallGroupBox.Location  = New-Object System.Drawing.Point(20, 415)
+$overallGroupBox.ForeColor = [System.Drawing.Color]::FromArgb(168, 85, 247)  # Vibrant purple
+$overallGroupBox.BackColor = [System.Drawing.Color]::FromArgb(16, 20, 28)
+$overallGroupBox.Size      = New-Object System.Drawing.Size(570, 50)
+$overallGroupBox.Location  = New-Object System.Drawing.Point(25, 425)
 $form.Controls.Add($overallGroupBox)
 
 $overallSpinnerLabel           = New-Object System.Windows.Forms.Label
 $overallSpinnerLabel.AutoSize  = $true
 $overallSpinnerLabel.Font      = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
-$overallSpinnerLabel.ForeColor = [System.Drawing.Color]::FromArgb(80, 80, 80)
-$overallSpinnerLabel.BackColor = [System.Drawing.Color]::FromArgb(245, 245, 245)
-$overallSpinnerLabel.Location  = New-Object System.Drawing.Point(62, 0)
+$overallSpinnerLabel.ForeColor = [System.Drawing.Color]::FromArgb(168, 85, 247)
+$overallSpinnerLabel.BackColor = [System.Drawing.Color]::FromArgb(16, 20, 28)
+$overallSpinnerLabel.Location  = New-Object System.Drawing.Point(105, -2)
 $overallSpinnerLabel.Text      = ""
 $overallSpinnerLabel.UseCompatibleTextRendering = $false
 $overallGroupBox.Controls.Add($overallSpinnerLabel)
 
 $progress          = New-Object System.Windows.Forms.ProgressBar
-$progress.Size     = New-Object System.Drawing.Size(508, 18)
-$progress.Location = New-Object System.Drawing.Point(12, 20)
+$progress.Size     = New-Object System.Drawing.Size(540, 16)
+$progress.Location = New-Object System.Drawing.Point(15, 22)
 $progress.Style    = "Continuous"
 $progress.Minimum  = 0
 $progress.Maximum  = 100
@@ -409,47 +577,51 @@ $overallGroupBox.Controls.Add($progress)
 
 $logLabel           = New-Object System.Windows.Forms.Label
 $logLabel.AutoSize  = $false
-$logLabel.Size      = New-Object System.Drawing.Size(536, 16)
-$logLabel.Location  = New-Object System.Drawing.Point(20, 468)
-$logLabel.ForeColor = [System.Drawing.Color]::Gray
+$logLabel.Size      = New-Object System.Drawing.Size(570, 15)
+$logLabel.Location  = New-Object System.Drawing.Point(25, 485)
+$logLabel.ForeColor = [System.Drawing.Color]::FromArgb(107, 114, 128)
 $logLabel.Font      = $FontUISmall
 $logLabel.Text      = "Log: $LogFile"
 $logLabel.UseCompatibleTextRendering = $false
 $form.Controls.Add($logLabel)
 
 # =========================
-# SOUND TOGGLE CHECKBOX
+# SOUND TOGGLE CHECKBOX - Enhanced
 # =========================
 $soundCheckbox                   = New-Object System.Windows.Forms.CheckBox
-$soundCheckbox.Text              = "Sound FX"
+$soundCheckbox.Text              = "🔊 Sound Effects"
 $soundCheckbox.Checked           = $true
 $soundCheckbox.Font              = $FontUIBold
-$soundCheckbox.ForeColor         = [System.Drawing.Color]::FromArgb(60, 60, 60)
+$soundCheckbox.ForeColor         = [System.Drawing.Color]::FromArgb(229, 230, 235)
+$soundCheckbox.BackColor         = [System.Drawing.Color]::FromArgb(16, 20, 28)
 $soundCheckbox.AutoSize          = $true
-$soundCheckbox.Location          = New-Object System.Drawing.Point(20, 490)
+$soundCheckbox.Location          = New-Object System.Drawing.Point(25, 510)
 $soundCheckbox.UseCompatibleTextRendering = $false
 $form.Controls.Add($soundCheckbox)
 
+# ---- Enhanced Buttons ----
 $button            = New-Object System.Windows.Forms.Button
-$button.Text       = "Install Drivers"
-$button.Size       = New-Object System.Drawing.Size(155, 36)
-$button.Location   = New-Object System.Drawing.Point(155, 483)
+$button.Text       = "▶ Install Drivers"
+$button.Size       = New-Object System.Drawing.Size(165, 42)
+$button.Location   = New-Object System.Drawing.Point(170, 505)
 $button.Font       = $FontUIBold
-$button.BackColor  = [System.Drawing.Color]::FromArgb(0, 120, 215)
+$button.BackColor  = [System.Drawing.Color]::FromArgb(59, 130, 246)  # Bright blue
 $button.ForeColor  = [System.Drawing.Color]::White
 $button.FlatStyle  = "Flat"
 $button.FlatAppearance.BorderSize = 0
+$button.FlatAppearance.MouseOverBackColor = [System.Drawing.Color]::FromArgb(37, 99, 235)  # Darker blue on hover
 $form.Controls.Add($button)
 
 $cancelButton            = New-Object System.Windows.Forms.Button
-$cancelButton.Text       = "Cancel"
-$cancelButton.Size       = New-Object System.Drawing.Size(100, 36)
-$cancelButton.Location   = New-Object System.Drawing.Point(320, 483)
+$cancelButton.Text       = "✕ Cancel"
+$cancelButton.Size       = New-Object System.Drawing.Size(120, 42)
+$cancelButton.Location   = New-Object System.Drawing.Point(350, 505)
 $cancelButton.Font       = $FontUIBold
-$cancelButton.BackColor  = [System.Drawing.Color]::FromArgb(160, 160, 160)
+$cancelButton.BackColor  = [System.Drawing.Color]::FromArgb(107, 114, 128)  # Gray
 $cancelButton.ForeColor  = [System.Drawing.Color]::White
 $cancelButton.FlatStyle  = "Flat"
 $cancelButton.FlatAppearance.BorderSize = 0
+$cancelButton.FlatAppearance.MouseOverBackColor = [System.Drawing.Color]::FromArgb(75, 85, 99)  # Darker gray on hover
 $cancelButton.Enabled    = $false
 $form.Controls.Add($cancelButton)
 
@@ -487,35 +659,86 @@ function Play-Sound {
 function Set-ButtonRunning {
     if ($script:Headless) { return }
     $button.Enabled         = $false
-    $button.BackColor       = [System.Drawing.Color]::FromArgb(120, 120, 120)
+    $button.BackColor       = [System.Drawing.Color]::FromArgb(107, 114, 128)  # Disabled gray
     $cancelButton.Enabled   = $true
-    $cancelButton.BackColor = [System.Drawing.Color]::FromArgb(200, 60, 60)
+    $cancelButton.BackColor = [System.Drawing.Color]::FromArgb(239, 68, 68)  # Bright red for cancel
     [System.Windows.Forms.Application]::DoEvents()
 }
 
 function Set-ButtonIdle {
     if ($script:Headless) { return }
     $button.Enabled         = $true
-    $button.BackColor       = [System.Drawing.Color]::FromArgb(0, 120, 215)
+    $button.BackColor       = [System.Drawing.Color]::FromArgb(59, 130, 246)  # Bright blue
     $cancelButton.Enabled   = $false
-    $cancelButton.BackColor = [System.Drawing.Color]::FromArgb(160, 160, 160)
+    $cancelButton.BackColor = [System.Drawing.Color]::FromArgb(107, 114, 128)  # Gray
     [System.Windows.Forms.Application]::DoEvents()
 }
 
 # =========================
 # HELPERS
 # =========================
-function Log($msg) {
-    $ts   = Get-Date -Format 'HH:mm:ss'
+function Log {
+    # v1.10.0 - now writes to three sinks:
+    #   1. console / GUI (suppressed by -Silent)
+    #   2. canonical .log text file (always)
+    #   3. .events.json NDJSON stream (always)
+    # The 'level' is heuristically inferred from the message text - existing
+    # call sites don't need to change. Pass -Level / -Event / -Context to a
+    # future structured caller and they'll override the inferred values.
+    param(
+        [Parameter(Mandatory=$true, Position=0)] [string]$msg,
+        [string]$Level   = $null,
+        [string]$Event   = $null,
+        [hashtable]$Context = $null
+    )
+    $now  = Get-Date
+    $ts   = $now.ToString('HH:mm:ss')
     $line = "[$ts] $msg"
-    if ($script:Headless) {
-        Write-Host $line
-    } else {
-        $statusBox.AppendText("$line`r`n")
-        $statusBox.ScrollToCaret()
-        [System.Windows.Forms.Application]::DoEvents()
+
+    # Human sinks
+    if (-not $script:Silent) {
+        if ($script:Headless) {
+            Write-Host $line
+        } else {
+            $statusBox.AppendText("$line`r`n")
+            $statusBox.ScrollToCaret()
+            [System.Windows.Forms.Application]::DoEvents()
+        }
     }
     Add-Content -Path $LogFile -Value $line -Encoding UTF8
+
+    # Structured NDJSON sink. Heuristic level inference keeps existing
+    # one-arg Log calls working; explicit -Level wins when supplied.
+    if (-not $Level) {
+        if ($msg -match '(?i)\bERROR\b|FATAL|FAILED|cannot') { $Level = 'error' }
+        elseif ($msg -match '(?i)\bWARNING\b|WARN\b')        { $Level = 'warn'  }
+        elseif ($msg -match '(?i)\bcancel(led)?\b')          { $Level = 'cancel' }
+        else                                                  { $Level = 'info' }
+    }
+    try {
+        $evt = [ordered]@{
+            ts             = $now.ToString('o')
+            level          = $Level
+            script_version = $ScriptVersion
+            msg            = $msg
+        }
+        if ($Event)   { $evt['event']   = $Event }
+        if ($Context) { foreach ($k in $Context.Keys) { $evt[$k] = $Context[$k] } }
+        $json = $evt | ConvertTo-Json -Compress -Depth 4
+        Add-Content -Path $EventsLogFile -Value $json -Encoding UTF8
+    } catch {
+        # Never let event-log failure interrupt the script. Worst case: the
+        # NDJSON sidecar is incomplete, but the canonical .log still has the line.
+    }
+}
+
+function Log-Diag {
+    # Diagnostic-only log: silently dropped unless -Diagnostic is set.
+    # Use this for high-volume / low-signal trace info (per-iteration timings,
+    # raw HTTP headers, etc.) that would otherwise bloat the standard log.
+    param([string]$msg, [hashtable]$Context = $null)
+    if (-not $script:Diagnostic) { return }
+    Log -msg "[diag] $msg" -Level "debug" -Event "diagnostic" -Context $Context
 }
 
 function SetProgress($val) {
@@ -686,6 +909,186 @@ function Write-MissingDriverDetails {
 }
 
 # =========================
+# v1.10.0 - VERBOSE DIAGNOSTICS
+# Only emits when -Diagnostic was passed. Complements (does not replace)
+# Write-DeviceInfo, which always runs.
+# =========================
+function Write-VerboseDiagnostics {
+    if (-not $script:Diagnostic) { return }
+    Log "============================================" -Level "info" -Event "diag_header"
+    Log "  VERBOSE DIAGNOSTICS (-Diagnostic)"
+    Log "============================================"
+    try {
+        $proxy = [System.Net.WebRequest]::GetSystemWebProxy()
+        $proxyUri = $proxy.GetProxy("https://www.google.com").AbsoluteUri
+        Log "  System proxy        : $proxyUri"
+    } catch { Log "  System proxy        : (error: $($_.Exception.Message))" }
+    try {
+        $tls = [Net.ServicePointManager]::SecurityProtocol
+        Log "  TLS protocols       : $tls"
+    } catch {}
+    try {
+        $curlVer = (& curl.exe --version 2>$null) -join " | "
+        Log "  curl.exe version    : $curlVer"
+    } catch {}
+    try {
+        $route = (route print 0.0.0.0 2>$null | Select-String "0.0.0.0\s+0.0.0.0" | Select-Object -First 1).ToString().Trim()
+        Log "  Default route       : $route"
+    } catch {}
+    try {
+        $nic = Get-NetAdapter -Physical -EA Stop | Where-Object Status -eq 'Up' | Select-Object -First 1
+        if ($nic) {
+            Log "  Active NIC          : $($nic.Name) ($($nic.InterfaceDescription)) - LinkSpeed $($nic.LinkSpeed)"
+        }
+    } catch {}
+    Log "============================================"
+}
+
+# =========================
+# v1.10.0 - HTML INSTALL REPORT
+# Self-contained single-file HTML with all the analytics state. Saved to
+# Downloads alongside the .log so it can be attached to support tickets or
+# shown to customers at handover. No external CSS/JS - styled inline.
+# =========================
+function Write-HtmlReport {
+    param(
+        [Parameter(Mandatory=$true)][ValidateSet("success","failure","cancelled","testmode")]
+        [string]$Result
+    )
+    try {
+        $durationSec = if ($script:AnalyticsStartTime) {
+            [int]((Get-Date) - $script:AnalyticsStartTime).TotalSeconds
+        } else { 0 }
+        $durationDisplay = if ($durationSec -ge 60) {
+            "{0}m {1}s" -f ([math]::Floor($durationSec/60)), ($durationSec % 60)
+        } else { "${durationSec}s" }
+
+        $missingDelta = if ($script:AnalyticsMissingBefore -ge 0 -and $script:AnalyticsMissingAfter -ge 0) {
+            $script:AnalyticsMissingBefore - $script:AnalyticsMissingAfter
+        } else { 0 }
+
+        # Status colour palette - reused for the badge and the row accents.
+        $statusColour = switch ($Result) {
+            "success"   { "#1b873f" }
+            "failure"   { "#c92a2a" }
+            "cancelled" { "#a37b00" }
+            "testmode"  { "#1864ab" }
+        }
+        $statusLabel = $Result.ToUpper()
+
+        # HTML-escape user-controlled strings (model names sometimes contain &)
+        function _He($s) {
+            if ($null -eq $s) { return "" }
+            $s -replace '&','&amp;' -replace '<','&lt;' -replace '>','&gt;' -replace '"','&quot;'
+        }
+
+        $installedRows = ""
+        if ($script:AnalyticsInstalledDrivers -and $script:AnalyticsInstalledDrivers.Count -gt 0) {
+            foreach ($d in $script:AnalyticsInstalledDrivers) {
+                if ([string]::IsNullOrWhiteSpace($d)) { continue }
+                $installedRows += "<li>$(_He $d)</li>`n"
+            }
+        } else {
+            $installedRows = "<li class='muted'>(none recorded)</li>"
+        }
+
+        $html = @"
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Driver Installer Report - $(_He $script:AnalyticsModel)</title>
+<style>
+  body { font: 14px/1.5 -apple-system, "Segoe UI", system-ui, sans-serif; color: #222; background: #f6f7f9; margin: 0; padding: 24px; }
+  .wrap { max-width: 900px; margin: 0 auto; background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.08); overflow: hidden; }
+  header { padding: 20px 28px; border-bottom: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center; }
+  header h1 { margin: 0; font-size: 20px; font-weight: 600; }
+  header .v { color: #6b7280; font-size: 12px; }
+  .badge { display: inline-block; padding: 6px 14px; border-radius: 999px; color: #fff; font-weight: 600; font-size: 12px; letter-spacing: .05em; background: $statusColour; }
+  section { padding: 18px 28px; border-bottom: 1px solid #f0f1f3; }
+  section:last-child { border-bottom: 0; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: #6b7280; margin: 0 0 12px 0; font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 6px 0; vertical-align: top; }
+  td.k { width: 200px; color: #6b7280; }
+  td.v { font-family: ui-monospace, "Cascadia Mono", "Consolas", monospace; font-size: 13px; word-break: break-word; }
+  ul { margin: 0; padding-left: 20px; font-family: ui-monospace, "Cascadia Mono", "Consolas", monospace; font-size: 13px; }
+  ul li { margin: 2px 0; }
+  .muted { color: #9ca3af; font-style: italic; list-style: none; margin-left: -20px; }
+  .delta-good { color: #1b873f; font-weight: 600; }
+  .delta-bad  { color: #c92a2a; font-weight: 600; }
+  footer { padding: 12px 28px; color: #9ca3af; font-size: 11px; background: #fafbfc; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Driver Installer Report</h1>
+      <div class="v">Script v$ScriptVersion &middot; generated $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')</div>
+    </div>
+    <span class="badge">$statusLabel</span>
+  </header>
+
+  <section>
+    <h2>Device</h2>
+    <table>
+      <tr><td class="k">Manufacturer</td><td class="v">$(_He $script:AnalyticsManufacturer)</td></tr>
+      <tr><td class="k">Model</td><td class="v">$(_He $script:AnalyticsModel)</td></tr>
+      <tr><td class="k">Serial / Service Tag</td><td class="v">$(_He $script:AnalyticsSerial)</td></tr>
+      <tr><td class="k">OS Version</td><td class="v">$(_He $script:AnalyticsOsVersion) (build $($script:AnalyticsOsBuild))</td></tr>
+    </table>
+  </section>
+
+  <section>
+    <h2>Result</h2>
+    <table>
+      <tr>
+        <td class="k">Missing drivers before</td>
+        <td class="v">$($script:AnalyticsMissingBefore)</td>
+      </tr>
+      <tr>
+        <td class="k">Missing drivers after</td>
+        <td class="v">$($script:AnalyticsMissingAfter)</td>
+      </tr>
+      <tr>
+        <td class="k">Resolved</td>
+        <td class="v"><span class="$(if ($missingDelta -gt 0) {'delta-good'} elseif ($missingDelta -lt 0) {'delta-bad'} else {''})">$missingDelta</span></td>
+      </tr>
+      <tr><td class="k">INFs installed (bound)</td><td class="v">$($script:AnalyticsInfCount)</td></tr>
+      <tr><td class="k">Total download size</td><td class="v">$($script:AnalyticsDownloadMB) MB</td></tr>
+      <tr><td class="k">Duration</td><td class="v">$durationDisplay</td></tr>
+    </table>
+  </section>
+
+  <section>
+    <h2>Installed drivers / packages</h2>
+    <ul>$installedRows</ul>
+  </section>
+
+  <section>
+    <h2>Artifacts</h2>
+    <table>
+      <tr><td class="k">Text log</td><td class="v">$(_He $LogFile)</td></tr>
+      <tr><td class="k">Structured events</td><td class="v">$(_He $EventsLogFile)</td></tr>
+      <tr><td class="k">Analytics JSON</td><td class="v">$(_He $AnalyticsFile)</td></tr>
+    </table>
+  </section>
+
+  <footer>Install-Drivers-auto.ps1 v$ScriptVersion &middot; skermiebroTech &middot; github.com/skermiebroTech/my-wiki</footer>
+</div>
+</body>
+</html>
+"@
+        $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText($ReportFile, $html, $utf8NoBom)
+        Log "HTML report saved to: $ReportFile" -Level "info" -Event "report_written"
+    } catch {
+        Log "  WARNING: HTML report generation failed - $($_.Exception.Message)" -Level "warn"
+    }
+}
+
+# =========================
 # 7-ZIP HELPERS
 # Installed at start of Start-Install for Dell/HP extraction.
 # Removed before final cleanup so nothing persists to the customer.
@@ -714,7 +1117,7 @@ function Install-7Zip {
         $proc                       = New-Object System.Diagnostics.Process
         $proc.StartInfo             = $psi
         $proc.Start() | Out-Null
-        while (-not $proc.HasExited) { Start-Sleep -Milliseconds 400; Step-AllSpinners }
+        while (-not $proc.HasExited) { Invoke-ResponsiveSleep -MillisecondsTotal 400; Step-AllSpinners }
         if ($proc.ExitCode -ne 0 -or -not (Test-Path $script:7zInstaller)) {
             Log "  7-Zip download failed (curl exit $($proc.ExitCode))."
             return $false
@@ -778,7 +1181,7 @@ $script:AnalyticsInstalledDrivers = New-Object System.Collections.Generic.List[s
 
 function Send-AnalyticsEvent {
     param(
-        [ValidateSet("success","failure","cancelled")]
+        [ValidateSet("success","failure","cancelled","testmode")]
         [string]$Result
     )
     $durationSec = 0
@@ -819,15 +1222,37 @@ function Send-AnalyticsEvent {
   "installed_drivers": "$installedDriversStr"
 }
 "@
-    Log "Sending analytics (result=$Result, model=$($script:AnalyticsModel), infs=$($script:AnalyticsInfCount), dl=$($script:AnalyticsDownloadMB)MB, missing=$($script:AnalyticsMissingBefore)->$($script:AnalyticsMissingAfter), installed=$($script:AnalyticsInstalledDrivers.Count), duration=${durationSec}s)..."
+
+    # v1.10.0 - persist payload to Downloads alongside the .log so analytics is
+    # never lost (previously only existed in %TEMP% for the duration of the curl
+    # POST, then deleted). This also gives -NoAnalytics runs a local record.
     try {
-        $payloadFile = Join-Path $env:TEMP "analytics_payload_$(Get-Date -Format 'HHmmss').json"
-        $utf8NoBom   = New-Object System.Text.UTF8Encoding $false
-        [System.IO.File]::WriteAllText($payloadFile, $payload, $utf8NoBom)
+        $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText($AnalyticsFile, $payload, $utf8NoBom)
+        Log-Diag "Analytics payload persisted to: $AnalyticsFile"
+    } catch {
+        Log "  WARNING: could not write analytics JSON to Downloads - $($_.Exception.Message)"
+    }
+
+    Log "Sending analytics (result=$Result, model=$($script:AnalyticsModel), infs=$($script:AnalyticsInfCount), dl=$($script:AnalyticsDownloadMB)MB, missing=$($script:AnalyticsMissingBefore)->$($script:AnalyticsMissingAfter), installed=$($script:AnalyticsInstalledDrivers.Count), duration=${durationSec}s)..." `
+        -Level "info" -Event "analytics_send" -Context @{
+            result        = $Result
+            inf_count     = $script:AnalyticsInfCount
+            download_mb   = $script:AnalyticsDownloadMB
+            duration_sec  = $durationSec
+        }
+
+    if ($script:NoAnalytics) {
+        Log "  -NoAnalytics set: skipping Sheets webhook. Local copy at $AnalyticsFile"
+        return
+    }
+
+    try {
+        # Use the persisted file as curl's data source - no second temp file needed.
         $curlArgs = "--silent --max-time 15 --connect-timeout 10 " +
                     "--location " +
                     "-H `"Content-Type: application/json`" " +
-                    "--data `@`"$payloadFile`" " +
+                    "--data `@`"$AnalyticsFile`" " +
                     "`"$SHEETS_WEBHOOK`""
         $psi                        = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName               = "curl.exe"
@@ -842,16 +1267,20 @@ function Send-AnalyticsEvent {
         $stdout = $proc.StandardOutput.ReadToEnd().Trim()
         $stderr = $proc.StandardError.ReadToEnd().Trim()
         $proc.WaitForExit()
-        Remove-Item $payloadFile -EA SilentlyContinue
         if ($proc.ExitCode -ne 0) {
-            Log "  Analytics warning: curl exit $($proc.ExitCode) - $stderr"
+            Log "  Analytics warning: curl exit $($proc.ExitCode) - $stderr" `
+                -Level "warn" -Event "analytics_fail"
         } elseif ($stdout -eq "OK") {
-            Log "  Analytics sent OK - row written to Google Sheet."
+            Log "  Analytics sent OK - row written to Google Sheet." `
+                -Level "info" -Event "analytics_ok"
         } else {
-            Log "  Analytics unexpected response: $stdout"
+            Log "  Analytics unexpected response: $stdout" `
+                -Level "warn" -Event "analytics_fail"
         }
     } catch {
-        Log "  Analytics error: $($_.Exception.Message)"
+        # Analytics failures must NEVER stop script execution - just log + carry on.
+        Log "  Analytics error: $($_.Exception.Message)" `
+            -Level "error" -Event "analytics_error"
     }
 }
 
@@ -896,7 +1325,7 @@ function Invoke-CurlDownload {
 
     $lastSize = 0; $stall = 0; $prevSize = 0
     while (-not $proc.HasExited) {
-        Start-Sleep -Milliseconds 700
+        Invoke-ResponsiveSleep -MillisecondsTotal 700
         # Honour cancel mid-download: kill curl immediately so the next ~10MB
         # don't keep streaming after the user clicked Cancel. Without this,
         # curl runs to completion (potentially hundreds of MB) while the
@@ -960,6 +1389,181 @@ function Invoke-CurlDownload {
 }
 
 # =========================
+# v1.11.0 - PARALLEL CURL DOWNLOAD
+#
+# Launches up to $MaxConcurrency curl.exe processes at once and polls them
+# together. Designed for the HP catalog softpaq loop and the Dell CatalogPC
+# individual-driver loop, where N small files each come from a fresh CDN
+# connection; running them serially serialises TCP slow-start overhead.
+#
+# Inputs:
+#   $Items: array of @{ Url=...; OutFile=...; Label='Display name' }
+#   $MaxConcurrency: cap (defaults to script-scope $MaxParallelDownloads, min 1)
+#
+# Returns: array of @{ Item=...; Success=$bool; Bytes=long; ErrorMsg=string }
+# in the same order as $Items. Callers can then iterate the returned array
+# and run any post-download serial work (hash verify, extract, install).
+#
+# Analytics: unlike Invoke-CurlDownload which uses MAX(downloads) for the
+# AnalyticsDownloadMB field, this helper SUMS the bytes of the whole batch
+# and adds the sum to AnalyticsDownloadMB. That's strictly more accurate
+# for the multi-file catalog paths. Serial Invoke-CurlDownload keeps its
+# MAX semantics so existing single-pack analytics rows don't change shape.
+#
+# Cancellation: $script:CancelRequested checked every 700ms; when set, every
+# active curl process is killed in parallel and partial files deleted.
+# =========================
+function Invoke-CurlDownloadParallel {
+    param(
+        [Parameter(Mandatory=$true)] [hashtable[]]$Items,
+        [int]$MaxConcurrency = 0
+    )
+    if (-not $Items -or $Items.Count -eq 0) { return @() }
+    if ($MaxConcurrency -le 0) {
+        $MaxConcurrency = if ($script:MaxParallelDownloads -gt 0) { $script:MaxParallelDownloads } else { 3 }
+    }
+    # Above 6 we're just thrashing the CDN and getting throttled. Below 1 makes no sense.
+    $MaxConcurrency = [math]::Min([math]::Max($MaxConcurrency, 1), 6)
+    $total = $Items.Count
+    Log "Parallel download: $total file(s), concurrency=$MaxConcurrency" `
+        -Level "info" -Event "parallel_dl_start" -Context @{ total=$total; concurrency=$MaxConcurrency }
+    SetDownload -Pct 0 -Label "Parallel: 0/$total complete"
+
+    # Result objects (one per input item, indexed identically)
+    $results = New-Object 'System.Collections.Generic.List[hashtable]'
+    foreach ($_ in $Items) {
+        $results.Add(@{ Item=$_; Success=$false; Bytes=0L; ErrorMsg=$null; Proc=$null; Started=$null; LastSize=0L; Stall=0 }) | Out-Null
+    }
+
+    $nextIdx       = 0
+    $activeIdxs    = New-Object 'System.Collections.Generic.List[int]'
+    $completedCnt  = 0
+    $failedCnt     = 0
+    $batchBytes    = 0L
+    $StallLimitSec = 210     # ~3.5 min, matches serial Invoke-CurlDownload
+
+    while ($completedCnt -lt $total) {
+        # Launch more processes up to the concurrency cap
+        while ($activeIdxs.Count -lt $MaxConcurrency -and $nextIdx -lt $total) {
+            $r    = $results[$nextIdx]
+            $item = $r.Item
+            $url  = $item.Url
+            $out  = $item.OutFile
+            $lbl  = if ($item.Label) { $item.Label } else { [System.IO.Path]::GetFileName($out) }
+
+            $psi                 = New-Object System.Diagnostics.ProcessStartInfo
+            $psi.FileName        = "curl.exe"
+            $psi.Arguments       = "--location --fail --connect-timeout 30 " +
+                                   "--retry 10 --retry-delay 5 --retry-all-errors " +
+                                   "--continue-at - " +
+                                   "--user-agent `"Mozilla/5.0 (Windows NT 10.0; Win64; x64)`" " +
+                                   "--output `"$out`" `"$url`""
+            $psi.UseShellExecute = $false
+            $psi.CreateNoWindow  = $true
+            try {
+                $proc            = New-Object System.Diagnostics.Process
+                $proc.StartInfo  = $psi
+                $null = $proc.Start()
+                $r.Proc    = $proc
+                $r.Started = Get-Date
+                $activeIdxs.Add($nextIdx) | Out-Null
+                Log-Diag "  parallel[$nextIdx]: started '$lbl' -> $out"
+            } catch {
+                $r.ErrorMsg = "curl launch failed: $($_.Exception.Message)"
+                $r.Success  = $false
+                $completedCnt++
+                $failedCnt++
+                Log "  parallel[$nextIdx]: launch failed - $($r.ErrorMsg)" -Level "error"
+            }
+            $nextIdx++
+        }
+
+        Invoke-ResponsiveSleep -MillisecondsTotal 700
+
+        # Cancel check - bail entire batch
+        if ($script:CancelRequested) {
+            Log "  Parallel cancel detected - killing all active curls." -Level "cancel"
+            foreach ($i in $activeIdxs) {
+                $r = $results[$i]
+                if ($r.Proc -and -not $r.Proc.HasExited) {
+                    try { $r.Proc.Kill() } catch {}
+                    try { $r.Proc.WaitForExit(2000) | Out-Null } catch {}
+                }
+                $of = $r.Item.OutFile
+                if ($of -and (Test-Path $of)) { Remove-Item $of -EA SilentlyContinue }
+                $r.Success  = $false
+                $r.ErrorMsg = "cancelled"
+            }
+            SetDownload -Pct 0 -Label "Cancelled."
+            Stop-DlSpinner -Success $false
+            return $results
+        }
+
+        # Poll each active process: handle exit, stall, progress aggregation
+        $stillActive = New-Object 'System.Collections.Generic.List[int]'
+        foreach ($i in $activeIdxs) {
+            $r = $results[$i]
+            $proc = $r.Proc
+            $of   = $r.Item.OutFile
+            $sz   = if ($of -and (Test-Path $of)) { (Get-Item $of -EA SilentlyContinue).Length } else { 0 }
+            if ($sz -gt $r.LastSize) { $r.Stall = 0; $r.LastSize = $sz } else { $r.Stall++ }
+
+            if ($proc.HasExited) {
+                if ($proc.ExitCode -eq 0 -and (Test-Path $of) -and (Get-Item $of).Length -gt 0) {
+                    $r.Bytes   = (Get-Item $of).Length
+                    $r.Success = $true
+                    $batchBytes += $r.Bytes
+                    $mb = [math]::Round($r.Bytes / 1MB, 1)
+                    $lbl = if ($r.Item.Label) { $r.Item.Label } else { [System.IO.Path]::GetFileName($of) }
+                    Log "  parallel[$i] OK: $lbl ($mb MB)" -Level "info" -Event "parallel_dl_ok"
+                } else {
+                    $r.Success  = $false
+                    $r.ErrorMsg = "curl exit $($proc.ExitCode)"
+                    Log "  parallel[$i] FAIL: $($r.ErrorMsg)" -Level "warn" -Event "parallel_dl_fail"
+                    if (Test-Path $of) { Remove-Item $of -EA SilentlyContinue }
+                    $failedCnt++
+                }
+                $completedCnt++
+            } elseif ($r.Stall -gt ($StallLimitSec * 1000 / 700)) {
+                # Per-process stall: kill just this one, don't affect siblings
+                Log "  parallel[$i] STALLED >$StallLimitSec`s - killing." -Level "warn"
+                try { $proc.Kill() } catch {}
+                try { $proc.WaitForExit(2000) | Out-Null } catch {}
+                if (Test-Path $of) { Remove-Item $of -EA SilentlyContinue }
+                $r.Success  = $false
+                $r.ErrorMsg = "stalled"
+                $completedCnt++
+                $failedCnt++
+            } else {
+                $stillActive.Add($i) | Out-Null
+            }
+        }
+        $activeIdxs = $stillActive
+
+        # UI update
+        $okSoFar = $completedCnt - $failedCnt
+        $pct     = if ($total -gt 0) { [int](($completedCnt / $total) * 100) } else { 0 }
+        if ($pct -ge 100) { $pct = 99 }  # leave 100 for the post-loop final
+        $activeMB = 0
+        foreach ($i in $activeIdxs) { $activeMB += ($results[$i].LastSize / 1MB) }
+        $batchMB  = [math]::Round(($batchBytes / 1MB) + $activeMB, 1)
+        SetDownload -Pct $pct -Label "Parallel: $okSoFar/$total complete ($batchMB MB, $($activeIdxs.Count) active)"
+        Step-AllSpinners
+    }
+
+    # Final accounting
+    $batchMB = [math]::Round($batchBytes / 1MB, 1)
+    $script:AnalyticsDownloadMB = [math]::Round($script:AnalyticsDownloadMB + $batchMB, 1)
+    $ok = ($results | Where-Object { $_.Success }).Count
+    Log "Parallel download finished: $ok/$total OK, total $batchMB MB" `
+        -Level "info" -Event "parallel_dl_done" -Context @{ ok=$ok; total=$total; mb=$batchMB }
+    SetDownload -Pct 100 -Label "Parallel: $ok/$total complete ($batchMB MB)"
+    Stop-DlSpinner -Success ($ok -gt 0)
+    if ($ok -gt 0) { Play-Sound -Event "DownloadComplete" }
+    return $results
+}
+
+# =========================
 # EXTRACTION WATCHER
 # =========================
 function Watch-Extraction {
@@ -977,7 +1581,7 @@ function Watch-Extraction {
     SetExtract -Pct -1 -Label "Extracting..."
 
     while (-not $ExtractProc.HasExited) {
-        Start-Sleep -Milliseconds 700
+        Invoke-ResponsiveSleep -MillisecondsTotal 700
         $count = if (Test-Path $DestPath) {
             (Get-ChildItem $DestPath -Recurse -ErrorAction SilentlyContinue).Count
         } else { 0 }
@@ -1001,7 +1605,7 @@ function Watch-Extraction {
             break
         }
     }
-    Start-Sleep -Seconds 2
+    Invoke-ResponsiveSleep -MillisecondsTotal 2000
     $finalCount = if (Test-Path $DestPath) {
         (Get-ChildItem $DestPath -Recurse -EA SilentlyContinue).Count
     } else { 0 }
@@ -1112,7 +1716,7 @@ function Start-PackExtraction {
             $exSpinnerLabel.Text      = " " + $SpinnerFrames[0]
             $overallSpinnerLabel.Text = " " + $SpinnerFrames[0]
             while ($zipJob.State -eq "Running") {
-                Start-Sleep -Milliseconds 700
+                Invoke-ResponsiveSleep -MillisecondsTotal 700
                 $count = if (Test-Path $DestPath) {
                     (Get-ChildItem $DestPath -Recurse -EA SilentlyContinue).Count
                 } else { 0 }
@@ -1183,7 +1787,7 @@ function Start-PackExtraction {
                 $sevenProc.Start() | Out-Null
 
                 while (-not $sevenProc.HasExited) {
-                    Start-Sleep -Milliseconds 700
+                    Invoke-ResponsiveSleep -MillisecondsTotal 700
                     $n = & $CountFiles
                     SetExtract -Pct -1 -Label "$n files extracted..."
                     Step-ExSpinner
@@ -1191,7 +1795,7 @@ function Start-PackExtraction {
                     [System.Windows.Forms.Application]::DoEvents()
                     if ($script:CancelRequested) { try { $sevenProc.Kill() } catch {}; break }
                 }
-                Start-Sleep -Seconds 1
+                Invoke-ResponsiveSleep -MillisecondsTotal 1000
                 $n7z = & $CountFiles
 
                 if ($n7z -gt 0) {
@@ -1219,7 +1823,7 @@ function Start-PackExtraction {
                 $proc.StartInfo = $p
                 $proc.Start() | Out-Null
                 while (-not $proc.HasExited) {
-                    Start-Sleep -Milliseconds 700
+                    Invoke-ResponsiveSleep -MillisecondsTotal 700
                     $n = & $CountFiles
                     SetExtract -Pct -1 -Label "$n files extracted..."
                     Step-ExSpinner
@@ -1227,7 +1831,7 @@ function Start-PackExtraction {
                     [System.Windows.Forms.Application]::DoEvents()
                     if ($script:CancelRequested) { try { $proc.Kill() } catch {}; break }
                 }
-                Start-Sleep -Seconds 2
+                Invoke-ResponsiveSleep -MillisecondsTotal 2000
                 return (& $CountFiles)
             }
 
@@ -1242,7 +1846,7 @@ function Start-PackExtraction {
                 $proc.Start() | Out-Null
                 $start = Get-Date
                 while (-not $proc.HasExited) {
-                    Start-Sleep -Milliseconds 700
+                    Invoke-ResponsiveSleep -MillisecondsTotal 700
                     $n = & $CountFiles
                     SetExtract -Pct -1 -Label "$n files extracted..."
                     Step-ExSpinner
@@ -1253,7 +1857,7 @@ function Start-PackExtraction {
                         break
                     }
                 }
-                Start-Sleep -Seconds 2
+                Invoke-ResponsiveSleep -MillisecondsTotal 2000
                 return (& $CountFiles)
             }
 
@@ -1504,26 +2108,45 @@ function Start-DellIndividualDriverInstall {
     Log "Found $($toDownload.Count) driver(s) to download individually."
     if (-not (Test-Path $DriverRoot)) { New-Item -Path $DriverRoot -ItemType Directory -Force | Out-Null }
 
+    # v1.11.0 - PARALLEL DOWNLOAD PHASE for Dell CatalogPC individual drivers.
+    # Same shape as HP: build manifest, batch-download, then iterate survivors
+    # serially for extraction (extraction needs disk I/O exclusivity per file).
+    $dlItems = New-Object 'System.Collections.Generic.List[hashtable]'
+    foreach ($drv in $toDownload) {
+        $driverUrl  = "https://downloads.dell.com/$($drv.Path)"
+        $driverFile = Join-Path $DriverRoot ([System.IO.Path]::GetFileName($drv.Path))
+        $dlItems.Add(@{
+            Url     = $driverUrl
+            OutFile = $driverFile
+            Label   = $drv.DriverName
+        }) | Out-Null
+    }
+    SetProgress 22
+    $dlResults = Invoke-CurlDownloadParallel -Items $dlItems
+    if (Test-Cancelled) { return $false }
+
+    $allDownloaded = $true
+    foreach ($r in $dlResults) {
+        if (-not $r.Success) {
+            Log "  Download failed for '$($r.Item.Label)': $($r.ErrorMsg) - falling back to full pack."
+            $allDownloaded = $false
+        }
+    }
+    if (-not $allDownloaded) { return $null }
+
+    # SERIAL EXTRACT PHASE (one extract dir per file - reuses indexing convention)
     $i = 0
     foreach ($drv in $toDownload) {
         $i++
-        $driverUrl  = "https://downloads.dell.com/$($drv.Path)"
-        $driverFile = Join-Path $DriverRoot ([System.IO.Path]::GetFileName($drv.Path))
-        Log "[$i/$($toDownload.Count)] Downloading: $($drv.DriverName)"
-        SetProgress (20 + [int](($i / $toDownload.Count) * 30))
-        if (-not (Invoke-CurlDownload -Url $driverUrl -OutFile $driverFile)) {
-            Log "  Download failed for '$($drv.DriverName)' - falling back to full pack."
-            return $null
-        }
         if (Test-Cancelled) { return $false }
-
+        $driverFile  = Join-Path $DriverRoot ([System.IO.Path]::GetFileName($drv.Path))
         $extractPath = Join-Path $DriverRoot "Dell_Individual_$i"
-        Log "  Extracting: $($drv.DriverName)..."
+        Log "  Extracting [$i/$($toDownload.Count)]: $($drv.DriverName)..."
+        SetProgress (40 + [int](($i / $toDownload.Count) * 20))
         Start-PackExtraction -PackFile $driverFile -DestPath $extractPath -StallLimitSec 120 -Vendor "Dell"
-        SetProgress (50 + [int](($i / $toDownload.Count) * 10))
     }
 
-    # Install all extracted INFs
+    # Install all extracted INFs (unchanged)
     $anyInstalled = $false
     foreach ($extractDir in (Get-Item (Join-Path $DriverRoot "Dell_Individual_*") -EA SilentlyContinue)) {
         if (Install-DriversFromPath -BasePath $extractDir.FullName) { $anyInstalled = $true }
@@ -2113,15 +2736,24 @@ function Find-HpApplicableSoftpaqs {
     }
 }
 
-function Install-HpSoftpaq {
+function Get-HpSoftpaqOutFile {
+    # Single source of truth for the local SP filename so the parallel download
+    # planner and the post-download installer agree on the path.
+    param([hashtable]$Sp, [string]$DriverRoot)
+    return (Join-Path $DriverRoot "$($Sp.Id).exe")
+}
+
+function Install-HpSoftpaqPostDownload {
+    # v1.11.0 - the post-download (serial) half of the old Install-HpSoftpaq.
+    # Assumes $spFile already exists on disk from a prior (serial or parallel)
+    # download. Does: SHA256 verify -> extract -> SilentInstall.
+    # Returns $true on success, $false on any failure.
     param(
         [hashtable]$Sp,
         [string]$DriverRoot,
         [int]$Index,
         [int]$Total
     )
-    # Download -> SHA256 verify -> extract -> run SilentInstall.
-    # Returns $true on success, $false on any failure.
     Log ""
     Log "----- HP CATALOG [$Index/$Total] $($Sp.Name) (v$($Sp.Version)) -----"
     Log "  SP ID:   $($Sp.Id)"
@@ -2129,18 +2761,15 @@ function Install-HpSoftpaq {
     Log "  Size:    $([math]::Round($Sp.Size/1MB,1)) MB"
     Log "  Install: $($Sp.SilentInstall)"
 
-    if (-not $Sp.Url) { Log "  ERROR: no URL in catalog - skipping."; return $false }
     if (-not $Sp.SilentInstall -or $Sp.SilentInstall -eq 'NA') {
         Log "  No SilentInstall command - skipping (would need user interaction)."
         return $false
     }
-
-    $spFile = Join-Path $DriverRoot "$($Sp.Id).exe"
-    if (-not (Invoke-CurlDownload -Url $Sp.Url -OutFile $spFile)) {
-        Log "  Download failed."
+    $spFile = Get-HpSoftpaqOutFile -Sp $Sp -DriverRoot $DriverRoot
+    if (-not (Test-Path $spFile)) {
+        Log "  Expected file missing on disk ($spFile) - skipping."
         return $false
     }
-    if (Test-Cancelled) { return $false }
 
     Log "  Verifying SHA256..."
     $actual = (Get-FileHash -Path $spFile -Algorithm SHA256).Hash.ToUpper()
@@ -2190,6 +2819,26 @@ function Install-HpSoftpaq {
     }
     Log "  Install reported failure (exit $exit)."
     return $false
+}
+
+function Install-HpSoftpaq {
+    # v1.11.0 - kept as a back-compat wrapper for any callers that still want
+    # the old "do everything for one SP, serially" behaviour. Internally just
+    # runs a 1-item parallel download then the post-download phase.
+    param(
+        [hashtable]$Sp,
+        [string]$DriverRoot,
+        [int]$Index,
+        [int]$Total
+    )
+    if (-not $Sp.Url) { Log "  ERROR: no URL in catalog - skipping."; return $false }
+    $spFile = Get-HpSoftpaqOutFile -Sp $Sp -DriverRoot $DriverRoot
+    if (-not (Invoke-CurlDownload -Url $Sp.Url -OutFile $spFile)) {
+        Log "  Download failed."
+        return $false
+    }
+    if (Test-Cancelled) { return $false }
+    return (Install-HpSoftpaqPostDownload -Sp $Sp -DriverRoot $DriverRoot -Index $Index -Total $Total)
 }
 
 function Start-HpReferenceCatalogInstall {
@@ -2254,21 +2903,74 @@ function Start-HpReferenceCatalogInstall {
 
         if (-not (Test-Path $DriverRoot)) { New-Item -Path $DriverRoot -ItemType Directory -Force | Out-Null }
 
+        # v1.11.0 - PARALLEL DOWNLOAD PHASE
+        # Build a download manifest (skipping anything that's missing a URL or
+        # SilentInstall - those would be no-ops in the install phase anyway),
+        # fetch them all concurrently, then iterate the survivors serially for
+        # SHA verify + extract + install. The serial install phase is unchanged.
+        $dlItems = New-Object 'System.Collections.Generic.List[hashtable]'
+        $dlMap   = @{}   # spId -> sp object, for re-lookup after the download batch
+        foreach ($sp in $softpaqs) {
+            if (-not $sp.Url) {
+                Log "  SKIP: $($sp.Name) has no URL in catalog."
+                continue
+            }
+            if (-not $sp.SilentInstall -or $sp.SilentInstall -eq 'NA') {
+                # Matches the old serial Install-HpSoftpaq's pre-download check -
+                # don't waste bandwidth on a SP we'd just reject in the install phase.
+                Log "  SKIP: $($sp.Name) has no SilentInstall command (would need user interaction)."
+                continue
+            }
+            $outFile = Get-HpSoftpaqOutFile -Sp $sp -DriverRoot $DriverRoot
+            $dlItems.Add(@{
+                Url     = $sp.Url
+                OutFile = $outFile
+                Label   = "$($sp.Id) - $($sp.Name)"
+            }) | Out-Null
+            $dlMap[$sp.Id] = $sp
+        }
+        if ($dlItems.Count -eq 0) {
+            Log "All matched softpaqs were filtered out before download - falling back to full pack."
+            return $null
+        }
+        SetProgress 32
+        $dlResults = Invoke-CurlDownloadParallel -Items $dlItems
+        if (Test-Cancelled) { return $false }
+
+        # Reduce results to the SPs whose download actually succeeded, preserving
+        # the original catalog order so per-INF logs match the manifest.
+        $okSet = @{}
+        foreach ($r in $dlResults) {
+            if ($r.Success) {
+                $name = [System.IO.Path]::GetFileNameWithoutExtension($r.Item.OutFile)
+                $okSet[$name] = $true
+            }
+        }
+        $readySps = @($softpaqs | Where-Object { $okSet[$_.Id] -eq $true })
+        if ($readySps.Count -eq 0) {
+            Log "Parallel download phase produced no usable files - falling back to full pack."
+            return $null
+        }
+        Log "Parallel download phase: $($readySps.Count)/$($softpaqs.Count) softpaq(s) ready for install."
+        SetProgress 50
+
+        # SERIAL INSTALL PHASE (unchanged semantics - pnputil/HPUP need exclusive access)
         $okCount = 0
         $i = 0
-        foreach ($sp in $softpaqs) {
+        foreach ($sp in $readySps) {
             $i++
             if (Test-Cancelled) { return $false }
-            SetProgress (30 + [int](($i / $softpaqs.Count) * 65))
-            SetExtract -Pct ([int](($i / $softpaqs.Count) * 100)) -Label "Catalog SP [$i/$($softpaqs.Count)]: $($sp.Name)"
-            if (Install-HpSoftpaq -Sp $sp -DriverRoot $DriverRoot -Index $i -Total $softpaqs.Count) {
+            SetProgress (50 + [int](($i / $readySps.Count) * 45))
+            SetExtract -Pct ([int](($i / $readySps.Count) * 100)) -Label "Catalog SP [$i/$($readySps.Count)]: $($sp.Name)"
+            if (Install-HpSoftpaqPostDownload -Sp $sp -DriverRoot $DriverRoot -Index $i -Total $readySps.Count) {
                 $okCount++
             }
         }
 
         Log ""
         Log "=== HP CATALOG SUMMARY ==="
-        Log "Installed: $okCount / $($softpaqs.Count)"
+        Log "Downloaded: $($readySps.Count) / $($softpaqs.Count)  (parallel, concurrency=$($script:MaxParallelDownloads))"
+        Log "Installed : $okCount / $($readySps.Count)"
 
         if ($okCount -eq 0) {
             Log "No softpaqs installed via catalog - falling back to full pack."
@@ -2400,21 +3102,32 @@ function Start-HpDriverInstall {
 # =========================
 # LENOVO
 # =========================
-# Two-path Lenovo flow:
+# Two-path Lenovo flow (priority reversed in v1.11.0):
 #
-#   Path 1: Consumer catalog (https://download.lenovo.com/catalog/<MTM>_<OS>.xml)
-#     Same catalog Lenovo System Update uses. Covers ThinkBook/IdeaPad consumer
-#     plus most ThinkPad/ThinkCentre. Returns a list of individual <package>
-#     entries; each package has a descriptor XML containing the silent install
-#     command + SHA256 checksums. We run each package's own installer.
+#   Path 1 (PRIMARY, v1.11.0+): Recipe Card / catalogv2.xml SCCM driver pack
+#     Lenovo's "Recipe Card" web tool at
+#     https://download.lenovo.com/cdrt/ddrc/RecipeCardWeb.html lists the same
+#     packs as catalogv2.xml. One monolithic .exe -> Inno Setup extract ->
+#     pnputil INFs. Simpler and more reliable than per-package descriptors;
+#     covers most commercial ThinkPad / ThinkCentre models.
 #
-#   Path 2 (fallback): catalogv2.xml SCCM driver pack
-#     One monolithic .exe -> Inno Setup extract -> pnputil INFs. Only used if
-#     Path 1 returned nothing (very old / niche commercial models).
+#   Path 2 (FALLBACK): Consumer catalog (download.lenovo.com/catalog/<MTM>_<OS>.xml)
+#     Same catalog Lenovo System Update uses. Used only when path 1 has no
+#     entry - i.e. consumer / ThinkBook / IdeaPad models that don't appear
+#     in catalogv2.xml. The v1.8.x consumer-catalog stack (DetectInstall
+#     evaluator, NVIDIA short-circuit, BIOS deferral, force-bind unbound) all
+#     stay in place and still run when this fallback fires.
 #
-# Helper Invoke-LenovoPackageCommand runs each package's <ExtractCommand>
-# and <Install><Cmdline> via cmd.exe with the placeholder substitutions
-# Lenovo's installer authors expect (%PACKAGEPATH% and %WINDOWS%).
+# Pre-v1.11.0 the order was reversed: v1.8.0 made consumer catalog primary
+# because catalogv2.xml lacks ThinkBook/IdeaPad coverage. The trade-off bit
+# back on ThinkPads where the consumer-catalog path had many more failure
+# modes than a single full-pack install. v1.11.0 restores the
+# full-pack-when-available behaviour while keeping consumer catalog for the
+# models that genuinely need it.
+#
+# Helper Invoke-LenovoPackageCommand runs each consumer-catalog package's
+# <ExtractCommand> and <Install><Cmdline> via cmd.exe with the placeholder
+# substitutions Lenovo's installer authors expect (%PACKAGEPATH% / %WINDOWS%).
 # =========================
 
 # =========================
@@ -3371,6 +4084,83 @@ function Start-LenovoConsumerCatalogInstall {
     return (($okCount + $alreadyInstalledCount + $naCount) -gt 0)
 }
 
+function Get-LenovoFullPackUrl {
+    # v1.11.0 - factored out of the old inline Path-2 code in
+    # Start-LenovoDriverInstall. Returns the SCCM driver pack URL from
+    # catalogv2.xml (Lenovo's "Recipe Card" listing) for the given machine
+    # type, or $null if the machine type isn't listed. Tries the detected
+    # OS first, then the other Windows generation as a fallback.
+    param(
+        [Parameter(Mandatory=$true)] [string]$MachineType,
+        [Parameter(Mandatory=$true)] [ValidateSet('Win10','Win11')] [string]$OsCode
+    )
+    Log "Checking Lenovo Recipe Card / catalogv2.xml for full driver pack..."
+    $catalogFile = Join-Path $env:TEMP "lenovo_catalogv2.xml"
+    if (-not (Invoke-CurlDownload -Url "https://download.lenovo.com/cdrt/td/catalogv2.xml" -OutFile $catalogFile)) {
+        Log "  catalogv2.xml download failed."
+        return $null
+    }
+    if (Test-Cancelled) { return $null }
+
+    try {
+        $bytes    = [System.IO.File]::ReadAllBytes($catalogFile)
+        $rawText  = [System.Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0xFEFF)
+        [xml]$cat = $rawText
+    } catch {
+        Log "  catalogv2.xml parse failed: $($_.Exception.Message)"
+        return $null
+    }
+
+    $osAttr     = $OsCode.ToLower()
+    $osFallback = if ($osAttr -eq 'win11') { 'win10' } else { 'win11' }
+
+    foreach ($model in $cat.ModelList.Model) {
+        $types = @($model.Types.Type)
+        if (-not ($types | Where-Object { $_ -like "$MachineType*" })) { continue }
+        Log "  Matched Recipe Card model: $($model.name)"
+        foreach ($os in @($osAttr, $osFallback)) {
+            $nodes = @($model.SCCM | Where-Object { $_.os -eq $os })
+            if ($nodes.Count -gt 0) {
+                $url = ($nodes | Select-Object -Last 1)."#text"
+                if ($url -match "^https?://") {
+                    Log "  Recipe Card pack URL [$os]: $url"
+                    return $url
+                }
+            }
+        }
+        # Matched the model but no SCCM URL for either OS - no point checking more models
+        break
+    }
+    Log "  No Recipe Card / SCCM pack listed for machine type '$MachineType'."
+    return $null
+}
+
+function Install-LenovoFullPack {
+    # v1.11.0 - factored out of Start-LenovoDriverInstall's inline path-2 code.
+    # Download -> Inno-Setup extract -> pnputil. Same flow that's been used
+    # since pre-v1.8.0; just isolated for clarity.
+    param(
+        [Parameter(Mandatory=$true)] [string]$PackUrl,
+        [Parameter(Mandatory=$true)] [string]$DriverRoot
+    )
+    SetProgress 28
+    if (-not (Test-Path $DriverRoot)) { New-Item -Path $DriverRoot -ItemType Directory -Force | Out-Null }
+    $packFile = Join-Path $DriverRoot ([System.IO.Path]::GetFileName(([System.Uri]$PackUrl).LocalPath))
+    SetProgress 30
+    if (-not (Invoke-CurlDownload -Url $PackUrl -OutFile $packFile)) {
+        Log "Lenovo driver pack download failed."
+        return $false
+    }
+    if (Test-Cancelled) { return $false }
+    SetProgress 55
+
+    $extractPath = Join-Path $DriverRoot "Lenovo_Extracted"
+    Log "Extracting Lenovo pack..."
+    Start-PackExtraction -PackFile $packFile -DestPath $extractPath -StallLimitSec 300 -Vendor "Lenovo"
+    SetProgress 60
+    return (Install-DriversFromPath -BasePath $extractPath)
+}
+
 function Start-LenovoDriverInstall {
     param([string]$DriverRoot)
 
@@ -3399,82 +4189,53 @@ function Start-LenovoDriverInstall {
     # BuildNumber is the unambiguous Win10 vs Win11 discriminator (>=22000 = Win11).
     $buildNum = 0
     try { $buildNum = [int](Get-CimInstance Win32_OperatingSystem).BuildNumber } catch {}
-    $osCode     = if ($buildNum -ge 22000) { 'Win11' } else { 'Win10' }
-    $osAttr     = $osCode.ToLower()  # 'win10' or 'win11' for the legacy SCCM-pack code below
-    $osFallback = if ($osAttr -eq 'win11') { 'win10' } else { 'win11' }
+    $osCode = if ($buildNum -ge 22000) { 'Win11' } else { 'Win10' }
     Log "Detected OS: $osCode (build $buildNum)"
 
     # ------------------------------------------------------------------
-    # PATH 1: Consumer catalog (Lenovo System Update mechanism)
-    #   This is the catalog that ALSO covers ThinkBook/IdeaPad/consumer
-    #   models missing from catalogv2.xml. Try it first.
+    # v1.11.0 PATH PRIORITY REVERSED FROM v1.8.0:
+    #
+    #   PATH 1 (primary): Recipe Card / catalogv2.xml SCCM full driver pack.
+    #     Lenovo's own "Recipe Card" web tool at
+    #     https://download.lenovo.com/cdrt/ddrc/RecipeCardWeb.html lists the
+    #     same packs. Single .exe -> Inno Setup extract -> pnputil INFs.
+    #     Simpler and more reliable than the per-descriptor consumer flow;
+    #     covers most ThinkPad/ThinkCentre commercial models.
+    #
+    #   PATH 2 (fallback): Consumer catalog (download.lenovo.com/catalog/<MTM>_<OS>.xml).
+    #     Only used when the machine type ISN'T listed in catalogv2.xml -
+    #     i.e. consumer / ThinkBook / IdeaPad models that don't get Recipe
+    #     Card packs (the use case that v1.8.0 originally added support for).
+    #     Per-package descriptors, individual installers, the whole v1.8.x
+    #     consumer-catalog stack stays in place untouched but only runs
+    #     when path 1 has nothing.
+    #
+    #   PATH 3: open Lenovo's Recipe Card web tool for manual selection.
     # ------------------------------------------------------------------
     SetProgress 5
-    $consumerOK = Start-LenovoConsumerCatalogInstall -MachineType $machineType -OsCode $osCode -DriverRoot $DriverRoot
-    if ($consumerOK) {
-        Log "Consumer catalog flow succeeded - skipping legacy SCCM pack path."
-        return $true
+    $packUrl = Get-LenovoFullPackUrl -MachineType $machineType -OsCode $osCode
+    if ($packUrl) {
+        Log "Recipe Card / catalogv2.xml has full pack for '$machineType' - using it."
+        return (Install-LenovoFullPack -PackUrl $packUrl -DriverRoot $DriverRoot)
     }
-    Log "Consumer catalog yielded nothing - falling back to legacy SCCM driver pack..."
+    Log "No Recipe Card pack for '$machineType' - trying consumer catalog (v1.8.0 path)..."
     SetProgress 15
 
-    # ------------------------------------------------------------------
-    # PATH 2: Legacy SCCM driver pack (catalogv2.xml)
-    #   Original behaviour - kept as fallback for older / niche models.
-    # ------------------------------------------------------------------
-    Log "Fetching Lenovo catalogv2.xml..."
-    $catalogFile = Join-Path $env:TEMP "lenovo_catalogv2.xml"
-    if (-not (Invoke-CurlDownload -Url "https://download.lenovo.com/cdrt/td/catalogv2.xml" -OutFile $catalogFile)) {
-        Log "Failed to download Lenovo catalog."
-        return $false
-    }
-    if (Test-Cancelled) { return $false }
-    SetProgress 20
-
-    Log "Parsing Lenovo catalog..."
-    SetExtract -Pct 10 -Label "Parsing catalog..."
-    try {
-        $bytes    = [System.IO.File]::ReadAllBytes($catalogFile)
-        $rawText  = [System.Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0xFEFF)
-        [xml]$cat = $rawText
-        Log "Catalog parsed OK."
-    } catch { Log "Failed to parse Lenovo catalog: $($_.Exception.Message)"; return $false }
-    SetExtract -Pct 30 -Label "Catalog parsed"
-    SetProgress 25
-
-    $packUrl = $null
-    foreach ($model in $cat.ModelList.Model) {
-        $types = @($model.Types.Type)
-        if (-not ($types | Where-Object { $_ -like "$machineType*" })) { continue }
-        Log "Matched model: $($model.name)"
-        foreach ($os in @($osAttr, $osFallback)) {
-            $nodes = @($model.SCCM | Where-Object { $_.os -eq $os })
-            if ($nodes.Count -gt 0) {
-                $url = ($nodes | Select-Object -Last 1)."#text"
-                if ($url -match "^https?://") { $packUrl = $url; Log "Driver pack URL [$os]: $packUrl"; break }
-            }
-        }
-        break
+    $consumerOK = Start-LenovoConsumerCatalogInstall -MachineType $machineType -OsCode $osCode -DriverRoot $DriverRoot
+    if ($consumerOK) {
+        Log "Consumer-catalog flow succeeded."
+        return $true
     }
 
-    if (-not $packUrl) {
-        Log "No SCCM driver pack found for machine type '$machineType'."
-        Start-Process "https://download.lenovo.com/cdrt/ddrc/RecipeCardWeb.html"
-        return $false
+    Log "Neither Recipe Card nor consumer catalog had drivers for '$machineType'."
+    if (-not $script:Headless) {
+        Log "Opening Lenovo Recipe Card web tool for manual selection..."
+        try { Start-Process "https://download.lenovo.com/cdrt/ddrc/RecipeCardWeb.html" } catch {}
+    } else {
+        Log "  (headless: skipping web-tool launch)"
+        Log "  Manual URL: https://download.lenovo.com/cdrt/ddrc/RecipeCardWeb.html"
     }
-    SetProgress 28
-    if (-not (Test-Path $DriverRoot)) { New-Item -Path $DriverRoot -ItemType Directory -Force | Out-Null }
-    $packFile = Join-Path $DriverRoot ([System.IO.Path]::GetFileName(([System.Uri]$packUrl).LocalPath))
-    SetProgress 30
-    if (-not (Invoke-CurlDownload -Url $packUrl -OutFile $packFile)) { Log "Lenovo driver pack download failed."; return $false }
-    if (Test-Cancelled) { return $false }
-    SetProgress 55
-
-    $extractPath = Join-Path $DriverRoot "Lenovo_Extracted"
-    Log "Extracting Lenovo pack..."
-    Start-PackExtraction -PackFile $packFile -DestPath $extractPath -StallLimitSec 300 -Vendor "Lenovo"
-    SetProgress 60
-    return (Install-DriversFromPath -BasePath $extractPath)
+    return $false
 }
 
 # =========================
@@ -3576,7 +4337,7 @@ function Install-SurfaceMsi {
 
     $elapsed = 0; $lastCount = 0; $stall = 0
     while (-not $msiProc.HasExited) {
-        Start-Sleep -Milliseconds 700
+        Invoke-ResponsiveSleep -MillisecondsTotal 700
         $elapsed += 0.7
         $count = if (Test-Path $extractPath) {
             (Get-ChildItem $extractPath -Recurse -EA SilentlyContinue).Count
@@ -4092,6 +4853,15 @@ function Start-Install {
     $script:AnalyticsStartTime       = Get-Date
     $script:7zInstalled              = $false
     $script:Headless                 = [bool]$Headless
+    # v1.10.0 - re-anchor mode flags on each Start-Install invocation. The
+    # script-scope assignments at top-of-file cover the irm|iex path; this
+    # covers the GUI-rerun-via-button-click path where users might re-launch
+    # without restarting PowerShell.
+    $script:Silent      = [bool]$Silent
+    $script:TestMode    = [bool]$TestMode
+    $script:Diagnostic  = [bool]$Diagnostic
+    $script:NoAnalytics = [bool]$NoAnalytics
+    $script:MaxParallelDownloads = $MaxParallelDownloads  # v1.11.0
 
     $id  = [Security.Principal.WindowsIdentity]::GetCurrent()
     $pri = New-Object Security.Principal.WindowsPrincipal($id)
@@ -4108,8 +4878,31 @@ function Start-Install {
         exit
     }
 
-    Log "Driver Installer v$ScriptVersion"
+    Log "Driver Installer v$ScriptVersion" -Level "info" -Event "run_start" -Context @{
+        log_file       = $LogFile
+        events_file    = $EventsLogFile
+        analytics_file = $AnalyticsFile
+        report_file    = $ReportFile
+        headless       = $script:Headless
+        silent         = $script:Silent
+        test_mode      = $script:TestMode
+        diagnostic     = $script:Diagnostic
+        no_analytics   = $script:NoAnalytics
+        skip_install   = [bool]$SkipInstall
+        skip_cleanup   = [bool]$SkipCleanup
+        max_parallel_downloads = $script:MaxParallelDownloads
+    }
     Log "Log: $LogFile"
+    # Surface the active modes prominently - matters most when someone is
+    # reading the log later trying to work out why an install "didn't happen".
+    $modeFlags = @()
+    if ($script:Silent)      { $modeFlags += "SILENT" }
+    if ($script:TestMode)    { $modeFlags += "TEST-MODE (dry-run)" }
+    if ($script:Diagnostic)  { $modeFlags += "DIAGNOSTIC" }
+    if ($script:NoAnalytics) { $modeFlags += "NO-ANALYTICS" }
+    if ($SkipInstall)        { $modeFlags += "SKIP-INSTALL" }
+    if ($SkipCleanup)        { $modeFlags += "SKIP-CLEANUP" }
+    if ($modeFlags.Count -gt 0) { Log "Mode flags  : $($modeFlags -join ', ')" }
     Log "--------------------------------------------"
 
     Play-Sound -Event "Start"
@@ -4138,6 +4931,7 @@ function Start-Install {
     Log "Model        : $model$overrideNote"
 
     Write-DeviceInfo
+    Write-VerboseDiagnostics
     SetProgress 5
 
     # Snapshot missing drivers before install
@@ -4179,6 +4973,40 @@ function Start-Install {
     $exSpinnerLabel.Text      = ""
     $overallSpinnerLabel.Text = ""
     $script:SpinnerIndex      = 0
+
+    # v1.10.0 - TEST MODE SHORT-CIRCUIT
+    # Bail before any system-mutating work happens. We've already done all the
+    # safe stuff: detected manufacturer, snapshotted missing drivers, written
+    # diagnostics. That's enough to tell the operator what a real run would
+    # have done. NB we deliberately fire this AFTER the missing-driver snapshot
+    # so the analytics row shows the real before/after gap (after == before in
+    # test mode, since we touched nothing).
+    if ($script:TestMode) {
+        Log "============================================" -Level "info"
+        Log "  TEST MODE - no downloads, no installs"
+        Log "============================================"
+        Log "  Would dispatch to vendor handler: $manufacturer / $model"
+        Log "  Missing drivers (would attempt to resolve): $($script:AnalyticsMissingBefore)"
+        Log "  Driver root would be: $($DriverRoot)"
+        $script:AnalyticsMissingAfter = $script:AnalyticsMissingBefore
+        SetProgress 100
+        SetDownload -Pct 100 -Label "Test mode - skipped"
+        SetExtract  -Pct 100 -Label "Test mode - skipped"
+        Send-AnalyticsEvent -Result "testmode"
+        Write-HtmlReport -Result "testmode"
+        Play-Sound -Event "Success"
+        if ($script:Headless) {
+            Write-Host "TEST MODE: dry-run complete. See log: $LogFile"
+            Write-Host "Report:    $ReportFile"
+        } else {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Test mode complete.`n`nNo downloads or installs were performed.`n`nReport: $ReportFile",
+                "Test Mode Complete", "OK", "Information"
+            ) | Out-Null
+            Set-ButtonIdle
+        }
+        return
+    }
 
     # Install 7-Zip for Dell and HP extraction (not needed for Lenovo or Surface)
     if ($manufacturer -match "Dell|HP|Hewlett") {
@@ -4267,6 +5095,7 @@ function Start-Install {
         Log "Driver installation complete!"
         Log "Log saved to: $LogFile"
         Send-AnalyticsEvent -Result "success"
+        Write-HtmlReport    -Result "success"  # v1.10.0
         Play-Sound -Event "Success"
 
         if ($SkipCleanup) {
@@ -4284,18 +5113,26 @@ function Start-Install {
         } else { "" }
 
         if ($script:Headless) {
-            Write-Host "SUCCESS: Drivers installed for $model.$missingLine"
-            Write-Host "Run complete. Reboot when ready."
+            if (-not $script:Silent) {
+                Write-Host "SUCCESS: Drivers installed for $model.$missingLine"
+                Write-Host "Run complete. Reboot when ready."
+                Write-Host "Report: $ReportFile"
+            }
         } else {
             $result = [System.Windows.Forms.MessageBox]::Show(
-                "Drivers installed successfully for:`n$model$missingLine`n`nReboot now to complete installation?",
+                "Drivers installed successfully for:`n$model$missingLine`n`nReport saved to:`n$ReportFile`n`nReboot now to complete installation?",
                 "Installation Complete", "YesNo", "Information"
             )
             if ($result -eq [System.Windows.Forms.DialogResult]::Yes) { Restart-Computer -Force }
             else { Set-ButtonIdle }
         }
     } else {
+        # On cancel, Send-AnalyticsEvent was already fired above with result="cancelled".
+        # On non-cancel failure, fire it here. Either way, write the HTML report next
+        # so the operator has a permanent record even on broken/cancelled runs.
         if (-not $script:CancelRequested) { Send-AnalyticsEvent -Result "failure" }
+        $reportResult = if ($script:CancelRequested) { "cancelled" } else { "failure" }
+        Write-HtmlReport -Result $reportResult  # v1.10.0
         SetDownload -Pct 0 -Label "Failed - see log"
         SetExtract  -Pct 0 -Label "Failed - see log"
         Stop-DlSpinner      -Success $false
@@ -4304,10 +5141,13 @@ function Start-Install {
         Play-Sound -Event "Failure"
         Log "Driver installation did not complete. Check log: $LogFile"
         if ($script:Headless) {
-            Write-Host "FAILED: Driver installation did not complete. Check log: $LogFile"
+            if (-not $script:Silent) {
+                Write-Host "FAILED: Driver installation did not complete. Check log: $LogFile"
+                Write-Host "Report: $ReportFile"
+            }
         } else {
             [System.Windows.Forms.MessageBox]::Show(
-                "Driver installation failed or no pack was found.`nCheck the log:`n`n$LogFile",
+                "Driver installation failed or no pack was found.`nCheck the log:`n`n$LogFile`n`nReport: $ReportFile",
                 "Installation Failed", "OK", "Error"
             )
             Set-ButtonIdle
