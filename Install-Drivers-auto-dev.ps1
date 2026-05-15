@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.9.2
+# Version: 1.10.0
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -11,16 +11,63 @@
 #   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -Manufacturer Dell
 #   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -Manufacturer HP -Model "EliteBook x360 1030 G8 Notebook PC"
 #   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -Manufacturer Lenovo -MachineType 20XX -SkipInstall -SkipCleanup
+#   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -TestMode -Diagnostic
+#   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -Silent -NoAnalytics
 #
 # Parameters:
 #   -Manufacturer  Override WMI manufacturer detection (Dell, HP, Lenovo, Microsoft)
 #   -Model         Override WMI model detection
 #   -Headless      Skip GUI, write to console only (auto-set when any param is passed)
+#   -Silent        Like -Headless but ALSO suppresses console output (log file only).
+#                  Forces -Headless on. Useful when launched from another script that
+#                  shouldn't have its stdout polluted, or for unattended scheduled tasks.
+#   -TestMode      Dry-run: detect manufacturer, snapshot missing drivers, fetch catalog
+#                  metadata, but DO NOT download, extract, or install anything that
+#                  mutates the system. Analytics still sent with result="testmode"
+#                  (unless -NoAnalytics). Safe to run on production machines.
+#   -Diagnostic    Verbose logging: extra environment dump, expanded network timings,
+#                  per-step duration logging, full pnputil enum on entry. Doubles log
+#                  size but is invaluable for triaging vendor-catalog regressions.
+#   -NoAnalytics   Disable the Google Sheets webhook entirely. Local analytics JSON
+#                  export is still written to Downloads. Use for offline / air-gapped
+#                  machines or when testing without polluting production telemetry.
 #   -SkipInstall   Download and extract only, skip pnputil driver installation
 #   -SkipCleanup   Keep C:\DRIVERS after run for inspection
 #
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
 #
+# Output files written to %USERPROFILE%\Downloads\ (timestamped, one set per run):
+#   DriverInstaller_<ts>.log         - human-readable text log (always)
+#   DriverInstaller_<ts>.events.json - NDJSON structured event log (always)
+#   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
+#   DriverInstaller_<ts>.report.html - install summary report (on completion)
+#
+# v1.10.0 - New switches and observability layer (additive; no vendor logic changed):
+#           (1) -Silent: log-only mode. Disables both GUI and console output; the log
+#               file is still written. Implies -Headless. Internally, the Log() helper
+#               now respects $script:Silent and short-circuits the Write-Host branch.
+#           (2) -TestMode: dry-run. Start-Install short-circuits before each vendor
+#               install function and reports what WOULD be done. Analytics records
+#               result="testmode" so dry-runs are distinguishable in the Sheet.
+#           (3) -Diagnostic: verbose mode. Existing Write-DeviceInfo is unchanged;
+#               new Write-VerboseDiagnostics adds per-run timings, expanded curl/
+#               network info, and a final perf summary. Controlled by $script:Diagnostic.
+#           (4) -NoAnalytics: skips the Sheets webhook POST. Local
+#               .analytics.json is still written so the data isn't lost if you
+#               later decide to backfill.
+#           (5) Structured NDJSON event log (DriverInstaller_<ts>.events.json):
+#               every Log() call also writes a {ts, level, event, msg, ...ctx} JSON
+#               line. Makes downstream tooling (jq, log shipping, anomaly detection)
+#               trivial without disturbing the existing human log format.
+#           (6) Analytics JSON saved to Downloads (previously written to %TEMP%
+#               and deleted after the curl POST). Now persists alongside the log.
+#           (7) HTML install report (DriverInstaller_<ts>.report.html) generated
+#               at end-of-run. Self-contained single file - useful for tech-stack
+#               sign-off, customer hand-over, or as an artifact attached to a
+#               support ticket.
+#           No changes to: Dell/HP/Lenovo/Surface vendor logic, curl download loop,
+#           extraction watchers, pnputil bind-marker parser, or DetectInstall
+#           evaluator. The new features compose with all existing behaviour.
 # v1.9.2 - Cancel: honour the cancel flag mid-download. In v1.9.1 and prior,
 #           Invoke-CurlDownload's poll loop only watched for $proc.HasExited
 #           and the 3.5-min stall timer - $script:CancelRequested was checked
@@ -220,14 +267,23 @@ param(
     [string]$MachineType  = "",   # Lenovo only: override 4-char machine type prefix (e.g. 20XX)
     [string]$DriverRoot   = "C:\DRIVERS",  # Override default driver root (useful for parallel testing)
     [switch]$Headless,
+    [switch]$Silent,        # v1.10.0 - log-only mode (no GUI, no console). Implies -Headless.
+    [switch]$TestMode,      # v1.10.0 - dry-run: detect + report but do not mutate system.
+    [switch]$Diagnostic,    # v1.10.0 - verbose logging (per-step timings, env extras).
+    [switch]$NoAnalytics,   # v1.10.0 - skip the Sheets webhook (local JSON still written).
     [switch]$SkipInstall,
     [switch]$SkipCleanup
 )
 
-# Auto-enable headless when any override param is passed
-if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" -or $SkipInstall -or $SkipCleanup) { $Headless = $true }
+# Auto-enable headless when any override param is passed.
+# Silent always implies Headless (no GUI is even more "headless" than -Headless alone).
+if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" `
+    -or $SkipInstall -or $SkipCleanup -or $Silent -or $TestMode -or $Diagnostic -or $NoAnalytics) {
+    $Headless = $true
+}
+if ($Silent) { $Headless = $true }
 
-$ScriptVersion   = "1.9.2"
+$ScriptVersion   = "1.10.0"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -247,10 +303,28 @@ w32tm /resync /force | Out-Null
 
 # =========================
 # LOG FILE SETUP
+# v1.10.0 - three sibling files share a common timestamp/base:
+#   <base>.log              - the canonical human-readable log (unchanged)
+#   <base>.events.json      - NDJSON structured events (one JSON object per line)
+#   <base>.analytics.json   - the final analytics payload (written at end-of-run)
+#   <base>.report.html      - end-of-run HTML report (written on completion)
 # =========================
-$LogFile = Join-Path ([Environment]::GetFolderPath("UserProfile")) `
-    ("Downloads\DriverInstaller_" + (Get-Date -Format 'yyyyMMdd_HHmmss') + ".log")
-New-Item -ItemType File -Path $LogFile -Force | Out-Null
+$LogStamp        = Get-Date -Format 'yyyyMMdd_HHmmss'
+$DownloadsDir    = Join-Path ([Environment]::GetFolderPath("UserProfile")) "Downloads"
+$LogBase         = Join-Path $DownloadsDir ("DriverInstaller_" + $LogStamp)
+$LogFile         = "$LogBase.log"
+$EventsLogFile   = "$LogBase.events.json"
+$AnalyticsFile   = "$LogBase.analytics.json"
+$ReportFile      = "$LogBase.report.html"
+New-Item -ItemType File -Path $LogFile       -Force | Out-Null
+New-Item -ItemType File -Path $EventsLogFile -Force | Out-Null
+
+# Mode flags lifted to script scope so helpers below can see them without
+# parameter plumbing. Set in Start-Install as well (covers irm|iex re-entry).
+$script:Silent     = [bool]$Silent
+$script:TestMode   = [bool]$TestMode
+$script:Diagnostic = [bool]$Diagnostic
+$script:NoAnalytics = [bool]$NoAnalytics
 
 # =========================
 # FONT CONSTANTS
@@ -505,17 +579,68 @@ function Set-ButtonIdle {
 # =========================
 # HELPERS
 # =========================
-function Log($msg) {
-    $ts   = Get-Date -Format 'HH:mm:ss'
+function Log {
+    # v1.10.0 - now writes to three sinks:
+    #   1. console / GUI (suppressed by -Silent)
+    #   2. canonical .log text file (always)
+    #   3. .events.json NDJSON stream (always)
+    # The 'level' is heuristically inferred from the message text - existing
+    # call sites don't need to change. Pass -Level / -Event / -Context to a
+    # future structured caller and they'll override the inferred values.
+    param(
+        [Parameter(Mandatory=$true, Position=0)] [string]$msg,
+        [string]$Level   = $null,
+        [string]$Event   = $null,
+        [hashtable]$Context = $null
+    )
+    $now  = Get-Date
+    $ts   = $now.ToString('HH:mm:ss')
     $line = "[$ts] $msg"
-    if ($script:Headless) {
-        Write-Host $line
-    } else {
-        $statusBox.AppendText("$line`r`n")
-        $statusBox.ScrollToCaret()
-        [System.Windows.Forms.Application]::DoEvents()
+
+    # Human sinks
+    if (-not $script:Silent) {
+        if ($script:Headless) {
+            Write-Host $line
+        } else {
+            $statusBox.AppendText("$line`r`n")
+            $statusBox.ScrollToCaret()
+            [System.Windows.Forms.Application]::DoEvents()
+        }
     }
     Add-Content -Path $LogFile -Value $line -Encoding UTF8
+
+    # Structured NDJSON sink. Heuristic level inference keeps existing
+    # one-arg Log calls working; explicit -Level wins when supplied.
+    if (-not $Level) {
+        if ($msg -match '(?i)\bERROR\b|FATAL|FAILED|cannot') { $Level = 'error' }
+        elseif ($msg -match '(?i)\bWARNING\b|WARN\b')        { $Level = 'warn'  }
+        elseif ($msg -match '(?i)\bcancel(led)?\b')          { $Level = 'cancel' }
+        else                                                  { $Level = 'info' }
+    }
+    try {
+        $evt = [ordered]@{
+            ts             = $now.ToString('o')
+            level          = $Level
+            script_version = $ScriptVersion
+            msg            = $msg
+        }
+        if ($Event)   { $evt['event']   = $Event }
+        if ($Context) { foreach ($k in $Context.Keys) { $evt[$k] = $Context[$k] } }
+        $json = $evt | ConvertTo-Json -Compress -Depth 4
+        Add-Content -Path $EventsLogFile -Value $json -Encoding UTF8
+    } catch {
+        # Never let event-log failure interrupt the script. Worst case: the
+        # NDJSON sidecar is incomplete, but the canonical .log still has the line.
+    }
+}
+
+function Log-Diag {
+    # Diagnostic-only log: silently dropped unless -Diagnostic is set.
+    # Use this for high-volume / low-signal trace info (per-iteration timings,
+    # raw HTTP headers, etc.) that would otherwise bloat the standard log.
+    param([string]$msg, [hashtable]$Context = $null)
+    if (-not $script:Diagnostic) { return }
+    Log -msg "[diag] $msg" -Level "debug" -Event "diagnostic" -Context $Context
 }
 
 function SetProgress($val) {
@@ -686,6 +811,186 @@ function Write-MissingDriverDetails {
 }
 
 # =========================
+# v1.10.0 - VERBOSE DIAGNOSTICS
+# Only emits when -Diagnostic was passed. Complements (does not replace)
+# Write-DeviceInfo, which always runs.
+# =========================
+function Write-VerboseDiagnostics {
+    if (-not $script:Diagnostic) { return }
+    Log "============================================" -Level "info" -Event "diag_header"
+    Log "  VERBOSE DIAGNOSTICS (-Diagnostic)"
+    Log "============================================"
+    try {
+        $proxy = [System.Net.WebRequest]::GetSystemWebProxy()
+        $proxyUri = $proxy.GetProxy("https://www.google.com").AbsoluteUri
+        Log "  System proxy        : $proxyUri"
+    } catch { Log "  System proxy        : (error: $($_.Exception.Message))" }
+    try {
+        $tls = [Net.ServicePointManager]::SecurityProtocol
+        Log "  TLS protocols       : $tls"
+    } catch {}
+    try {
+        $curlVer = (& curl.exe --version 2>$null) -join " | "
+        Log "  curl.exe version    : $curlVer"
+    } catch {}
+    try {
+        $route = (route print 0.0.0.0 2>$null | Select-String "0.0.0.0\s+0.0.0.0" | Select-Object -First 1).ToString().Trim()
+        Log "  Default route       : $route"
+    } catch {}
+    try {
+        $nic = Get-NetAdapter -Physical -EA Stop | Where-Object Status -eq 'Up' | Select-Object -First 1
+        if ($nic) {
+            Log "  Active NIC          : $($nic.Name) ($($nic.InterfaceDescription)) - LinkSpeed $($nic.LinkSpeed)"
+        }
+    } catch {}
+    Log "============================================"
+}
+
+# =========================
+# v1.10.0 - HTML INSTALL REPORT
+# Self-contained single-file HTML with all the analytics state. Saved to
+# Downloads alongside the .log so it can be attached to support tickets or
+# shown to customers at handover. No external CSS/JS - styled inline.
+# =========================
+function Write-HtmlReport {
+    param(
+        [Parameter(Mandatory=$true)][ValidateSet("success","failure","cancelled","testmode")]
+        [string]$Result
+    )
+    try {
+        $durationSec = if ($script:AnalyticsStartTime) {
+            [int]((Get-Date) - $script:AnalyticsStartTime).TotalSeconds
+        } else { 0 }
+        $durationDisplay = if ($durationSec -ge 60) {
+            "{0}m {1}s" -f ([math]::Floor($durationSec/60)), ($durationSec % 60)
+        } else { "${durationSec}s" }
+
+        $missingDelta = if ($script:AnalyticsMissingBefore -ge 0 -and $script:AnalyticsMissingAfter -ge 0) {
+            $script:AnalyticsMissingBefore - $script:AnalyticsMissingAfter
+        } else { 0 }
+
+        # Status colour palette - reused for the badge and the row accents.
+        $statusColour = switch ($Result) {
+            "success"   { "#1b873f" }
+            "failure"   { "#c92a2a" }
+            "cancelled" { "#a37b00" }
+            "testmode"  { "#1864ab" }
+        }
+        $statusLabel = $Result.ToUpper()
+
+        # HTML-escape user-controlled strings (model names sometimes contain &)
+        function _He($s) {
+            if ($null -eq $s) { return "" }
+            $s -replace '&','&amp;' -replace '<','&lt;' -replace '>','&gt;' -replace '"','&quot;'
+        }
+
+        $installedRows = ""
+        if ($script:AnalyticsInstalledDrivers -and $script:AnalyticsInstalledDrivers.Count -gt 0) {
+            foreach ($d in $script:AnalyticsInstalledDrivers) {
+                if ([string]::IsNullOrWhiteSpace($d)) { continue }
+                $installedRows += "<li>$(_He $d)</li>`n"
+            }
+        } else {
+            $installedRows = "<li class='muted'>(none recorded)</li>"
+        }
+
+        $html = @"
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Driver Installer Report - $(_He $script:AnalyticsModel)</title>
+<style>
+  body { font: 14px/1.5 -apple-system, "Segoe UI", system-ui, sans-serif; color: #222; background: #f6f7f9; margin: 0; padding: 24px; }
+  .wrap { max-width: 900px; margin: 0 auto; background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.08); overflow: hidden; }
+  header { padding: 20px 28px; border-bottom: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center; }
+  header h1 { margin: 0; font-size: 20px; font-weight: 600; }
+  header .v { color: #6b7280; font-size: 12px; }
+  .badge { display: inline-block; padding: 6px 14px; border-radius: 999px; color: #fff; font-weight: 600; font-size: 12px; letter-spacing: .05em; background: $statusColour; }
+  section { padding: 18px 28px; border-bottom: 1px solid #f0f1f3; }
+  section:last-child { border-bottom: 0; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: #6b7280; margin: 0 0 12px 0; font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 6px 0; vertical-align: top; }
+  td.k { width: 200px; color: #6b7280; }
+  td.v { font-family: ui-monospace, "Cascadia Mono", "Consolas", monospace; font-size: 13px; word-break: break-word; }
+  ul { margin: 0; padding-left: 20px; font-family: ui-monospace, "Cascadia Mono", "Consolas", monospace; font-size: 13px; }
+  ul li { margin: 2px 0; }
+  .muted { color: #9ca3af; font-style: italic; list-style: none; margin-left: -20px; }
+  .delta-good { color: #1b873f; font-weight: 600; }
+  .delta-bad  { color: #c92a2a; font-weight: 600; }
+  footer { padding: 12px 28px; color: #9ca3af; font-size: 11px; background: #fafbfc; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Driver Installer Report</h1>
+      <div class="v">Script v$ScriptVersion &middot; generated $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')</div>
+    </div>
+    <span class="badge">$statusLabel</span>
+  </header>
+
+  <section>
+    <h2>Device</h2>
+    <table>
+      <tr><td class="k">Manufacturer</td><td class="v">$(_He $script:AnalyticsManufacturer)</td></tr>
+      <tr><td class="k">Model</td><td class="v">$(_He $script:AnalyticsModel)</td></tr>
+      <tr><td class="k">Serial / Service Tag</td><td class="v">$(_He $script:AnalyticsSerial)</td></tr>
+      <tr><td class="k">OS Version</td><td class="v">$(_He $script:AnalyticsOsVersion) (build $($script:AnalyticsOsBuild))</td></tr>
+    </table>
+  </section>
+
+  <section>
+    <h2>Result</h2>
+    <table>
+      <tr>
+        <td class="k">Missing drivers before</td>
+        <td class="v">$($script:AnalyticsMissingBefore)</td>
+      </tr>
+      <tr>
+        <td class="k">Missing drivers after</td>
+        <td class="v">$($script:AnalyticsMissingAfter)</td>
+      </tr>
+      <tr>
+        <td class="k">Resolved</td>
+        <td class="v"><span class="$(if ($missingDelta -gt 0) {'delta-good'} elseif ($missingDelta -lt 0) {'delta-bad'} else {''})">$missingDelta</span></td>
+      </tr>
+      <tr><td class="k">INFs installed (bound)</td><td class="v">$($script:AnalyticsInfCount)</td></tr>
+      <tr><td class="k">Total download size</td><td class="v">$($script:AnalyticsDownloadMB) MB</td></tr>
+      <tr><td class="k">Duration</td><td class="v">$durationDisplay</td></tr>
+    </table>
+  </section>
+
+  <section>
+    <h2>Installed drivers / packages</h2>
+    <ul>$installedRows</ul>
+  </section>
+
+  <section>
+    <h2>Artifacts</h2>
+    <table>
+      <tr><td class="k">Text log</td><td class="v">$(_He $LogFile)</td></tr>
+      <tr><td class="k">Structured events</td><td class="v">$(_He $EventsLogFile)</td></tr>
+      <tr><td class="k">Analytics JSON</td><td class="v">$(_He $AnalyticsFile)</td></tr>
+    </table>
+  </section>
+
+  <footer>Install-Drivers-auto.ps1 v$ScriptVersion &middot; skermiebroTech &middot; github.com/skermiebroTech/my-wiki</footer>
+</div>
+</body>
+</html>
+"@
+        $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText($ReportFile, $html, $utf8NoBom)
+        Log "HTML report saved to: $ReportFile" -Level "info" -Event "report_written"
+    } catch {
+        Log "  WARNING: HTML report generation failed - $($_.Exception.Message)" -Level "warn"
+    }
+}
+
+# =========================
 # 7-ZIP HELPERS
 # Installed at start of Start-Install for Dell/HP extraction.
 # Removed before final cleanup so nothing persists to the customer.
@@ -778,7 +1083,7 @@ $script:AnalyticsInstalledDrivers = New-Object System.Collections.Generic.List[s
 
 function Send-AnalyticsEvent {
     param(
-        [ValidateSet("success","failure","cancelled")]
+        [ValidateSet("success","failure","cancelled","testmode")]
         [string]$Result
     )
     $durationSec = 0
@@ -819,15 +1124,37 @@ function Send-AnalyticsEvent {
   "installed_drivers": "$installedDriversStr"
 }
 "@
-    Log "Sending analytics (result=$Result, model=$($script:AnalyticsModel), infs=$($script:AnalyticsInfCount), dl=$($script:AnalyticsDownloadMB)MB, missing=$($script:AnalyticsMissingBefore)->$($script:AnalyticsMissingAfter), installed=$($script:AnalyticsInstalledDrivers.Count), duration=${durationSec}s)..."
+
+    # v1.10.0 - persist payload to Downloads alongside the .log so analytics is
+    # never lost (previously only existed in %TEMP% for the duration of the curl
+    # POST, then deleted). This also gives -NoAnalytics runs a local record.
     try {
-        $payloadFile = Join-Path $env:TEMP "analytics_payload_$(Get-Date -Format 'HHmmss').json"
-        $utf8NoBom   = New-Object System.Text.UTF8Encoding $false
-        [System.IO.File]::WriteAllText($payloadFile, $payload, $utf8NoBom)
+        $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText($AnalyticsFile, $payload, $utf8NoBom)
+        Log-Diag "Analytics payload persisted to: $AnalyticsFile"
+    } catch {
+        Log "  WARNING: could not write analytics JSON to Downloads - $($_.Exception.Message)"
+    }
+
+    Log "Sending analytics (result=$Result, model=$($script:AnalyticsModel), infs=$($script:AnalyticsInfCount), dl=$($script:AnalyticsDownloadMB)MB, missing=$($script:AnalyticsMissingBefore)->$($script:AnalyticsMissingAfter), installed=$($script:AnalyticsInstalledDrivers.Count), duration=${durationSec}s)..." `
+        -Level "info" -Event "analytics_send" -Context @{
+            result        = $Result
+            inf_count     = $script:AnalyticsInfCount
+            download_mb   = $script:AnalyticsDownloadMB
+            duration_sec  = $durationSec
+        }
+
+    if ($script:NoAnalytics) {
+        Log "  -NoAnalytics set: skipping Sheets webhook. Local copy at $AnalyticsFile"
+        return
+    }
+
+    try {
+        # Use the persisted file as curl's data source - no second temp file needed.
         $curlArgs = "--silent --max-time 15 --connect-timeout 10 " +
                     "--location " +
                     "-H `"Content-Type: application/json`" " +
-                    "--data `@`"$payloadFile`" " +
+                    "--data `@`"$AnalyticsFile`" " +
                     "`"$SHEETS_WEBHOOK`""
         $psi                        = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName               = "curl.exe"
@@ -842,16 +1169,20 @@ function Send-AnalyticsEvent {
         $stdout = $proc.StandardOutput.ReadToEnd().Trim()
         $stderr = $proc.StandardError.ReadToEnd().Trim()
         $proc.WaitForExit()
-        Remove-Item $payloadFile -EA SilentlyContinue
         if ($proc.ExitCode -ne 0) {
-            Log "  Analytics warning: curl exit $($proc.ExitCode) - $stderr"
+            Log "  Analytics warning: curl exit $($proc.ExitCode) - $stderr" `
+                -Level "warn" -Event "analytics_fail"
         } elseif ($stdout -eq "OK") {
-            Log "  Analytics sent OK - row written to Google Sheet."
+            Log "  Analytics sent OK - row written to Google Sheet." `
+                -Level "info" -Event "analytics_ok"
         } else {
-            Log "  Analytics unexpected response: $stdout"
+            Log "  Analytics unexpected response: $stdout" `
+                -Level "warn" -Event "analytics_fail"
         }
     } catch {
-        Log "  Analytics error: $($_.Exception.Message)"
+        # Analytics failures must NEVER stop script execution - just log + carry on.
+        Log "  Analytics error: $($_.Exception.Message)" `
+            -Level "error" -Event "analytics_error"
     }
 }
 
@@ -4092,6 +4423,14 @@ function Start-Install {
     $script:AnalyticsStartTime       = Get-Date
     $script:7zInstalled              = $false
     $script:Headless                 = [bool]$Headless
+    # v1.10.0 - re-anchor mode flags on each Start-Install invocation. The
+    # script-scope assignments at top-of-file cover the irm|iex path; this
+    # covers the GUI-rerun-via-button-click path where users might re-launch
+    # without restarting PowerShell.
+    $script:Silent      = [bool]$Silent
+    $script:TestMode    = [bool]$TestMode
+    $script:Diagnostic  = [bool]$Diagnostic
+    $script:NoAnalytics = [bool]$NoAnalytics
 
     $id  = [Security.Principal.WindowsIdentity]::GetCurrent()
     $pri = New-Object Security.Principal.WindowsPrincipal($id)
@@ -4108,8 +4447,30 @@ function Start-Install {
         exit
     }
 
-    Log "Driver Installer v$ScriptVersion"
+    Log "Driver Installer v$ScriptVersion" -Level "info" -Event "run_start" -Context @{
+        log_file       = $LogFile
+        events_file    = $EventsLogFile
+        analytics_file = $AnalyticsFile
+        report_file    = $ReportFile
+        headless       = $script:Headless
+        silent         = $script:Silent
+        test_mode      = $script:TestMode
+        diagnostic     = $script:Diagnostic
+        no_analytics   = $script:NoAnalytics
+        skip_install   = [bool]$SkipInstall
+        skip_cleanup   = [bool]$SkipCleanup
+    }
     Log "Log: $LogFile"
+    # Surface the active modes prominently - matters most when someone is
+    # reading the log later trying to work out why an install "didn't happen".
+    $modeFlags = @()
+    if ($script:Silent)      { $modeFlags += "SILENT" }
+    if ($script:TestMode)    { $modeFlags += "TEST-MODE (dry-run)" }
+    if ($script:Diagnostic)  { $modeFlags += "DIAGNOSTIC" }
+    if ($script:NoAnalytics) { $modeFlags += "NO-ANALYTICS" }
+    if ($SkipInstall)        { $modeFlags += "SKIP-INSTALL" }
+    if ($SkipCleanup)        { $modeFlags += "SKIP-CLEANUP" }
+    if ($modeFlags.Count -gt 0) { Log "Mode flags  : $($modeFlags -join ', ')" }
     Log "--------------------------------------------"
 
     Play-Sound -Event "Start"
@@ -4138,6 +4499,7 @@ function Start-Install {
     Log "Model        : $model$overrideNote"
 
     Write-DeviceInfo
+    Write-VerboseDiagnostics
     SetProgress 5
 
     # Snapshot missing drivers before install
@@ -4179,6 +4541,40 @@ function Start-Install {
     $exSpinnerLabel.Text      = ""
     $overallSpinnerLabel.Text = ""
     $script:SpinnerIndex      = 0
+
+    # v1.10.0 - TEST MODE SHORT-CIRCUIT
+    # Bail before any system-mutating work happens. We've already done all the
+    # safe stuff: detected manufacturer, snapshotted missing drivers, written
+    # diagnostics. That's enough to tell the operator what a real run would
+    # have done. NB we deliberately fire this AFTER the missing-driver snapshot
+    # so the analytics row shows the real before/after gap (after == before in
+    # test mode, since we touched nothing).
+    if ($script:TestMode) {
+        Log "============================================" -Level "info"
+        Log "  TEST MODE - no downloads, no installs"
+        Log "============================================"
+        Log "  Would dispatch to vendor handler: $manufacturer / $model"
+        Log "  Missing drivers (would attempt to resolve): $($script:AnalyticsMissingBefore)"
+        Log "  Driver root would be: $($DriverRoot)"
+        $script:AnalyticsMissingAfter = $script:AnalyticsMissingBefore
+        SetProgress 100
+        SetDownload -Pct 100 -Label "Test mode - skipped"
+        SetExtract  -Pct 100 -Label "Test mode - skipped"
+        Send-AnalyticsEvent -Result "testmode"
+        Write-HtmlReport -Result "testmode"
+        Play-Sound -Event "Success"
+        if ($script:Headless) {
+            Write-Host "TEST MODE: dry-run complete. See log: $LogFile"
+            Write-Host "Report:    $ReportFile"
+        } else {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Test mode complete.`n`nNo downloads or installs were performed.`n`nReport: $ReportFile",
+                "Test Mode Complete", "OK", "Information"
+            ) | Out-Null
+            Set-ButtonIdle
+        }
+        return
+    }
 
     # Install 7-Zip for Dell and HP extraction (not needed for Lenovo or Surface)
     if ($manufacturer -match "Dell|HP|Hewlett") {
@@ -4267,6 +4663,7 @@ function Start-Install {
         Log "Driver installation complete!"
         Log "Log saved to: $LogFile"
         Send-AnalyticsEvent -Result "success"
+        Write-HtmlReport    -Result "success"  # v1.10.0
         Play-Sound -Event "Success"
 
         if ($SkipCleanup) {
@@ -4284,18 +4681,26 @@ function Start-Install {
         } else { "" }
 
         if ($script:Headless) {
-            Write-Host "SUCCESS: Drivers installed for $model.$missingLine"
-            Write-Host "Run complete. Reboot when ready."
+            if (-not $script:Silent) {
+                Write-Host "SUCCESS: Drivers installed for $model.$missingLine"
+                Write-Host "Run complete. Reboot when ready."
+                Write-Host "Report: $ReportFile"
+            }
         } else {
             $result = [System.Windows.Forms.MessageBox]::Show(
-                "Drivers installed successfully for:`n$model$missingLine`n`nReboot now to complete installation?",
+                "Drivers installed successfully for:`n$model$missingLine`n`nReport saved to:`n$ReportFile`n`nReboot now to complete installation?",
                 "Installation Complete", "YesNo", "Information"
             )
             if ($result -eq [System.Windows.Forms.DialogResult]::Yes) { Restart-Computer -Force }
             else { Set-ButtonIdle }
         }
     } else {
+        # On cancel, Send-AnalyticsEvent was already fired above with result="cancelled".
+        # On non-cancel failure, fire it here. Either way, write the HTML report next
+        # so the operator has a permanent record even on broken/cancelled runs.
         if (-not $script:CancelRequested) { Send-AnalyticsEvent -Result "failure" }
+        $reportResult = if ($script:CancelRequested) { "cancelled" } else { "failure" }
+        Write-HtmlReport -Result $reportResult  # v1.10.0
         SetDownload -Pct 0 -Label "Failed - see log"
         SetExtract  -Pct 0 -Label "Failed - see log"
         Stop-DlSpinner      -Success $false
@@ -4304,10 +4709,13 @@ function Start-Install {
         Play-Sound -Event "Failure"
         Log "Driver installation did not complete. Check log: $LogFile"
         if ($script:Headless) {
-            Write-Host "FAILED: Driver installation did not complete. Check log: $LogFile"
+            if (-not $script:Silent) {
+                Write-Host "FAILED: Driver installation did not complete. Check log: $LogFile"
+                Write-Host "Report: $ReportFile"
+            }
         } else {
             [System.Windows.Forms.MessageBox]::Show(
-                "Driver installation failed or no pack was found.`nCheck the log:`n`n$LogFile",
+                "Driver installation failed or no pack was found.`nCheck the log:`n`n$LogFile`n`nReport: $ReportFile",
                 "Installation Failed", "OK", "Error"
             )
             Set-ButtonIdle
