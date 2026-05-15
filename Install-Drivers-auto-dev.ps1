@@ -376,6 +376,7 @@ $script:TestMode   = [bool]$TestMode
 $script:Diagnostic = [bool]$Diagnostic
 $script:NoAnalytics = [bool]$NoAnalytics
 $script:MaxParallelDownloads = $MaxParallelDownloads  # v1.11.0
+$script:AutoScroll = $true   # v1.11.0 - GUI console auto-scrolls to latest line; toggle via checkbox or Set-AutoScroll
 
 # =========================
 # FONT CONSTANTS
@@ -480,7 +481,10 @@ $form.Controls.Add($versionLabel)
 # =========================
 # CONSOLE / STATUS CARD
 # Dark console box wrapped in a faint border so it reads as a "card".
-# Border is just a Panel one pixel larger than the RichTextBox.
+# The status box is a CHILD of the border panel, not a sibling on the form —
+# v1.11.0 fix: siblings on $form fight over Z-order (first-added wins in
+# WinForms), which made the border panel render OVER the textbox and the
+# whole console appeared as a grey rectangle.
 # =========================
 $statusCardBorder            = New-Object System.Windows.Forms.Panel
 $statusCardBorder.Size       = New-Object System.Drawing.Size(556, 224)
@@ -492,13 +496,13 @@ $statusBox             = New-Object System.Windows.Forms.RichTextBox
 $statusBox.Multiline   = $true
 $statusBox.ScrollBars  = "Vertical"
 $statusBox.Size        = New-Object System.Drawing.Size(554, 222)
-$statusBox.Location    = New-Object System.Drawing.Point(29, 89)
+$statusBox.Location    = New-Object System.Drawing.Point(1, 1)    # relative to parent panel = 1px frame
 $statusBox.ReadOnly    = $true
 $statusBox.BackColor   = $ColorConsoleBg
 $statusBox.ForeColor   = $ColorConsoleFg
 $statusBox.Font        = $FontMono
 $statusBox.BorderStyle = "None"
-$form.Controls.Add($statusBox)
+$statusCardBorder.Controls.Add($statusBox)        # CHILD of the panel - no Z-order conflict
 
 # =========================
 # PROGRESS SECTIONS
@@ -675,6 +679,27 @@ $soundCheckbox.Location          = New-Object System.Drawing.Point(28, 538)
 $soundCheckbox.UseCompatibleTextRendering = $false
 $form.Controls.Add($soundCheckbox)
 
+# v1.11.0 - Auto-scroll toggle. Default on (matches pre-v1.11.0 behaviour).
+# Unchecking lets the user scroll back through the log while the run continues -
+# new lines still arrive but the textbox doesn't yank them down to the bottom.
+$autoScrollCheckbox                   = New-Object System.Windows.Forms.CheckBox
+$autoScrollCheckbox.Text              = "Auto-scroll"
+$autoScrollCheckbox.Checked           = $true
+$autoScrollCheckbox.Font              = $FontUI
+$autoScrollCheckbox.ForeColor         = $ColorTextHi
+$autoScrollCheckbox.AutoSize          = $true
+$autoScrollCheckbox.Location          = New-Object System.Drawing.Point(126, 538)
+$autoScrollCheckbox.UseCompatibleTextRendering = $false
+$autoScrollCheckbox.Add_CheckedChanged({
+    # Sync the script-scope flag with the checkbox state. Set-AutoScroll
+    # also re-snaps the textbox to bottom on enable, which is the natural
+    # expectation when the user re-checks the box mid-run.
+    if ($script:AutoScroll -ne $autoScrollCheckbox.Checked) {
+        Set-AutoScroll -Enabled $autoScrollCheckbox.Checked
+    }
+})
+$form.Controls.Add($autoScrollCheckbox)
+
 $button            = New-Object System.Windows.Forms.Button
 $button.Text       = "Install Drivers"
 $button.Size       = New-Object System.Drawing.Size(146, 36)
@@ -761,6 +786,34 @@ function Set-ButtonIdle {
     [System.Windows.Forms.Application]::DoEvents()
 }
 
+function Set-AutoScroll {
+    # v1.11.0 - enable or disable auto-scroll of the GUI console box.
+    # Usage:
+    #   Set-AutoScroll $true     # snap to bottom on every Log line (default)
+    #   Set-AutoScroll $false    # leave the scroll position alone - user can
+    #                            # browse history while the run continues
+    #
+    # The checkbox in the footer toggles this too; calling this function and
+    # toggling the checkbox stay in sync because the checkbox's CheckedChanged
+    # handler calls back into this function.
+    param([bool]$Enabled)
+    $script:AutoScroll = $Enabled
+    if (-not $script:Headless -and $autoScrollCheckbox -and $autoScrollCheckbox.Checked -ne $Enabled) {
+        # Don't trigger a CheckedChanged event loop: only assign if the checkbox
+        # state doesn't already match. (The CheckedChanged handler also guards
+        # against this via state comparison, but belt-and-braces is cheap.)
+        $autoScrollCheckbox.Checked = $Enabled
+    }
+    if (-not $script:Headless -and $Enabled -and $statusBox) {
+        # When re-enabling, jump straight to the bottom so the next log line
+        # doesn't appear orphaned in the middle of the scrollback.
+        $statusBox.SelectionStart = $statusBox.TextLength
+        $statusBox.ScrollToCaret()
+    }
+    Log "Auto-scroll: $(if ($Enabled) { 'on' } else { 'off (browse history freely)' })" `
+        -Level "info" -Event "auto_scroll_toggle" -Context @{ enabled = $Enabled }
+}
+
 # =========================
 # HELPERS
 # =========================
@@ -788,7 +841,10 @@ function Log {
             Write-Host $line
         } else {
             $statusBox.AppendText("$line`r`n")
-            $statusBox.ScrollToCaret()
+            # v1.11.0 - only snap to bottom when auto-scroll is on. When the user
+            # has scrolled back to read history, $script:AutoScroll = $false stops
+            # the textbox yanking them down on every new log line.
+            if ($script:AutoScroll) { $statusBox.ScrollToCaret() }
             [System.Windows.Forms.Application]::DoEvents()
         }
     }
