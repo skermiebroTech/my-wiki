@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.11.0
+# Version: 1.12.0
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -333,7 +333,7 @@ if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" `
 }
 if ($Silent) { $Headless = $true }
 
-$ScriptVersion   = "1.11.0"
+$ScriptVersion   = "1.12.0"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -376,356 +376,252 @@ $script:TestMode   = [bool]$TestMode
 $script:Diagnostic = [bool]$Diagnostic
 $script:NoAnalytics = [bool]$NoAnalytics
 $script:MaxParallelDownloads = $MaxParallelDownloads  # v1.11.0
-$script:AutoScroll = $true   # v1.11.0 - GUI console auto-scrolls to latest line; toggle via checkbox or Set-AutoScroll
+
+# =========================
+# v1.12.0 - RESPONSIVE UI HELPERS
+# =========================
+function Invoke-ResponsiveSleep {
+    <#
+    Sleep while keeping the UI responsive by processing events in small chunks.
+    Instead of sleeping for 700ms straight (blocking the UI), this breaks it into
+    50ms chunks with DoEvents calls, making the interface feel snappy.
+    #>
+    param(
+        [int]$MillisecondsTotal = 700,
+        [int]$ChunkSize = 50
+    )
+    $elapsed = 0
+    while ($elapsed -lt $MillisecondsTotal) {
+        [System.Windows.Forms.Application]::DoEvents()
+        $remaining = $MillisecondsTotal - $elapsed
+        $sleepMs = if ($remaining -lt $ChunkSize) { $remaining } else { $ChunkSize }
+        Start-Sleep -Milliseconds $sleepMs
+        $elapsed += $sleepMs
+    }
+}
 
 # =========================
 # FONT CONSTANTS
 # =========================
-$FontMono       = New-Object System.Drawing.Font("Cascadia Mono", 9,    [System.Drawing.FontStyle]::Regular)
-if ($FontMono.Name -ne "Cascadia Mono") {
-    # Cascadia ships with Windows Terminal but isn't on every fresh install.
-    # Fall back to Consolas, then Courier New, both ubiquitous.
-    $FontMono   = New-Object System.Drawing.Font("Consolas",      9,    [System.Drawing.FontStyle]::Regular)
-    if ($FontMono.Name -ne "Consolas") {
-        $FontMono = New-Object System.Drawing.Font("Courier New", 9,    [System.Drawing.FontStyle]::Regular)
-    }
-}
-$FontMonoSm     = New-Object System.Drawing.Font($FontMono.FontFamily, 8.25, [System.Drawing.FontStyle]::Regular)
-$FontUI         = New-Object System.Drawing.Font("Segoe UI",    9,    [System.Drawing.FontStyle]::Regular)
-$FontUIBold     = New-Object System.Drawing.Font("Segoe UI",    9,    [System.Drawing.FontStyle]::Bold)
-$FontUIBoldSm   = New-Object System.Drawing.Font("Segoe UI",    8.25, [System.Drawing.FontStyle]::Bold)
-$FontUISmall    = New-Object System.Drawing.Font("Segoe UI",    8,    [System.Drawing.FontStyle]::Regular)
-$FontTitleBold  = New-Object System.Drawing.Font("Segoe UI Semibold", 17, [System.Drawing.FontStyle]::Bold)
-$FontSubtitle   = New-Object System.Drawing.Font("Segoe UI",    9,    [System.Drawing.FontStyle]::Regular)
-$FontSectionHdr = New-Object System.Drawing.Font("Segoe UI Semibold", 10, [System.Drawing.FontStyle]::Bold)
-$FontStatusDot  = New-Object System.Drawing.Font("Segoe UI",    13,   [System.Drawing.FontStyle]::Regular)
-$FontButton     = New-Object System.Drawing.Font("Segoe UI Semibold", 9.5, [System.Drawing.FontStyle]::Bold)
+$FontMono      = New-Object System.Drawing.Font("Courier New", 9,   [System.Drawing.FontStyle]::Regular)
+$FontMonoSm    = New-Object System.Drawing.Font("Courier New", 8,   [System.Drawing.FontStyle]::Regular)
+$FontUI        = New-Object System.Drawing.Font("Segoe UI",    9,   [System.Drawing.FontStyle]::Regular)
+$FontUIBold    = New-Object System.Drawing.Font("Segoe UI",    9,   [System.Drawing.FontStyle]::Bold)
+$FontUIBoldSm  = New-Object System.Drawing.Font("Segoe UI",    8,   [System.Drawing.FontStyle]::Bold)
+$FontUISmall   = New-Object System.Drawing.Font("Segoe UI",    7.5, [System.Drawing.FontStyle]::Regular)
+$FontTitleBold = New-Object System.Drawing.Font("Segoe UI",    13,  [System.Drawing.FontStyle]::Bold)
 
 # =========================
-# COLOR PALETTE (v1.11.0 UI refresh)
-# Cool, modern, content-forward. Inspired by Tailwind gray/blue/emerald families
-# so the script doesn't look like an abandoned 2014 utility on a 2026 monitor.
-# Roles are stable so the rest of the script can keep referencing the same names.
-# =========================
-$ColorBg          = [System.Drawing.Color]::FromArgb(248, 249, 251)   # surface (gray-50)
-$ColorCardBorder  = [System.Drawing.Color]::FromArgb(229, 231, 235)   # card border (gray-200)
-$ColorTextHi      = [System.Drawing.Color]::FromArgb(17,  24,  39)    # primary text (gray-900)
-$ColorTextMid     = [System.Drawing.Color]::FromArgb(75,  85,  99)    # secondary text (gray-600)
-$ColorTextLo      = [System.Drawing.Color]::FromArgb(107, 114, 128)   # tertiary text (gray-500)
-$ColorPrimary     = [System.Drawing.Color]::FromArgb(37,  99,  235)   # blue-600
-$ColorPrimaryDk   = [System.Drawing.Color]::FromArgb(29,  78,  216)   # blue-700 (hover)
-$ColorPrimaryPd   = [System.Drawing.Color]::FromArgb(30,  64,  175)   # blue-800 (pressed)
-$ColorSuccess     = [System.Drawing.Color]::FromArgb(16,  185, 129)   # emerald-500
-$ColorAccent      = [System.Drawing.Color]::FromArgb(99,  102, 241)   # indigo-500
-$ColorDanger      = [System.Drawing.Color]::FromArgb(220, 38,  38)    # red-600
-$ColorDangerDk    = [System.Drawing.Color]::FromArgb(185, 28,  28)    # red-700 (hover)
-$ColorMuted       = [System.Drawing.Color]::FromArgb(156, 163, 175)   # gray-400 (idle dot)
-$ColorMutedBg     = [System.Drawing.Color]::FromArgb(107, 114, 128)   # gray-500 (disabled btn bg - dark enough for WHITE text @ 4.5:1)
-$ColorDisabledFg  = [System.Drawing.Color]::FromArgb(243, 244, 246)   # gray-100 (near-white text on disabled btn)
-$ColorConsoleBg   = [System.Drawing.Color]::FromArgb(17,  24,  39)    # console bg (gray-900)
-$ColorConsoleFg   = [System.Drawing.Color]::FromArgb(209, 250, 229)   # console fg (green-100 - bright mint, ~16:1 contrast on bg)
-
-# =========================
-# FORM
+# FORM SETUP - Enhanced Modern UI
 # =========================
 $form                 = New-Object System.Windows.Forms.Form
 $form.Text            = "Driver Installer Tool  v$ScriptVersion"
-$form.Size            = New-Object System.Drawing.Size(612, 628)
+$form.Size            = New-Object System.Drawing.Size(620, 600)
 $form.StartPosition   = "CenterScreen"
 $form.FormBorderStyle = "FixedSingle"
 $form.MaximizeBox     = $false
-$form.BackColor       = $ColorBg
-$form.Font            = $FontUI   # default for any child control that doesn't override
+$form.BackColor       = [System.Drawing.Color]::FromArgb(16, 20, 28)  # Dark slate background
+$form.ForeColor       = [System.Drawing.Color]::FromArgb(229, 230, 235)
 
-# Top accent stripe (4px) - cheap branding cue, modern apps all do this.
-$accentBar           = New-Object System.Windows.Forms.Panel
-$accentBar.Size      = New-Object System.Drawing.Size(612, 4)
-$accentBar.Location  = New-Object System.Drawing.Point(0, 0)
-$accentBar.BackColor = $ColorPrimary
-$form.Controls.Add($accentBar)
-
-# =========================
-# HEADER ROW (title + dynamic subtitle + version pill)
-# =========================
 $title           = New-Object System.Windows.Forms.Label
 $title.AutoSize  = $true
 $title.Font      = $FontTitleBold
-$title.ForeColor = $ColorTextHi
-$title.Location  = New-Object System.Drawing.Point(28, 22)
+$title.ForeColor = [System.Drawing.Color]::FromArgb(255, 255, 255)
+$title.Location  = New-Object System.Drawing.Point(25, 20)
 $title.Text      = "Driver Installer"
 $title.UseCompatibleTextRendering = $false
 $form.Controls.Add($title)
 
-# Subtitle below the title - shows model after detection. Helpers can set
-# $subtitle.Text to refresh; it's tiny and easy to miss but really pulls the
-# whole layout together.
-$subtitle           = New-Object System.Windows.Forms.Label
-$subtitle.AutoSize  = $true
-$subtitle.Font      = $FontSubtitle
-$subtitle.ForeColor = $ColorTextMid
-$subtitle.Location  = New-Object System.Drawing.Point(28, 56)
-$subtitle.Text      = "Detecting hardware…"
-$subtitle.UseCompatibleTextRendering = $false
-$form.Controls.Add($subtitle)
-
-# Version "pill" in the corner. Right-aligned via fixed coords (cheap), small.
 $versionLabel           = New-Object System.Windows.Forms.Label
 $versionLabel.AutoSize  = $true
 $versionLabel.Font      = $FontUISmall
-$versionLabel.ForeColor = $ColorTextMid           # v1.11.0 bumped from TextLo (gray-500) for readability
+$versionLabel.ForeColor = [System.Drawing.Color]::FromArgb(107, 114, 128)
 $versionLabel.Text      = "v$ScriptVersion"
-$versionLabel.Location  = New-Object System.Drawing.Point(540, 30)
+$versionLabel.Location  = New-Object System.Drawing.Point(555, 25)
 $versionLabel.UseCompatibleTextRendering = $false
 $form.Controls.Add($versionLabel)
 
-# =========================
-# CONSOLE / STATUS CARD
-# Dark console box wrapped in a faint border so it reads as a "card".
-# The status box is a CHILD of the border panel, not a sibling on the form —
-# v1.11.0 fix: siblings on $form fight over Z-order (first-added wins in
-# WinForms), which made the border panel render OVER the textbox and the
-# whole console appeared as a grey rectangle.
-# =========================
-$statusCardBorder            = New-Object System.Windows.Forms.Panel
-$statusCardBorder.Size       = New-Object System.Drawing.Size(556, 224)
-$statusCardBorder.Location   = New-Object System.Drawing.Point(28, 88)
-$statusCardBorder.BackColor  = $ColorCardBorder
-$form.Controls.Add($statusCardBorder)
+# Subtle separator line
+$separatorLine           = New-Object System.Windows.Forms.Panel
+$separatorLine.BackColor = [System.Drawing.Color]::FromArgb(31, 41, 55)
+$separatorLine.Size      = New-Object System.Drawing.Size(600, 1)
+$separatorLine.Location  = New-Object System.Drawing.Point(0, 50)
+$form.Controls.Add($separatorLine)
 
 $statusBox             = New-Object System.Windows.Forms.RichTextBox
 $statusBox.Multiline   = $true
 $statusBox.ScrollBars  = "Vertical"
-$statusBox.Size        = New-Object System.Drawing.Size(554, 222)
-$statusBox.Location    = New-Object System.Drawing.Point(1, 1)    # relative to parent panel = 1px frame
+$statusBox.Size        = New-Object System.Drawing.Size(570, 190)
+$statusBox.Location    = New-Object System.Drawing.Point(25, 65)
 $statusBox.ReadOnly    = $true
-$statusBox.BackColor   = $ColorConsoleBg
-$statusBox.ForeColor   = $ColorConsoleFg
+$statusBox.BackColor   = [System.Drawing.Color]::FromArgb(8, 12, 18)  # Deeper dark background
+$statusBox.ForeColor   = [System.Drawing.Color]::FromArgb(132, 204, 22)  # Vibrant green text
 $statusBox.Font        = $FontMono
-$statusBox.BorderStyle = "None"
-$statusCardBorder.Controls.Add($statusBox)        # CHILD of the panel - no Z-order conflict
+$statusBox.BorderStyle = "FixedSingle"
+$statusBox.Margin      = New-Object System.Windows.Forms.Padding(0)
+$form.Controls.Add($statusBox)
 
-# =========================
-# PROGRESS SECTIONS
-#
-# Three sections (Download / Extract / Overall) share a layout: a colored
-# status dot, a small uppercase header label, an inline braille spinner, a
-# right-aligned mono caption with stats, and a progress bar below.
-#
-# Variable names are preserved from the pre-v1.11.0 layout so the helpers
-# (SetDownload, SetExtract, Step-*Spinner, Stop-*Spinner, Test-Cancelled)
-# work without modification. New variables introduced for the redesign:
-#   $dlStatusDot / $exStatusDot / $overallStatusDot   - small "●" labels
-#   $dlHeaderLabel / $exHeaderLabel / $overallHeaderLabel
-#     (replaces $dlGroupBox.Text / $exGroupBox.Text / $overallGroupBox.Text;
-#      five external call sites that wrote to $exGroupBox.Text have been
-#      redirected to $exHeaderLabel.Text)
-# =========================
-
-# ---- DOWNLOAD section (y=324) ----
-$dlStatusDot           = New-Object System.Windows.Forms.Label
-$dlStatusDot.AutoSize  = $true
-$dlStatusDot.Font      = $FontStatusDot
-$dlStatusDot.ForeColor = $ColorMuted
-$dlStatusDot.Text      = "●"
-$dlStatusDot.Location  = New-Object System.Drawing.Point(28, 322)
-$dlStatusDot.UseCompatibleTextRendering = $false
-$form.Controls.Add($dlStatusDot)
-
-$dlHeaderLabel           = New-Object System.Windows.Forms.Label
-$dlHeaderLabel.AutoSize  = $true
-$dlHeaderLabel.Font      = $FontSectionHdr
-$dlHeaderLabel.ForeColor = $ColorTextHi
-$dlHeaderLabel.Text      = "Download"
-$dlHeaderLabel.Location  = New-Object System.Drawing.Point(46, 326)
-$dlHeaderLabel.UseCompatibleTextRendering = $false
-$form.Controls.Add($dlHeaderLabel)
+# ---- DOWNLOAD group ----
+$dlGroupBox           = New-Object System.Windows.Forms.GroupBox
+$dlGroupBox.Text      = "⬇ Download"
+$dlGroupBox.Font      = $FontUIBoldSm
+$dlGroupBox.ForeColor = [System.Drawing.Color]::FromArgb(59, 130, 246)  # Bright blue
+$dlGroupBox.BackColor = [System.Drawing.Color]::FromArgb(16, 20, 28)
+$dlGroupBox.Size      = New-Object System.Drawing.Size(570, 72)
+$dlGroupBox.Location  = New-Object System.Drawing.Point(25, 265)
+$form.Controls.Add($dlGroupBox)
 
 $dlSpinnerLabel           = New-Object System.Windows.Forms.Label
 $dlSpinnerLabel.AutoSize  = $true
-$dlSpinnerLabel.Font      = $FontUIBold
-$dlSpinnerLabel.ForeColor = $ColorPrimary
+$dlSpinnerLabel.Font      = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+$dlSpinnerLabel.ForeColor = [System.Drawing.Color]::FromArgb(59, 130, 246)
+$dlSpinnerLabel.BackColor = [System.Drawing.Color]::FromArgb(16, 20, 28)
+$dlSpinnerLabel.Location  = New-Object System.Drawing.Point(72, -2)
 $dlSpinnerLabel.Text      = ""
-$dlSpinnerLabel.Location  = New-Object System.Drawing.Point(116, 326)
 $dlSpinnerLabel.UseCompatibleTextRendering = $false
-$form.Controls.Add($dlSpinnerLabel)
+$dlGroupBox.Controls.Add($dlSpinnerLabel)
+
+$dlBar                       = New-Object System.Windows.Forms.ProgressBar
+$dlBar.Size                  = New-Object System.Drawing.Size(540, 16)
+$dlBar.Location              = New-Object System.Drawing.Point(15, 22)
+$dlBar.Style                 = "Marquee"
+$dlBar.MarqueeAnimationSpeed = 25
+$dlBar.Minimum               = 0
+$dlBar.Maximum               = 100
+$dlGroupBox.Controls.Add($dlBar)
 
 $dlLabel           = New-Object System.Windows.Forms.Label
 $dlLabel.AutoSize  = $false
-$dlLabel.Size      = New-Object System.Drawing.Size(396, 18)
-$dlLabel.Location  = New-Object System.Drawing.Point(188, 326)
+$dlLabel.Size      = New-Object System.Drawing.Size(540, 16)
+$dlLabel.Location  = New-Object System.Drawing.Point(15, 44)
 $dlLabel.Font      = $FontMonoSm
-$dlLabel.ForeColor = $ColorTextHi
-$dlLabel.Text      = "Waiting…"
-$dlLabel.TextAlign = "MiddleRight"
+$dlLabel.ForeColor = [System.Drawing.Color]::FromArgb(156, 163, 175)
+$dlLabel.BackColor = [System.Drawing.Color]::FromArgb(16, 20, 28)
+$dlLabel.Text      = "Waiting..."
 $dlLabel.UseCompatibleTextRendering = $false
-$form.Controls.Add($dlLabel)
+$dlGroupBox.Controls.Add($dlLabel)
 
-$dlBar                       = New-Object System.Windows.Forms.ProgressBar
-$dlBar.Size                  = New-Object System.Drawing.Size(556, 14)
-$dlBar.Location              = New-Object System.Drawing.Point(28, 350)
-$dlBar.Style                 = "Marquee"
-$dlBar.MarqueeAnimationSpeed = 30
-$dlBar.Minimum               = 0
-$dlBar.Maximum               = 100
-$form.Controls.Add($dlBar)
-
-# ---- EXTRACT section (y=378) ----
-$exStatusDot           = New-Object System.Windows.Forms.Label
-$exStatusDot.AutoSize  = $true
-$exStatusDot.Font      = $FontStatusDot
-$exStatusDot.ForeColor = $ColorMuted
-$exStatusDot.Text      = "●"
-$exStatusDot.Location  = New-Object System.Drawing.Point(28, 376)
-$exStatusDot.UseCompatibleTextRendering = $false
-$form.Controls.Add($exStatusDot)
-
-$exHeaderLabel           = New-Object System.Windows.Forms.Label
-$exHeaderLabel.AutoSize  = $true
-$exHeaderLabel.Font      = $FontSectionHdr
-$exHeaderLabel.ForeColor = $ColorTextHi
-$exHeaderLabel.Text      = "Extract"
-$exHeaderLabel.Location  = New-Object System.Drawing.Point(46, 380)
-$exHeaderLabel.UseCompatibleTextRendering = $false
-$form.Controls.Add($exHeaderLabel)
+# ---- EXTRACT group ----
+$exGroupBox           = New-Object System.Windows.Forms.GroupBox
+$exGroupBox.Text      = "📦 Extract"
+$exGroupBox.Font      = $FontUIBoldSm
+$exGroupBox.ForeColor = [System.Drawing.Color]::FromArgb(34, 197, 94)  # Bright green
+$exGroupBox.BackColor = [System.Drawing.Color]::FromArgb(16, 20, 28)
+$exGroupBox.Size      = New-Object System.Drawing.Size(570, 72)
+$exGroupBox.Location  = New-Object System.Drawing.Point(25, 345)
+$form.Controls.Add($exGroupBox)
 
 $exSpinnerLabel           = New-Object System.Windows.Forms.Label
 $exSpinnerLabel.AutoSize  = $true
-$exSpinnerLabel.Font      = $FontUIBold
-$exSpinnerLabel.ForeColor = $ColorSuccess
+$exSpinnerLabel.Font      = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+$exSpinnerLabel.ForeColor = [System.Drawing.Color]::FromArgb(34, 197, 94)
+$exSpinnerLabel.BackColor = [System.Drawing.Color]::FromArgb(16, 20, 28)
+$exSpinnerLabel.Location  = New-Object System.Drawing.Point(58, -2)
 $exSpinnerLabel.Text      = ""
-$exSpinnerLabel.Location  = New-Object System.Drawing.Point(116, 380)
 $exSpinnerLabel.UseCompatibleTextRendering = $false
-$form.Controls.Add($exSpinnerLabel)
-
-$exLabel           = New-Object System.Windows.Forms.Label
-$exLabel.AutoSize  = $false
-$exLabel.Size      = New-Object System.Drawing.Size(396, 18)
-$exLabel.Location  = New-Object System.Drawing.Point(188, 380)
-$exLabel.Font      = $FontMonoSm
-$exLabel.ForeColor = $ColorTextHi
-$exLabel.Text      = "Waiting…"
-$exLabel.TextAlign = "MiddleRight"
-$exLabel.UseCompatibleTextRendering = $false
-$form.Controls.Add($exLabel)
+$exGroupBox.Controls.Add($exSpinnerLabel)
 
 $exBar                       = New-Object System.Windows.Forms.ProgressBar
-$exBar.Size                  = New-Object System.Drawing.Size(556, 14)
-$exBar.Location              = New-Object System.Drawing.Point(28, 404)
+$exBar.Size                  = New-Object System.Drawing.Size(540, 16)
+$exBar.Location              = New-Object System.Drawing.Point(15, 22)
 $exBar.Style                 = "Marquee"
 $exBar.MarqueeAnimationSpeed = 30
 $exBar.Minimum               = 0
 $exBar.Maximum               = 100
-$form.Controls.Add($exBar)
+$exGroupBox.Controls.Add($exBar)
 
-# ---- OVERALL section (y=432) ----
-$overallStatusDot           = New-Object System.Windows.Forms.Label
-$overallStatusDot.AutoSize  = $true
-$overallStatusDot.Font      = $FontStatusDot
-$overallStatusDot.ForeColor = $ColorMuted
-$overallStatusDot.Text      = "●"
-$overallStatusDot.Location  = New-Object System.Drawing.Point(28, 430)
-$overallStatusDot.UseCompatibleTextRendering = $false
-$form.Controls.Add($overallStatusDot)
+$exLabel           = New-Object System.Windows.Forms.Label
+$exLabel.AutoSize  = $false
+$exLabel.Size      = New-Object System.Drawing.Size(540, 16)
+$exLabel.Location  = New-Object System.Drawing.Point(15, 44)
+$exLabel.Font      = $FontMonoSm
+$exLabel.ForeColor = [System.Drawing.Color]::FromArgb(156, 163, 175)
+$exLabel.BackColor = [System.Drawing.Color]::FromArgb(16, 20, 28)
+$exLabel.Text      = "Waiting..."
+$exLabel.UseCompatibleTextRendering = $false
+$exGroupBox.Controls.Add($exLabel)
+$exLabel.Location  = New-Object System.Drawing.Point(12, 42)
+$exLabel.Font      = $FontMonoSm
+$exLabel.ForeColor = [System.Drawing.Color]::FromArgb(50, 50, 50)
+$exLabel.Text      = "Waiting..."
+$exLabel.UseCompatibleTextRendering = $false
+$exGroupBox.Controls.Add($exLabel)
 
-$overallHeaderLabel           = New-Object System.Windows.Forms.Label
-$overallHeaderLabel.AutoSize  = $true
-$overallHeaderLabel.Font      = $FontSectionHdr
-$overallHeaderLabel.ForeColor = $ColorTextHi
-$overallHeaderLabel.Text      = "Overall"
-$overallHeaderLabel.Location  = New-Object System.Drawing.Point(46, 434)
-$overallHeaderLabel.UseCompatibleTextRendering = $false
-$form.Controls.Add($overallHeaderLabel)
+# ---- OVERALL group ----
+$overallGroupBox           = New-Object System.Windows.Forms.GroupBox
+$overallGroupBox.Text      = "⚡ Overall Progress"
+$overallGroupBox.Font      = $FontUIBoldSm
+$overallGroupBox.ForeColor = [System.Drawing.Color]::FromArgb(168, 85, 247)  # Vibrant purple
+$overallGroupBox.BackColor = [System.Drawing.Color]::FromArgb(16, 20, 28)
+$overallGroupBox.Size      = New-Object System.Drawing.Size(570, 50)
+$overallGroupBox.Location  = New-Object System.Drawing.Point(25, 425)
+$form.Controls.Add($overallGroupBox)
 
 $overallSpinnerLabel           = New-Object System.Windows.Forms.Label
 $overallSpinnerLabel.AutoSize  = $true
-$overallSpinnerLabel.Font      = $FontUIBold
-$overallSpinnerLabel.ForeColor = $ColorAccent
+$overallSpinnerLabel.Font      = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+$overallSpinnerLabel.ForeColor = [System.Drawing.Color]::FromArgb(168, 85, 247)
+$overallSpinnerLabel.BackColor = [System.Drawing.Color]::FromArgb(16, 20, 28)
+$overallSpinnerLabel.Location  = New-Object System.Drawing.Point(105, -2)
 $overallSpinnerLabel.Text      = ""
-$overallSpinnerLabel.Location  = New-Object System.Drawing.Point(116, 434)
 $overallSpinnerLabel.UseCompatibleTextRendering = $false
-$form.Controls.Add($overallSpinnerLabel)
+$overallGroupBox.Controls.Add($overallSpinnerLabel)
 
 $progress          = New-Object System.Windows.Forms.ProgressBar
-$progress.Size     = New-Object System.Drawing.Size(556, 14)
-$progress.Location = New-Object System.Drawing.Point(28, 458)
+$progress.Size     = New-Object System.Drawing.Size(540, 16)
+$progress.Location = New-Object System.Drawing.Point(15, 22)
 $progress.Style    = "Continuous"
 $progress.Minimum  = 0
 $progress.Maximum  = 100
-$form.Controls.Add($progress)
+$overallGroupBox.Controls.Add($progress)
 
-# =========================
-# FOOTER: log path + sound toggle + buttons
-# =========================
 $logLabel           = New-Object System.Windows.Forms.Label
 $logLabel.AutoSize  = $false
-$logLabel.Size      = New-Object System.Drawing.Size(556, 16)
-$logLabel.Location  = New-Object System.Drawing.Point(28, 490)
-$logLabel.ForeColor = $ColorTextMid    # v1.11.0 bumped from TextLo for readability
+$logLabel.Size      = New-Object System.Drawing.Size(570, 15)
+$logLabel.Location  = New-Object System.Drawing.Point(25, 485)
+$logLabel.ForeColor = [System.Drawing.Color]::FromArgb(107, 114, 128)
 $logLabel.Font      = $FontUISmall
 $logLabel.Text      = "Log: $LogFile"
 $logLabel.UseCompatibleTextRendering = $false
 $form.Controls.Add($logLabel)
 
 # =========================
-# SOUND TOGGLE CHECKBOX + ACTION BUTTONS
+# SOUND TOGGLE CHECKBOX - Enhanced
 # =========================
 $soundCheckbox                   = New-Object System.Windows.Forms.CheckBox
-$soundCheckbox.Text              = "Sound FX"
+$soundCheckbox.Text              = "🔊 Sound Effects"
 $soundCheckbox.Checked           = $true
-$soundCheckbox.Font              = $FontUI
-$soundCheckbox.ForeColor         = $ColorTextHi     # v1.11.0 - was TextMid; darker for clearer label
+$soundCheckbox.Font              = $FontUIBold
+$soundCheckbox.ForeColor         = [System.Drawing.Color]::FromArgb(229, 230, 235)
+$soundCheckbox.BackColor         = [System.Drawing.Color]::FromArgb(16, 20, 28)
 $soundCheckbox.AutoSize          = $true
-$soundCheckbox.Location          = New-Object System.Drawing.Point(28, 538)
+$soundCheckbox.Location          = New-Object System.Drawing.Point(25, 510)
 $soundCheckbox.UseCompatibleTextRendering = $false
 $form.Controls.Add($soundCheckbox)
 
-# v1.11.0 - Auto-scroll toggle. Default on (matches pre-v1.11.0 behaviour).
-# Unchecking lets the user scroll back through the log while the run continues -
-# new lines still arrive but the textbox doesn't yank them down to the bottom.
-$autoScrollCheckbox                   = New-Object System.Windows.Forms.CheckBox
-$autoScrollCheckbox.Text              = "Auto-scroll"
-$autoScrollCheckbox.Checked           = $true
-$autoScrollCheckbox.Font              = $FontUI
-$autoScrollCheckbox.ForeColor         = $ColorTextHi
-$autoScrollCheckbox.AutoSize          = $true
-$autoScrollCheckbox.Location          = New-Object System.Drawing.Point(126, 538)
-$autoScrollCheckbox.UseCompatibleTextRendering = $false
-$autoScrollCheckbox.Add_CheckedChanged({
-    # Sync the script-scope flag with the checkbox state. Set-AutoScroll
-    # also re-snaps the textbox to bottom on enable, which is the natural
-    # expectation when the user re-checks the box mid-run.
-    if ($script:AutoScroll -ne $autoScrollCheckbox.Checked) {
-        Set-AutoScroll -Enabled $autoScrollCheckbox.Checked
-    }
-})
-$form.Controls.Add($autoScrollCheckbox)
-
+# ---- Enhanced Buttons ----
 $button            = New-Object System.Windows.Forms.Button
-$button.Text       = "Install Drivers"
-$button.Size       = New-Object System.Drawing.Size(146, 36)
-$button.Location   = New-Object System.Drawing.Point(290, 530)
-$button.Font       = $FontButton
-$button.BackColor  = $ColorPrimary
+$button.Text       = "▶ Install Drivers"
+$button.Size       = New-Object System.Drawing.Size(165, 42)
+$button.Location   = New-Object System.Drawing.Point(170, 505)
+$button.Font       = $FontUIBold
+$button.BackColor  = [System.Drawing.Color]::FromArgb(59, 130, 246)  # Bright blue
 $button.ForeColor  = [System.Drawing.Color]::White
 $button.FlatStyle  = "Flat"
-$button.FlatAppearance.BorderSize         = 0
-# Built-in hover/press states - cheaper than wiring MouseEnter/MouseLeave.
-$button.FlatAppearance.MouseOverBackColor = $ColorPrimaryDk
-$button.FlatAppearance.MouseDownBackColor = $ColorPrimaryPd
-$button.Cursor     = "Hand"
+$button.FlatAppearance.BorderSize = 0
+$button.FlatAppearance.MouseOverBackColor = [System.Drawing.Color]::FromArgb(37, 99, 235)  # Darker blue on hover
 $form.Controls.Add($button)
 
 $cancelButton            = New-Object System.Windows.Forms.Button
-$cancelButton.Text       = "Cancel"
-$cancelButton.Size       = New-Object System.Drawing.Size(120, 36)
-$cancelButton.Location   = New-Object System.Drawing.Point(446, 530)
-$cancelButton.Font       = $FontButton
-$cancelButton.BackColor  = $ColorMutedBg                        # idle: dark muted gray (v1.11.0)
-$cancelButton.ForeColor  = $ColorDisabledFg                     # white text - readable when disabled
+$cancelButton.Text       = "✕ Cancel"
+$cancelButton.Size       = New-Object System.Drawing.Size(120, 42)
+$cancelButton.Location   = New-Object System.Drawing.Point(350, 505)
+$cancelButton.Font       = $FontUIBold
+$cancelButton.BackColor  = [System.Drawing.Color]::FromArgb(107, 114, 128)  # Gray
+$cancelButton.ForeColor  = [System.Drawing.Color]::White
 $cancelButton.FlatStyle  = "Flat"
-$cancelButton.FlatAppearance.BorderSize         = 0
-$cancelButton.FlatAppearance.MouseOverBackColor = $ColorDangerDk
-$cancelButton.FlatAppearance.MouseDownBackColor = $ColorDangerDk
+$cancelButton.FlatAppearance.BorderSize = 0
+$cancelButton.FlatAppearance.MouseOverBackColor = [System.Drawing.Color]::FromArgb(75, 85, 99)  # Darker gray on hover
 $cancelButton.Enabled    = $false
 $form.Controls.Add($cancelButton)
 
@@ -763,55 +659,19 @@ function Play-Sound {
 function Set-ButtonRunning {
     if ($script:Headless) { return }
     $button.Enabled         = $false
-    $button.BackColor       = $ColorMutedBg
-    $button.ForeColor       = $ColorDisabledFg     # v1.11.0 - white on gray-500 (4.5:1, readable)
+    $button.BackColor       = [System.Drawing.Color]::FromArgb(107, 114, 128)  # Disabled gray
     $cancelButton.Enabled   = $true
-    $cancelButton.BackColor = $ColorDanger
-    $cancelButton.ForeColor = [System.Drawing.Color]::White
-    # Reset section dots back to muted-then-they-light-up-as-spinners-fire
-    $dlStatusDot.ForeColor      = $ColorMuted
-    $exStatusDot.ForeColor      = $ColorMuted
-    $overallStatusDot.ForeColor = $ColorMuted
+    $cancelButton.BackColor = [System.Drawing.Color]::FromArgb(239, 68, 68)  # Bright red for cancel
     [System.Windows.Forms.Application]::DoEvents()
 }
 
 function Set-ButtonIdle {
     if ($script:Headless) { return }
     $button.Enabled         = $true
-    $button.BackColor       = $ColorPrimary
-    $button.ForeColor       = [System.Drawing.Color]::White
+    $button.BackColor       = [System.Drawing.Color]::FromArgb(59, 130, 246)  # Bright blue
     $cancelButton.Enabled   = $false
-    $cancelButton.BackColor = $ColorMutedBg
-    $cancelButton.ForeColor = $ColorDisabledFg     # v1.11.0 - white on gray-500
+    $cancelButton.BackColor = [System.Drawing.Color]::FromArgb(107, 114, 128)  # Gray
     [System.Windows.Forms.Application]::DoEvents()
-}
-
-function Set-AutoScroll {
-    # v1.11.0 - enable or disable auto-scroll of the GUI console box.
-    # Usage:
-    #   Set-AutoScroll $true     # snap to bottom on every Log line (default)
-    #   Set-AutoScroll $false    # leave the scroll position alone - user can
-    #                            # browse history while the run continues
-    #
-    # The checkbox in the footer toggles this too; calling this function and
-    # toggling the checkbox stay in sync because the checkbox's CheckedChanged
-    # handler calls back into this function.
-    param([bool]$Enabled)
-    $script:AutoScroll = $Enabled
-    if (-not $script:Headless -and $autoScrollCheckbox -and $autoScrollCheckbox.Checked -ne $Enabled) {
-        # Don't trigger a CheckedChanged event loop: only assign if the checkbox
-        # state doesn't already match. (The CheckedChanged handler also guards
-        # against this via state comparison, but belt-and-braces is cheap.)
-        $autoScrollCheckbox.Checked = $Enabled
-    }
-    if (-not $script:Headless -and $Enabled -and $statusBox) {
-        # When re-enabling, jump straight to the bottom so the next log line
-        # doesn't appear orphaned in the middle of the scrollback.
-        $statusBox.SelectionStart = $statusBox.TextLength
-        $statusBox.ScrollToCaret()
-    }
-    Log "Auto-scroll: $(if ($Enabled) { 'on' } else { 'off (browse history freely)' })" `
-        -Level "info" -Event "auto_scroll_toggle" -Context @{ enabled = $Enabled }
 }
 
 # =========================
@@ -841,10 +701,7 @@ function Log {
             Write-Host $line
         } else {
             $statusBox.AppendText("$line`r`n")
-            # v1.11.0 - only snap to bottom when auto-scroll is on. When the user
-            # has scrolled back to read history, $script:AutoScroll = $false stops
-            # the textbox yanking them down on every new log line.
-            if ($script:AutoScroll) { $statusBox.ScrollToCaret() }
+            $statusBox.ScrollToCaret()
             [System.Windows.Forms.Application]::DoEvents()
         }
     }
@@ -927,17 +784,13 @@ function Step-DlSpinner {
     if ($script:Headless) { return }
     $script:SpinnerIndex = ($script:SpinnerIndex + 1) % $SpinnerFrames.Count
     $dlSpinnerLabel.Text = " " + $SpinnerFrames[$script:SpinnerIndex]
-    # v1.11.0 - dot tracks state: working = primary blue
-    $dlStatusDot.ForeColor = $ColorPrimary
     [System.Windows.Forms.Application]::DoEvents()
 }
 function Stop-DlSpinner {
     param([bool]$Success = $true)
     if ($script:Headless) { return }
     $dlSpinnerLabel.Text      = if ($Success) { " OK" } else { " XX" }
-    $dlSpinnerLabel.ForeColor = if ($Success) { $ColorPrimary } else { $ColorDanger }
-    # v1.11.0 - dot tracks state: done = success green, failed = danger red
-    $dlStatusDot.ForeColor    = if ($Success) { $ColorSuccess } else { $ColorDanger }
+    $dlSpinnerLabel.ForeColor = if ($Success) { [System.Drawing.Color]::FromArgb(0, 100, 180) } else { [System.Drawing.Color]::FromArgb(200, 40, 40) }
     [System.Windows.Forms.Application]::DoEvents()
 }
 
@@ -945,15 +798,13 @@ function Step-ExSpinner {
     if ($script:Headless) { return }
     $script:SpinnerIndex  = ($script:SpinnerIndex + 1) % $SpinnerFrames.Count
     $exSpinnerLabel.Text  = " " + $SpinnerFrames[$script:SpinnerIndex]
-    $exStatusDot.ForeColor = $ColorPrimary
     [System.Windows.Forms.Application]::DoEvents()
 }
 function Stop-ExSpinner {
     param([bool]$Success = $true)
     if ($script:Headless) { return }
     $exSpinnerLabel.Text      = if ($Success) { " OK" } else { " XX" }
-    $exSpinnerLabel.ForeColor = if ($Success) { $ColorSuccess } else { $ColorDanger }
-    $exStatusDot.ForeColor    = if ($Success) { $ColorSuccess } else { $ColorDanger }
+    $exSpinnerLabel.ForeColor = if ($Success) { [System.Drawing.Color]::FromArgb(0, 140, 80) } else { [System.Drawing.Color]::FromArgb(200, 40, 40) }
     [System.Windows.Forms.Application]::DoEvents()
 }
 
@@ -961,15 +812,13 @@ function Step-OverallSpinner {
     if ($script:Headless) { return }
     $script:SpinnerIndex      = ($script:SpinnerIndex + 1) % $SpinnerFrames.Count
     $overallSpinnerLabel.Text = " " + $SpinnerFrames[$script:SpinnerIndex]
-    $overallStatusDot.ForeColor = $ColorAccent
     [System.Windows.Forms.Application]::DoEvents()
 }
 function Stop-OverallSpinner {
     param([bool]$Success = $true)
     if ($script:Headless) { return }
     $overallSpinnerLabel.Text      = if ($Success) { " OK" } else { " XX" }
-    $overallSpinnerLabel.ForeColor = if ($Success) { $ColorSuccess } else { $ColorDanger }
-    $overallStatusDot.ForeColor    = if ($Success) { $ColorSuccess } else { $ColorDanger }
+    $overallSpinnerLabel.ForeColor = if ($Success) { [System.Drawing.Color]::FromArgb(80, 80, 80) } else { [System.Drawing.Color]::FromArgb(200, 40, 40) }
     [System.Windows.Forms.Application]::DoEvents()
 }
 
@@ -980,10 +829,6 @@ function Step-AllSpinners {
     $dlSpinnerLabel.Text      = " " + $f
     $exSpinnerLabel.Text      = " " + $f
     $overallSpinnerLabel.Text = " " + $f
-    # While anything is spinning, every dot reflects "working" colour
-    $dlStatusDot.ForeColor      = $ColorPrimary
-    $exStatusDot.ForeColor      = $ColorPrimary
-    $overallStatusDot.ForeColor = $ColorAccent
     [System.Windows.Forms.Application]::DoEvents()
 }
 
@@ -1018,32 +863,6 @@ function Get-MissingDriverCount {
     } catch {
         Log "  WARNING: Could not query PnP device status: $($_.Exception.Message)"
         return -1
-    }
-}
-
-function Get-MissingDriverNames {
-    # v1.11.0 - returns an array of device names for every PnP device whose
-    # ConfigManagerErrorCode is non-zero (i.e. "missing/broken driver"). Used
-    # to populate the analytics missing_before_list / missing_after_list
-    # fields. Returns an empty array on any failure so callers can blindly
-    # forward to ConvertTo-Json without null-handling.
-    try {
-        $missing = @(Get-CimInstance Win32_PnPEntity -EA Stop |
-                     Where-Object { $_.ConfigManagerErrorCode -ne 0 })
-        $names = New-Object 'System.Collections.Generic.List[string]'
-        foreach ($m in $missing) {
-            $n = if ($m.Name)        { [string]$m.Name }
-                 elseif ($m.Caption) { [string]$m.Caption }
-                 else                { '(unnamed device)' }
-            # Deduplicate trivially - many machines have multiple "Unknown device"
-            # rows that all collapse to the same string; one row in the sheet is
-            # plenty.
-            if ($names -notcontains $n) { $names.Add($n) | Out-Null }
-        }
-        return ,@($names)
-    } catch {
-        Log "  WARNING: Could not enumerate missing device names: $($_.Exception.Message)"
-        return ,@()
     }
 }
 
@@ -1173,27 +992,6 @@ function Write-HtmlReport {
             $installedRows = "<li class='muted'>(none recorded)</li>"
         }
 
-        # v1.11.0 - missing-driver lists in the HTML report. Same <ul><li> shape
-        # as installed_drivers; muted placeholder if a list happens to be empty.
-        $missingBeforeRows = ""
-        if ($script:AnalyticsMissingBeforeList -and $script:AnalyticsMissingBeforeList.Count -gt 0) {
-            foreach ($d in $script:AnalyticsMissingBeforeList) {
-                if ([string]::IsNullOrWhiteSpace($d)) { continue }
-                $missingBeforeRows += "<li>$(_He $d)</li>`n"
-            }
-        } else {
-            $missingBeforeRows = "<li class='muted'>(no missing devices detected before run)</li>"
-        }
-        $missingAfterRows = ""
-        if ($script:AnalyticsMissingAfterList -and $script:AnalyticsMissingAfterList.Count -gt 0) {
-            foreach ($d in $script:AnalyticsMissingAfterList) {
-                if ([string]::IsNullOrWhiteSpace($d)) { continue }
-                $missingAfterRows += "<li>$(_He $d)</li>`n"
-            }
-        } else {
-            $missingAfterRows = "<li class='muted'>(all devices resolved)</li>"
-        }
-
         $html = @"
 <!doctype html>
 <html lang="en">
@@ -1264,16 +1062,6 @@ function Write-HtmlReport {
   </section>
 
   <section>
-    <h2>Missing drivers before run</h2>
-    <ul>$missingBeforeRows</ul>
-  </section>
-
-  <section>
-    <h2>Missing drivers still unresolved</h2>
-    <ul>$missingAfterRows</ul>
-  </section>
-
-  <section>
     <h2>Installed drivers / packages</h2>
     <ul>$installedRows</ul>
   </section>
@@ -1329,7 +1117,7 @@ function Install-7Zip {
         $proc                       = New-Object System.Diagnostics.Process
         $proc.StartInfo             = $psi
         $proc.Start() | Out-Null
-        while (-not $proc.HasExited) { Start-Sleep -Milliseconds 400; Step-AllSpinners }
+        while (-not $proc.HasExited) { Invoke-ResponsiveSleep -MillisecondsTotal 400; Step-AllSpinners }
         if ($proc.ExitCode -ne 0 -or -not (Test-Path $script:7zInstaller)) {
             Log "  7-Zip download failed (curl exit $($proc.ExitCode))."
             return $false
@@ -1389,8 +1177,6 @@ $script:AnalyticsDownloadMB      = 0.0
 $script:AnalyticsStartTime       = $null
 $script:AnalyticsMissingBefore   = -1
 $script:AnalyticsMissingAfter    = -1
-$script:AnalyticsMissingBeforeList = New-Object System.Collections.Generic.List[string]   # v1.11.0
-$script:AnalyticsMissingAfterList  = New-Object System.Collections.Generic.List[string]   # v1.11.0
 $script:AnalyticsInstalledDrivers = New-Object System.Collections.Generic.List[string]
 
 function Send-AnalyticsEvent {
@@ -1402,48 +1188,38 @@ function Send-AnalyticsEvent {
     if ($script:AnalyticsStartTime) {
         $durationSec = [int]((Get-Date) - $script:AnalyticsStartTime).TotalSeconds
     }
-    # v1.11.0 - DRY helper. Was duplicated for installed_drivers; now also used
-    # for missing_before_list and missing_after_list. Strips control chars,
-    # escapes JSON specials, joins, caps to a sane length so a single spreadsheet
-    # cell can hold the result.
-    $cleanForJsonList = {
-        param($items)
-        if (-not $items -or $items.Count -eq 0) { return "" }
-        $cleaned = foreach ($d in $items) {
+    # Build comma-separated list of installed driver/package names.
+    # Strip embedded control chars + escape JSON-special chars, then join.
+    $installedDriversStr = ""
+    if ($script:AnalyticsInstalledDrivers -and $script:AnalyticsInstalledDrivers.Count -gt 0) {
+        $cleaned = foreach ($d in $script:AnalyticsInstalledDrivers) {
             if ([string]::IsNullOrWhiteSpace($d)) { continue }
             $t = ($d -replace '[\r\n\t]', ' ').Trim()
-            $t = $t -replace '\\', '\\'
-            $t = $t -replace '"',  '\"'
+            $t = $t -replace '\\', '\\'      # backslash-escape backslashes for JSON
+            $t = $t -replace '"',  '\"'      # escape embedded double-quotes
             $t
         }
-        $joined = ($cleaned -join ', ')
-        if ($joined.Length -gt 8000) {
-            $joined = $joined.Substring(0, 8000) + '...[truncated]'
+        $installedDriversStr = ($cleaned -join ', ')
+        # Hard cap to keep the payload (and the spreadsheet cell) sane.
+        if ($installedDriversStr.Length -gt 8000) {
+            $installedDriversStr = $installedDriversStr.Substring(0, 8000) + '...[truncated]'
         }
-        return $joined
     }
-
-    $installedDriversStr   = & $cleanForJsonList $script:AnalyticsInstalledDrivers
-    $missingBeforeListStr  = & $cleanForJsonList $script:AnalyticsMissingBeforeList
-    $missingAfterListStr   = & $cleanForJsonList $script:AnalyticsMissingAfterList
-
     $payload = @"
 {
-  "result":              "$Result",
-  "manufacturer":        "$($script:AnalyticsManufacturer -replace '"','\"')",
-  "model":               "$($script:AnalyticsModel -replace '"','\"')",
-  "serial":              "$($script:AnalyticsSerial -replace '"','\"')",
-  "os_version":          "$($script:AnalyticsOsVersion -replace '"','\"')",
-  "os_build":            $($script:AnalyticsOsBuild),
-  "inf_count":           $($script:AnalyticsInfCount),
-  "download_mb":         $($script:AnalyticsDownloadMB),
-  "missing_before":      $($script:AnalyticsMissingBefore),
-  "missing_after":       $($script:AnalyticsMissingAfter),
-  "duration_sec":        $durationSec,
-  "script_version":      "$ScriptVersion",
-  "installed_drivers":   "$installedDriversStr",
-  "missing_before_list": "$missingBeforeListStr",
-  "missing_after_list":  "$missingAfterListStr"
+  "result":            "$Result",
+  "manufacturer":      "$($script:AnalyticsManufacturer -replace '"','\"')",
+  "model":             "$($script:AnalyticsModel -replace '"','\"')",
+  "serial":            "$($script:AnalyticsSerial -replace '"','\"')",
+  "os_version":        "$($script:AnalyticsOsVersion -replace '"','\"')",
+  "os_build":          $($script:AnalyticsOsBuild),
+  "inf_count":         $($script:AnalyticsInfCount),
+  "download_mb":       $($script:AnalyticsDownloadMB),
+  "missing_before":    $($script:AnalyticsMissingBefore),
+  "missing_after":     $($script:AnalyticsMissingAfter),
+  "duration_sec":      $durationSec,
+  "script_version":    "$ScriptVersion",
+  "installed_drivers": "$installedDriversStr"
 }
 "@
 
@@ -1549,7 +1325,7 @@ function Invoke-CurlDownload {
 
     $lastSize = 0; $stall = 0; $prevSize = 0
     while (-not $proc.HasExited) {
-        Start-Sleep -Milliseconds 700
+        Invoke-ResponsiveSleep -MillisecondsTotal 700
         # Honour cancel mid-download: kill curl immediately so the next ~10MB
         # don't keep streaming after the user clicked Cancel. Without this,
         # curl runs to completion (potentially hundreds of MB) while the
@@ -1702,7 +1478,7 @@ function Invoke-CurlDownloadParallel {
             $nextIdx++
         }
 
-        Start-Sleep -Milliseconds 700
+        Invoke-ResponsiveSleep -MillisecondsTotal 700
 
         # Cancel check - bail entire batch
         if ($script:CancelRequested) {
@@ -1805,7 +1581,7 @@ function Watch-Extraction {
     SetExtract -Pct -1 -Label "Extracting..."
 
     while (-not $ExtractProc.HasExited) {
-        Start-Sleep -Milliseconds 700
+        Invoke-ResponsiveSleep -MillisecondsTotal 700
         $count = if (Test-Path $DestPath) {
             (Get-ChildItem $DestPath -Recurse -ErrorAction SilentlyContinue).Count
         } else { 0 }
@@ -1829,7 +1605,7 @@ function Watch-Extraction {
             break
         }
     }
-    Start-Sleep -Seconds 2
+    Invoke-ResponsiveSleep -MillisecondsTotal 2000
     $finalCount = if (Test-Path $DestPath) {
         (Get-ChildItem $DestPath -Recurse -EA SilentlyContinue).Count
     } else { 0 }
@@ -1862,7 +1638,7 @@ function Install-DriversFromPath {
         return $true
     }
     Log "Installing via pnputil..."
-    $exHeaderLabel.Text  = "Install INFs"
+    $exGroupBox.Text     = "Install INFs"
     $exSpinnerLabel.Text = " " + $SpinnerFrames[0]
     $script:SpinnerIndex = 0
     $exBar.Style         = "Continuous"
@@ -1904,7 +1680,7 @@ function Install-DriversFromPath {
     SetExtract -Pct 100 -Label "All $total INFs installed."
     Stop-ExSpinner      -Success $true
     Stop-OverallSpinner -Success $true
-    $exHeaderLabel.Text = "Extract & install"
+    $exGroupBox.Text = "Extract / Install"
     Log "All INFs processed."
     return $true
 }
@@ -1940,7 +1716,7 @@ function Start-PackExtraction {
             $exSpinnerLabel.Text      = " " + $SpinnerFrames[0]
             $overallSpinnerLabel.Text = " " + $SpinnerFrames[0]
             while ($zipJob.State -eq "Running") {
-                Start-Sleep -Milliseconds 700
+                Invoke-ResponsiveSleep -MillisecondsTotal 700
                 $count = if (Test-Path $DestPath) {
                     (Get-ChildItem $DestPath -Recurse -EA SilentlyContinue).Count
                 } else { 0 }
@@ -2011,7 +1787,7 @@ function Start-PackExtraction {
                 $sevenProc.Start() | Out-Null
 
                 while (-not $sevenProc.HasExited) {
-                    Start-Sleep -Milliseconds 700
+                    Invoke-ResponsiveSleep -MillisecondsTotal 700
                     $n = & $CountFiles
                     SetExtract -Pct -1 -Label "$n files extracted..."
                     Step-ExSpinner
@@ -2019,7 +1795,7 @@ function Start-PackExtraction {
                     [System.Windows.Forms.Application]::DoEvents()
                     if ($script:CancelRequested) { try { $sevenProc.Kill() } catch {}; break }
                 }
-                Start-Sleep -Seconds 1
+                Invoke-ResponsiveSleep -MillisecondsTotal 1000
                 $n7z = & $CountFiles
 
                 if ($n7z -gt 0) {
@@ -2047,7 +1823,7 @@ function Start-PackExtraction {
                 $proc.StartInfo = $p
                 $proc.Start() | Out-Null
                 while (-not $proc.HasExited) {
-                    Start-Sleep -Milliseconds 700
+                    Invoke-ResponsiveSleep -MillisecondsTotal 700
                     $n = & $CountFiles
                     SetExtract -Pct -1 -Label "$n files extracted..."
                     Step-ExSpinner
@@ -2055,7 +1831,7 @@ function Start-PackExtraction {
                     [System.Windows.Forms.Application]::DoEvents()
                     if ($script:CancelRequested) { try { $proc.Kill() } catch {}; break }
                 }
-                Start-Sleep -Seconds 2
+                Invoke-ResponsiveSleep -MillisecondsTotal 2000
                 return (& $CountFiles)
             }
 
@@ -2070,7 +1846,7 @@ function Start-PackExtraction {
                 $proc.Start() | Out-Null
                 $start = Get-Date
                 while (-not $proc.HasExited) {
-                    Start-Sleep -Milliseconds 700
+                    Invoke-ResponsiveSleep -MillisecondsTotal 700
                     $n = & $CountFiles
                     SetExtract -Pct -1 -Label "$n files extracted..."
                     Step-ExSpinner
@@ -2081,7 +1857,7 @@ function Start-PackExtraction {
                         break
                     }
                 }
-                Start-Sleep -Seconds 2
+                Invoke-ResponsiveSleep -MillisecondsTotal 2000
                 return (& $CountFiles)
             }
 
@@ -4543,7 +4319,7 @@ function Install-SurfaceMsi {
 
     Log "Extracting Surface MSI: $FileName"
     Log "  msiexec /a `"$MsiFile`" /qn TARGETDIR=`"$extractPath`""
-    $exHeaderLabel.Text          = "Extract MSI"
+    $exGroupBox.Text             = "Extract MSI"
     $exSpinnerLabel.Text         = " " + $SpinnerFrames[0]
     $script:SpinnerIndex         = 0
     $exBar.Style                 = "Marquee"
@@ -4561,7 +4337,7 @@ function Install-SurfaceMsi {
 
     $elapsed = 0; $lastCount = 0; $stall = 0
     while (-not $msiProc.HasExited) {
-        Start-Sleep -Milliseconds 700
+        Invoke-ResponsiveSleep -MillisecondsTotal 700
         $elapsed += 0.7
         $count = if (Test-Path $extractPath) {
             (Get-ChildItem $extractPath -Recurse -EA SilentlyContinue).Count
@@ -4601,7 +4377,7 @@ function Install-SurfaceMsi {
     SetExtract -Pct 60 -Label "Extracted $finalCount files - installing INFs..."
     Play-Sound -Event "ExtractComplete"
 
-    $exHeaderLabel.Text = "Install INFs"
+    $exGroupBox.Text = "Install INFs"
     SetProgress 60
     return (Install-DriversFromPath -BasePath $extractPath)
 }
@@ -5073,8 +4849,6 @@ function Start-Install {
     $script:AnalyticsOsBuild         = 0
     $script:AnalyticsMissingBefore   = -1
     $script:AnalyticsMissingAfter    = -1
-    $script:AnalyticsMissingBeforeList = New-Object System.Collections.Generic.List[string]
-    $script:AnalyticsMissingAfterList  = New-Object System.Collections.Generic.List[string]
     $script:AnalyticsInstalledDrivers = New-Object System.Collections.Generic.List[string]
     $script:AnalyticsStartTime       = Get-Date
     $script:7zInstalled              = $false
@@ -5149,11 +4923,7 @@ function Start-Install {
 
     if (-not $script:Headless) {
         try { [System.Windows.Forms.Clipboard]::SetText($model) } catch {}
-        # v1.11.0 - title stays static; the detected model lives in the subtitle row
-        # for a cleaner header hierarchy. The window title bar still gets the
-        # full string so the taskbar entry is informative.
-        $subtitle.Text  = "$manufacturer  ·  $model"
-        $form.Text      = "Driver Installer  -  $model"
+        $title.Text = "Driver Installer - $model"
     }
 
     $overrideNote = if ($Manufacturer -or $Model) { "  [OVERRIDDEN via param]" } else { "  (from WMI)" }
@@ -5167,16 +4937,7 @@ function Start-Install {
     # Snapshot missing drivers before install
     Log "Checking for devices with missing drivers..."
     $script:AnalyticsMissingBefore = Get-MissingDriverCount
-    # v1.11.0 - also capture names for the analytics sheet
-    $beforeNames = Get-MissingDriverNames
-    foreach ($n in $beforeNames) { $script:AnalyticsMissingBeforeList.Add($n) | Out-Null }
     Log "Missing drivers BEFORE install: $($script:AnalyticsMissingBefore)"
-    if ($beforeNames.Count -gt 0) {
-        # Mirror the at-a-glance list into the log for the human reader too,
-        # so the .log and the analytics sheet tell the same story.
-        Log "Missing devices (before):"
-        foreach ($n in $beforeNames) { Log "  - $n" }
-    }
 
     # Offer to skip if no missing drivers detected
     if ($script:AnalyticsMissingBefore -eq 0) {
@@ -5207,7 +4968,7 @@ function Start-Install {
     SetProgress 0
     SetDownload -Pct 0 -Label "Waiting..."
     SetExtract  -Pct 0 -Label "Waiting..."
-    $exHeaderLabel.Text       = "Extract"
+    $exGroupBox.Text          = "Extract"
     $dlSpinnerLabel.Text      = ""
     $exSpinnerLabel.Text      = ""
     $overallSpinnerLabel.Text = ""
@@ -5305,8 +5066,7 @@ function Start-Install {
             # Update analytics model to the picked Surface model
             $script:AnalyticsManufacturer = "Microsoft"
             $script:AnalyticsModel        = $pickedModel
-            $subtitle.Text = "Microsoft  ·  $pickedModel"
-            $form.Text     = "Driver Installer  -  $pickedModel"
+            $title.Text = "Driver Installer - $pickedModel"
             Set-ButtonRunning
             if (-not (Assert-Curl)) { Send-AnalyticsEvent -Result "failure"; Set-ButtonIdle; return }
             $success = Start-MicrosoftSurfaceDriverInstall -DriverRoot $driverRoot -ModelName $pickedModel
@@ -5318,11 +5078,6 @@ function Start-Install {
 
     # Snapshot missing drivers after install
     $script:AnalyticsMissingAfter = Get-MissingDriverCount
-    # v1.11.0 - capture names of devices still unresolved so the analytics
-    # sheet shows exactly what the run failed to fix. Write-MissingDriverDetails
-    # below dumps the full HardwareID/CompatibleID detail to the .log.
-    $afterNames = Get-MissingDriverNames
-    foreach ($n in $afterNames) { $script:AnalyticsMissingAfterList.Add($n) | Out-Null }
     $missingDelta = if ($script:AnalyticsMissingBefore -ge 0 -and $script:AnalyticsMissingAfter -ge 0) {
         $script:AnalyticsMissingBefore - $script:AnalyticsMissingAfter
     } else { 0 }
