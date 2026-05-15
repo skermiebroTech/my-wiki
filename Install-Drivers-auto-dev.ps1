@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.11.0
+# Version: 1.11.1
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -48,6 +48,17 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.11.1 - Analytics error legibility. When the Google Apps Script doPost
+#           throws server-side, Apps Script returns HTTP 200 with an HTML
+#           error page instead of plain "OK". Pre-v1.11.1 the script dumped
+#           the entire multi-line HTML into the .log, which buried the actual
+#           error message. v1.11.1 extracts the message (e.g. "ReferenceError:
+#           Cannot access 'data' before initialization (line 4, file Code)")
+#           and logs it on its own line at error level, with a pointer to the
+#           Apps Script editor. The full HTML body is still captured in the
+#           .events.json file for deep debugging. No client-side payload
+#           changes - this is purely better error surfacing for server-side
+#           Apps Script failures.
 # v1.11.0 - Parallel downloads + Lenovo Recipe Card priority restored.
 #           (1) Parallel curl downloads via new Invoke-CurlDownloadParallel helper.
 #               Takes an array of {Url, OutFile, Label} items and runs up to
@@ -333,7 +344,7 @@ if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" `
 }
 if ($Silent) { $Headless = $true }
 
-$ScriptVersion   = "1.11.0"
+$ScriptVersion   = "1.11.1"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -1498,8 +1509,44 @@ function Send-AnalyticsEvent {
             Log "  Analytics sent OK - row written to Google Sheet." `
                 -Level "info" -Event "analytics_ok"
         } else {
-            Log "  Analytics unexpected response: $stdout" `
-                -Level "warn" -Event "analytics_fail"
+            # v1.11.1 - When the Apps Script throws server-side, it returns a
+            # *200 OK* with an HTML error page instead of plain "OK". The full
+            # HTML is useless in the human log (multi-line, inline CSS) but the
+            # error message itself is sitting in the centered <div>. Extract it
+            # for the .log; keep the full HTML in the structured event so it's
+            # still recoverable for deep debugging.
+            $brief = $stdout
+            $isHtmlError = $stdout -match '(?i)<html|<!DOCTYPE'
+            if ($isHtmlError) {
+                # Apps Script's error page puts the message in a monospace div.
+                # Match its content first; fall back to any <title>Error</title>
+                # neighbour, and last to any "*Error:..." substring.
+                if ($stdout -match '(?is)<div[^>]*monospace[^>]*>(.+?)</div>') {
+                    $brief = $matches[1]
+                } elseif ($stdout -match '(?i)(ReferenceError|TypeError|SyntaxError|RangeError|Exception)[^<]+') {
+                    $brief = $matches[0]
+                } else {
+                    $brief = '(Apps Script returned an HTML error page - see events.json for full body)'
+                }
+                # Decode the most common HTML entities so the log is readable.
+                $brief = $brief -replace '&#39;', "'" -replace '&quot;', '"' `
+                                 -replace '&amp;', '&' -replace '&lt;', '<' -replace '&gt;', '>'
+                $brief = ($brief -replace '\s+', ' ').Trim()
+                Log "  Analytics FAILED (server-side Apps Script error):" `
+                    -Level "error" -Event "analytics_fail"
+                Log "    $brief" -Level "error"
+                Log "    To fix: open your Apps Script (Extensions > Apps Script in the Sheet)" `
+                    -Level "error"
+                Log "    and check the doPost function. Full HTML body is in the .events.json file." `
+                    -Level "error"
+            } else {
+                # Non-HTML, non-OK response - some other unexpected payload.
+                Log "  Analytics unexpected response: $brief" `
+                    -Level "warn" -Event "analytics_fail"
+            }
+            # Always include the full body in the structured event for forensics.
+            Log "[diag] analytics raw response body follows" `
+                -Level "debug" -Event "analytics_raw_body" -Context @{ body = $stdout }
         }
     } catch {
         # Analytics failures must NEVER stop script execution - just log + carry on.
