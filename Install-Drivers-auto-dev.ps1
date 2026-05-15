@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.11.0
+# Version: 1.12.0
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -333,7 +333,7 @@ if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" `
 }
 if ($Silent) { $Headless = $true }
 
-$ScriptVersion   = "1.11.0"
+$ScriptVersion   = "1.12.0"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -389,21 +389,22 @@ $FontUISmall   = New-Object System.Drawing.Font("Segoe UI",    7.5, [System.Draw
 $FontTitleBold = New-Object System.Drawing.Font("Segoe UI",    13,  [System.Drawing.FontStyle]::Bold)
 
 # =========================
-# FORM SETUP
+# FORM SETUP - Enhanced Modern UI
 # =========================
 $form                 = New-Object System.Windows.Forms.Form
 $form.Text            = "Driver Installer Tool  v$ScriptVersion"
-$form.Size            = New-Object System.Drawing.Size(580, 560)
+$form.Size            = New-Object System.Drawing.Size(620, 600)
 $form.StartPosition   = "CenterScreen"
 $form.FormBorderStyle = "FixedSingle"
 $form.MaximizeBox     = $false
-$form.BackColor       = [System.Drawing.Color]::FromArgb(245, 245, 245)
+$form.BackColor       = [System.Drawing.Color]::FromArgb(16, 20, 28)  # Dark slate background
+$form.ForeColor       = [System.Drawing.Color]::FromArgb(229, 230, 235)
 
 $title           = New-Object System.Windows.Forms.Label
 $title.AutoSize  = $true
 $title.Font      = $FontTitleBold
-$title.ForeColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
-$title.Location  = New-Object System.Drawing.Point(20, 15)
+$title.ForeColor = [System.Drawing.Color]::FromArgb(255, 255, 255)
+$title.Location  = New-Object System.Drawing.Point(25, 20)
 $title.Text      = "Driver Installer"
 $title.UseCompatibleTextRendering = $false
 $form.Controls.Add($title)
@@ -411,46 +412,55 @@ $form.Controls.Add($title)
 $versionLabel           = New-Object System.Windows.Forms.Label
 $versionLabel.AutoSize  = $true
 $versionLabel.Font      = $FontUISmall
-$versionLabel.ForeColor = [System.Drawing.Color]::Gray
+$versionLabel.ForeColor = [System.Drawing.Color]::FromArgb(107, 114, 128)
 $versionLabel.Text      = "v$ScriptVersion"
-$versionLabel.Location  = New-Object System.Drawing.Point(510, 20)
+$versionLabel.Location  = New-Object System.Drawing.Point(555, 25)
 $versionLabel.UseCompatibleTextRendering = $false
 $form.Controls.Add($versionLabel)
+
+# Subtle separator line
+$separatorLine           = New-Object System.Windows.Forms.Panel
+$separatorLine.BackColor = [System.Drawing.Color]::FromArgb(31, 41, 55)
+$separatorLine.Size      = New-Object System.Drawing.Size(600, 1)
+$separatorLine.Location  = New-Object System.Drawing.Point(0, 50)
+$form.Controls.Add($separatorLine)
 
 $statusBox             = New-Object System.Windows.Forms.RichTextBox
 $statusBox.Multiline   = $true
 $statusBox.ScrollBars  = "Vertical"
-$statusBox.Size        = New-Object System.Drawing.Size(536, 200)
-$statusBox.Location    = New-Object System.Drawing.Point(20, 55)
+$statusBox.Size        = New-Object System.Drawing.Size(570, 190)
+$statusBox.Location    = New-Object System.Drawing.Point(25, 65)
 $statusBox.ReadOnly    = $true
-$statusBox.BackColor   = [System.Drawing.Color]::FromArgb(22, 22, 22)
-$statusBox.ForeColor   = [System.Drawing.Color]::FromArgb(190, 255, 190)
+$statusBox.BackColor   = [System.Drawing.Color]::FromArgb(8, 12, 18)  # Deeper dark background
+$statusBox.ForeColor   = [System.Drawing.Color]::FromArgb(132, 204, 22)  # Vibrant green text
 $statusBox.Font        = $FontMono
 $statusBox.BorderStyle = "FixedSingle"
+$statusBox.Margin      = New-Object System.Windows.Forms.Padding(0)
 $form.Controls.Add($statusBox)
 
 # ---- DOWNLOAD group ----
 $dlGroupBox           = New-Object System.Windows.Forms.GroupBox
-$dlGroupBox.Text      = "Download"
+$dlGroupBox.Text      = "⬇ Download"
 $dlGroupBox.Font      = $FontUIBoldSm
-$dlGroupBox.ForeColor = [System.Drawing.Color]::FromArgb(0, 100, 180)
-$dlGroupBox.Size      = New-Object System.Drawing.Size(536, 68)
-$dlGroupBox.Location  = New-Object System.Drawing.Point(20, 265)
+$dlGroupBox.ForeColor = [System.Drawing.Color]::FromArgb(59, 130, 246)  # Bright blue
+$dlGroupBox.BackColor = [System.Drawing.Color]::FromArgb(16, 20, 28)
+$dlGroupBox.Size      = New-Object System.Drawing.Size(570, 72)
+$dlGroupBox.Location  = New-Object System.Drawing.Point(25, 265)
 $form.Controls.Add($dlGroupBox)
 
 $dlSpinnerLabel           = New-Object System.Windows.Forms.Label
 $dlSpinnerLabel.AutoSize  = $true
 $dlSpinnerLabel.Font      = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
-$dlSpinnerLabel.ForeColor = [System.Drawing.Color]::FromArgb(0, 100, 180)
-$dlSpinnerLabel.BackColor = [System.Drawing.Color]::FromArgb(245, 245, 245)
-$dlSpinnerLabel.Location  = New-Object System.Drawing.Point(72, 0)
+$dlSpinnerLabel.ForeColor = [System.Drawing.Color]::FromArgb(59, 130, 246)
+$dlSpinnerLabel.BackColor = [System.Drawing.Color]::FromArgb(16, 20, 28)
+$dlSpinnerLabel.Location  = New-Object System.Drawing.Point(72, -2)
 $dlSpinnerLabel.Text      = ""
 $dlSpinnerLabel.UseCompatibleTextRendering = $false
 $dlGroupBox.Controls.Add($dlSpinnerLabel)
 
 $dlBar                       = New-Object System.Windows.Forms.ProgressBar
-$dlBar.Size                  = New-Object System.Drawing.Size(508, 18)
-$dlBar.Location              = New-Object System.Drawing.Point(12, 20)
+$dlBar.Size                  = New-Object System.Drawing.Size(540, 16)
+$dlBar.Location              = New-Object System.Drawing.Point(15, 22)
 $dlBar.Style                 = "Marquee"
 $dlBar.MarqueeAnimationSpeed = 25
 $dlBar.Minimum               = 0
@@ -459,36 +469,38 @@ $dlGroupBox.Controls.Add($dlBar)
 
 $dlLabel           = New-Object System.Windows.Forms.Label
 $dlLabel.AutoSize  = $false
-$dlLabel.Size      = New-Object System.Drawing.Size(508, 17)
-$dlLabel.Location  = New-Object System.Drawing.Point(12, 42)
+$dlLabel.Size      = New-Object System.Drawing.Size(540, 16)
+$dlLabel.Location  = New-Object System.Drawing.Point(15, 44)
 $dlLabel.Font      = $FontMonoSm
-$dlLabel.ForeColor = [System.Drawing.Color]::FromArgb(50, 50, 50)
+$dlLabel.ForeColor = [System.Drawing.Color]::FromArgb(156, 163, 175)
+$dlLabel.BackColor = [System.Drawing.Color]::FromArgb(16, 20, 28)
 $dlLabel.Text      = "Waiting..."
 $dlLabel.UseCompatibleTextRendering = $false
 $dlGroupBox.Controls.Add($dlLabel)
 
 # ---- EXTRACT group ----
 $exGroupBox           = New-Object System.Windows.Forms.GroupBox
-$exGroupBox.Text      = "Extract"
+$exGroupBox.Text      = "📦 Extract"
 $exGroupBox.Font      = $FontUIBoldSm
-$exGroupBox.ForeColor = [System.Drawing.Color]::FromArgb(0, 140, 80)
-$exGroupBox.Size      = New-Object System.Drawing.Size(536, 68)
-$exGroupBox.Location  = New-Object System.Drawing.Point(20, 340)
+$exGroupBox.ForeColor = [System.Drawing.Color]::FromArgb(34, 197, 94)  # Bright green
+$exGroupBox.BackColor = [System.Drawing.Color]::FromArgb(16, 20, 28)
+$exGroupBox.Size      = New-Object System.Drawing.Size(570, 72)
+$exGroupBox.Location  = New-Object System.Drawing.Point(25, 345)
 $form.Controls.Add($exGroupBox)
 
 $exSpinnerLabel           = New-Object System.Windows.Forms.Label
 $exSpinnerLabel.AutoSize  = $true
 $exSpinnerLabel.Font      = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
-$exSpinnerLabel.ForeColor = [System.Drawing.Color]::FromArgb(0, 140, 80)
-$exSpinnerLabel.BackColor = [System.Drawing.Color]::FromArgb(245, 245, 245)
-$exSpinnerLabel.Location  = New-Object System.Drawing.Point(58, 0)
+$exSpinnerLabel.ForeColor = [System.Drawing.Color]::FromArgb(34, 197, 94)
+$exSpinnerLabel.BackColor = [System.Drawing.Color]::FromArgb(16, 20, 28)
+$exSpinnerLabel.Location  = New-Object System.Drawing.Point(58, -2)
 $exSpinnerLabel.Text      = ""
 $exSpinnerLabel.UseCompatibleTextRendering = $false
 $exGroupBox.Controls.Add($exSpinnerLabel)
 
 $exBar                       = New-Object System.Windows.Forms.ProgressBar
-$exBar.Size                  = New-Object System.Drawing.Size(508, 18)
-$exBar.Location              = New-Object System.Drawing.Point(12, 20)
+$exBar.Size                  = New-Object System.Drawing.Size(540, 16)
+$exBar.Location              = New-Object System.Drawing.Point(15, 22)
 $exBar.Style                 = "Marquee"
 $exBar.MarqueeAnimationSpeed = 30
 $exBar.Minimum               = 0
@@ -497,7 +509,14 @@ $exGroupBox.Controls.Add($exBar)
 
 $exLabel           = New-Object System.Windows.Forms.Label
 $exLabel.AutoSize  = $false
-$exLabel.Size      = New-Object System.Drawing.Size(508, 17)
+$exLabel.Size      = New-Object System.Drawing.Size(540, 16)
+$exLabel.Location  = New-Object System.Drawing.Point(15, 44)
+$exLabel.Font      = $FontMonoSm
+$exLabel.ForeColor = [System.Drawing.Color]::FromArgb(156, 163, 175)
+$exLabel.BackColor = [System.Drawing.Color]::FromArgb(16, 20, 28)
+$exLabel.Text      = "Waiting..."
+$exLabel.UseCompatibleTextRendering = $false
+$exGroupBox.Controls.Add($exLabel)
 $exLabel.Location  = New-Object System.Drawing.Point(12, 42)
 $exLabel.Font      = $FontMonoSm
 $exLabel.ForeColor = [System.Drawing.Color]::FromArgb(50, 50, 50)
@@ -507,26 +526,27 @@ $exGroupBox.Controls.Add($exLabel)
 
 # ---- OVERALL group ----
 $overallGroupBox           = New-Object System.Windows.Forms.GroupBox
-$overallGroupBox.Text      = "Overall"
+$overallGroupBox.Text      = "⚡ Overall Progress"
 $overallGroupBox.Font      = $FontUIBoldSm
-$overallGroupBox.ForeColor = [System.Drawing.Color]::FromArgb(80, 80, 80)
-$overallGroupBox.Size      = New-Object System.Drawing.Size(536, 48)
-$overallGroupBox.Location  = New-Object System.Drawing.Point(20, 415)
+$overallGroupBox.ForeColor = [System.Drawing.Color]::FromArgb(168, 85, 247)  # Vibrant purple
+$overallGroupBox.BackColor = [System.Drawing.Color]::FromArgb(16, 20, 28)
+$overallGroupBox.Size      = New-Object System.Drawing.Size(570, 50)
+$overallGroupBox.Location  = New-Object System.Drawing.Point(25, 425)
 $form.Controls.Add($overallGroupBox)
 
 $overallSpinnerLabel           = New-Object System.Windows.Forms.Label
 $overallSpinnerLabel.AutoSize  = $true
 $overallSpinnerLabel.Font      = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
-$overallSpinnerLabel.ForeColor = [System.Drawing.Color]::FromArgb(80, 80, 80)
-$overallSpinnerLabel.BackColor = [System.Drawing.Color]::FromArgb(245, 245, 245)
-$overallSpinnerLabel.Location  = New-Object System.Drawing.Point(62, 0)
+$overallSpinnerLabel.ForeColor = [System.Drawing.Color]::FromArgb(168, 85, 247)
+$overallSpinnerLabel.BackColor = [System.Drawing.Color]::FromArgb(16, 20, 28)
+$overallSpinnerLabel.Location  = New-Object System.Drawing.Point(105, -2)
 $overallSpinnerLabel.Text      = ""
 $overallSpinnerLabel.UseCompatibleTextRendering = $false
 $overallGroupBox.Controls.Add($overallSpinnerLabel)
 
 $progress          = New-Object System.Windows.Forms.ProgressBar
-$progress.Size     = New-Object System.Drawing.Size(508, 18)
-$progress.Location = New-Object System.Drawing.Point(12, 20)
+$progress.Size     = New-Object System.Drawing.Size(540, 16)
+$progress.Location = New-Object System.Drawing.Point(15, 22)
 $progress.Style    = "Continuous"
 $progress.Minimum  = 0
 $progress.Maximum  = 100
@@ -534,47 +554,51 @@ $overallGroupBox.Controls.Add($progress)
 
 $logLabel           = New-Object System.Windows.Forms.Label
 $logLabel.AutoSize  = $false
-$logLabel.Size      = New-Object System.Drawing.Size(536, 16)
-$logLabel.Location  = New-Object System.Drawing.Point(20, 468)
-$logLabel.ForeColor = [System.Drawing.Color]::Gray
+$logLabel.Size      = New-Object System.Drawing.Size(570, 15)
+$logLabel.Location  = New-Object System.Drawing.Point(25, 485)
+$logLabel.ForeColor = [System.Drawing.Color]::FromArgb(107, 114, 128)
 $logLabel.Font      = $FontUISmall
 $logLabel.Text      = "Log: $LogFile"
 $logLabel.UseCompatibleTextRendering = $false
 $form.Controls.Add($logLabel)
 
 # =========================
-# SOUND TOGGLE CHECKBOX
+# SOUND TOGGLE CHECKBOX - Enhanced
 # =========================
 $soundCheckbox                   = New-Object System.Windows.Forms.CheckBox
-$soundCheckbox.Text              = "Sound FX"
+$soundCheckbox.Text              = "🔊 Sound Effects"
 $soundCheckbox.Checked           = $true
 $soundCheckbox.Font              = $FontUIBold
-$soundCheckbox.ForeColor         = [System.Drawing.Color]::FromArgb(60, 60, 60)
+$soundCheckbox.ForeColor         = [System.Drawing.Color]::FromArgb(229, 230, 235)
+$soundCheckbox.BackColor         = [System.Drawing.Color]::FromArgb(16, 20, 28)
 $soundCheckbox.AutoSize          = $true
-$soundCheckbox.Location          = New-Object System.Drawing.Point(20, 490)
+$soundCheckbox.Location          = New-Object System.Drawing.Point(25, 510)
 $soundCheckbox.UseCompatibleTextRendering = $false
 $form.Controls.Add($soundCheckbox)
 
+# ---- Enhanced Buttons ----
 $button            = New-Object System.Windows.Forms.Button
-$button.Text       = "Install Drivers"
-$button.Size       = New-Object System.Drawing.Size(155, 36)
-$button.Location   = New-Object System.Drawing.Point(155, 483)
+$button.Text       = "▶ Install Drivers"
+$button.Size       = New-Object System.Drawing.Size(165, 42)
+$button.Location   = New-Object System.Drawing.Point(170, 505)
 $button.Font       = $FontUIBold
-$button.BackColor  = [System.Drawing.Color]::FromArgb(0, 120, 215)
+$button.BackColor  = [System.Drawing.Color]::FromArgb(59, 130, 246)  # Bright blue
 $button.ForeColor  = [System.Drawing.Color]::White
 $button.FlatStyle  = "Flat"
 $button.FlatAppearance.BorderSize = 0
+$button.FlatAppearance.MouseOverBackColor = [System.Drawing.Color]::FromArgb(37, 99, 235)  # Darker blue on hover
 $form.Controls.Add($button)
 
 $cancelButton            = New-Object System.Windows.Forms.Button
-$cancelButton.Text       = "Cancel"
-$cancelButton.Size       = New-Object System.Drawing.Size(100, 36)
-$cancelButton.Location   = New-Object System.Drawing.Point(320, 483)
+$cancelButton.Text       = "✕ Cancel"
+$cancelButton.Size       = New-Object System.Drawing.Size(120, 42)
+$cancelButton.Location   = New-Object System.Drawing.Point(350, 505)
 $cancelButton.Font       = $FontUIBold
-$cancelButton.BackColor  = [System.Drawing.Color]::FromArgb(160, 160, 160)
+$cancelButton.BackColor  = [System.Drawing.Color]::FromArgb(107, 114, 128)  # Gray
 $cancelButton.ForeColor  = [System.Drawing.Color]::White
 $cancelButton.FlatStyle  = "Flat"
 $cancelButton.FlatAppearance.BorderSize = 0
+$cancelButton.FlatAppearance.MouseOverBackColor = [System.Drawing.Color]::FromArgb(75, 85, 99)  # Darker gray on hover
 $cancelButton.Enabled    = $false
 $form.Controls.Add($cancelButton)
 
@@ -612,18 +636,18 @@ function Play-Sound {
 function Set-ButtonRunning {
     if ($script:Headless) { return }
     $button.Enabled         = $false
-    $button.BackColor       = [System.Drawing.Color]::FromArgb(120, 120, 120)
+    $button.BackColor       = [System.Drawing.Color]::FromArgb(107, 114, 128)  # Disabled gray
     $cancelButton.Enabled   = $true
-    $cancelButton.BackColor = [System.Drawing.Color]::FromArgb(200, 60, 60)
+    $cancelButton.BackColor = [System.Drawing.Color]::FromArgb(239, 68, 68)  # Bright red for cancel
     [System.Windows.Forms.Application]::DoEvents()
 }
 
 function Set-ButtonIdle {
     if ($script:Headless) { return }
     $button.Enabled         = $true
-    $button.BackColor       = [System.Drawing.Color]::FromArgb(0, 120, 215)
+    $button.BackColor       = [System.Drawing.Color]::FromArgb(59, 130, 246)  # Bright blue
     $cancelButton.Enabled   = $false
-    $cancelButton.BackColor = [System.Drawing.Color]::FromArgb(160, 160, 160)
+    $cancelButton.BackColor = [System.Drawing.Color]::FromArgb(107, 114, 128)  # Gray
     [System.Windows.Forms.Application]::DoEvents()
 }
 
