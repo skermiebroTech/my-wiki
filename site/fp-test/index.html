@@ -13,6 +13,8 @@
       
       
       
+        <link rel="prev" href="../todo/">
+      
       
       
         
@@ -23,7 +25,7 @@
     
     
       
-        <title>Fancy semi-automatic script - JJs Wiki</title>
+        <title>Fingerprint Test - JJs Wiki</title>
       
     
     
@@ -76,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#fancy-semi-automatic-script" class="md-skip">
+        <a href="#windows-fingerprint-reader-test" class="md-skip">
           Skip to content
         </a>
       
@@ -112,7 +114,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Fancy semi-automatic script
+              Fingerprint Test
             
           </span>
         </div>
@@ -475,10 +477,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../fp-test/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fingerprint Test
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -494,6 +523,59 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#run-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run it
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-it-checks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it checks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -525,10 +607,32 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#step-1-run" class="md-nav__link">
+  <a href="#run-it" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 1 – Run
+        Run it
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-it-checks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it checks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notes
       
     </span>
   </a>
@@ -552,29 +656,28 @@
 
 
 
-<h1 id="fancy-semi-automatic-script">Fancy semi-automatic script<a class="headerlink" href="#fancy-semi-automatic-script" title="Permanent link">&para;</a></h1>
-<h2 id="step-1-run">Step 1 – Run<a class="headerlink" href="#step-1-run" title="Permanent link">&para;</a></h2>
-<p>Copy the following:
-<div class="highlight"><pre><span></span><code>powershell -ExecutionPolicy Bypass -Command &quot;irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers.ps1 | iex&quot;
+<h1 id="windows-fingerprint-reader-test">Windows Fingerprint Reader Test<a class="headerlink" href="#windows-fingerprint-reader-test" title="Permanent link">&para;</a></h1>
+<p>A single-file PowerShell diagnostic that checks whether the fingerprint reader on a Windows PC is detected, configured, and working. Runs from the <strong>Win+R</strong> Run dialog with zero installation — PowerShell is already on every supported version of Windows.</p>
+<h2 id="run-it">Run it<a class="headerlink" href="#run-it" title="Permanent link">&para;</a></h2>
+<p>Press <strong>Win+R</strong>, paste this, and press Enter (replace <code>&lt;user&gt;</code> and <code>&lt;repo&gt;</code> with your GitHub username and repository name):</p>
+<div class="highlight"><pre><span></span><code>powershell -ep bypass -nop -c &quot;irm https://raw.githubusercontent.com/SkermiebroTech/my-wiki/main/fp-test.ps1 | iex&quot;
 </code></pre></div>
-hide useless powershell window:
-<div class="highlight"><pre><span></span><code>powershell -WindowStyle Hidden -ExecutionPolicy Bypass -Command &quot;irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers.ps1 | iex&quot;
-</code></pre></div></p>
-<p>Then press <code>win+r</code> and press <code>ctrl+v</code> then enter to run the script </p>
+<p>A console window opens, runs the diagnostic, and at the end pops up the Windows Hello prompt so you can physically touch the sensor and confirm authentication works.</p>
+<h2 id="what-it-checks">What it checks<a class="headerlink" href="#what-it-checks" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>Hardware</strong> — enumerates devices in the <code>Biometric</code> PnP class and reports their driver status.</li>
+<li><strong>Service</strong> — confirms the Windows Biometric Service (<code>WbioSrvc</code>) is running.</li>
+<li><strong>Windows Hello</strong> — queries <code>UserConsentVerifier.CheckAvailabilityAsync()</code> to report <code>Available</code>, <code>DeviceNotPresent</code>, <code>NotConfiguredForUser</code>, <code>DisabledByPolicy</code>, or <code>DeviceBusy</code>.</li>
+<li><strong>Enrollment</strong> — checks <code>HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\WinBio\AccountInfo\&lt;SID&gt;</code> for the current user.</li>
+<li><strong>Live test</strong> — calls <code>UserConsentVerifier.RequestVerificationAsync()</code> to trigger an actual Windows Hello prompt and reports the result.</li>
+</ol>
+<h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
 <ul>
-<li>⚠️  The source code can be found at the following URLs<ul>
-<li><a href="https://raw.githubusercontent.com/skermiebroTech/my-wiki/refs/heads/main/install.bat">install.bat</a> (not used for online version)</li>
-<li><a href="https://raw.githubusercontent.com/skermiebroTech/my-wiki/refs/heads/main/Install-Drivers.ps1">install-drivers.ps1</a><ul>
-<li>⚠️ the script looks in the root dir of D:\ for install-drivers.ps1</li>
-<li>⚠️ Right-Click and save link as </li>
-<li>⚠️ this will reboot after the script is run</li>
-<li>⚠️ Please note that this is only intended to be run on a freshly installed Dell, Lenovo or HP laptop. Usage on other systems is at your own risk</li>
+<li><code>UserConsentVerifier</code> authenticates with whichever Windows Hello modality the user has enrolled (fingerprint, face, or PIN). To isolate the fingerprint sensor specifically, make sure only a fingerprint is enrolled, or watch which method the Hello prompt asks for.</li>
+<li>Uses Windows PowerShell 5.1 (the built-in <code>powershell.exe</code>). The WinRT interop pattern used here does not work reliably in PowerShell 7 (<code>pwsh</code>).</li>
+<li>No admin rights required.</li>
+<li>Network: the <code>irm | iex</code> invocation requires internet access to reach <code>raw.githubusercontent.com</code>. On air-gapped machines, save <code>fp-test.ps1</code> to disk and run <code>powershell -ep bypass -f fp-test.ps1</code>.</li>
 </ul>
-</li>
-</ul>
-</li>
-</ul>
-<hr />
 
 
 
