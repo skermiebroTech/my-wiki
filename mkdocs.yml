@@ -36,6 +36,7 @@ nav:
   - Panasonic:
       - FZ-G1 Guide: Panasonic/panasonic-fzg1.md
   - ToDo: todo.md
+  - Fingerprint Test: fp-test.md
 
 markdown_extensions:
   - admonition

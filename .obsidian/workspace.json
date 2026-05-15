@@ -27,16 +27,30 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "docs/Useful-Links.md",
+                "file": "docs/todo.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "Useful-Links"
+              "title": "todo"
+            }
+          },
+          {
+            "id": "b98051cbc092f948",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "docs/fp-test.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "fp-test"
             }
           }
         ],
-        "currentTab": 1
+        "currentTab": 2
       }
     ],
     "direction": "vertical"
@@ -198,8 +212,13 @@
       "bases:Create new base": false
     }
   },
-  "active": "b5f199122ba3065d",
+  "active": "b98051cbc092f948",
   "lastOpenFiles": [
+    "docs/index.md",
+    "docs/fp-test.md",
+    "docs/todo.md",
+    "fp-test.ps1",
+    "docs/Useful-Links.md",
     "site/search/search_index.json",
     "site/search",
     "site/Panasonic/panasonic-fzg1/index.html",
@@ -209,11 +228,6 @@
     "site/todo",
     "site/driver-installation/index.html",
     "site/driver-installation",
-    "site/cab-file-driver-installation/index.html",
-    "site/cab-file-driver-installation",
-    "docs/todo.md",
-    "docs/Useful-Links.md",
-    "docs/index.md",
     "README.md",
     "Intel RST.md",
     "docs/Auto-Installer-Docs.md",

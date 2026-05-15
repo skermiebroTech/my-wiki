@@ -4,3 +4,4 @@
 	- test Dell with auto installer 
 	- test other Lenovo models 
 	- fix leovo issue where it launches the exe visibly and extracts it
+	- research videoninja
