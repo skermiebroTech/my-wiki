@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.10.0
+# Version: 1.11.0
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -13,6 +13,7 @@
 #   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -Manufacturer Lenovo -MachineType 20XX -SkipInstall -SkipCleanup
 #   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -TestMode -Diagnostic
 #   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -Silent -NoAnalytics
+#   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -MaxParallelDownloads 5
 #
 # Parameters:
 #   -Manufacturer  Override WMI manufacturer detection (Dell, HP, Lenovo, Microsoft)
@@ -31,6 +32,11 @@
 #   -NoAnalytics   Disable the Google Sheets webhook entirely. Local analytics JSON
 #                  export is still written to Downloads. Use for offline / air-gapped
 #                  machines or when testing without polluting production telemetry.
+#   -MaxParallelDownloads <int>  v1.11.0 - concurrency cap for parallel downloads
+#                  in the HP per-machine catalog and Dell CatalogPC individual-driver
+#                  paths. Default 3. Clamped to 1..6 (above 6 just thrashes the CDN
+#                  and triggers rate limiting). Has no effect on single-file full
+#                  driver pack downloads.
 #   -SkipInstall   Download and extract only, skip pnputil driver installation
 #   -SkipCleanup   Keep C:\DRIVERS after run for inspection
 #
@@ -42,6 +48,49 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.11.0 - Parallel downloads + Lenovo Recipe Card priority restored.
+#           (1) Parallel curl downloads via new Invoke-CurlDownloadParallel helper.
+#               Takes an array of {Url, OutFile, Label} items and runs up to
+#               $MaxParallelDownloads curl.exe processes concurrently, polling
+#               them together with the same per-process stall detection
+#               (~3.5 min) and cancel handling as the serial download. On cancel:
+#               every active curl is killed and every partial file deleted in one
+#               pass before returning - same "no broken state" guarantee as the
+#               v1.9.2 serial cancel fix.
+#               Wired into TWO call sites where it actually helps:
+#               - HP per-machine catalog softpaq loop (was the worst serial
+#                 offender - N small softpaqs each from a fresh CDN connection,
+#                 paying TCP slow-start N times)
+#               - Dell CatalogPC individual-driver loop (same shape: 1-3 small
+#                 INF cabinets each from a separate CDN edge)
+#               NOT wired into: full driver pack downloads (single file, nothing
+#               to parallelise), descriptor XMLs, BIOS update CABs (those are
+#               one-shot and need to finish before anything else can plan).
+#               Analytics: parallel batches SUM their bytes into AnalyticsDownloadMB
+#               (more accurate for multi-file paths). Serial Invoke-CurlDownload
+#               keeps its long-standing MAX semantics so existing single-pack
+#               analytics rows don't change shape - documented quirk, not unified
+#               to avoid changing downstream sheet/dashboard semantics.
+#           (2) Lenovo: PATH PRIORITY REVERSED.
+#               Pre-v1.11.0:  consumer catalog (PATH 1) -> catalogv2.xml (PATH 2 fallback)
+#               v1.11.0+:    catalogv2.xml / Recipe Card (PATH 1) -> consumer catalog (PATH 2 fallback)
+#               The consumer-catalog stack (v1.8.0 onwards: DetectInstall evaluator,
+#               NVIDIA short-circuit, BIOS deferral, force-bind unbound, dock skip)
+#               is ALL preserved; it just only runs now when the machine type
+#               has no Recipe Card / catalogv2.xml entry.
+#               Motivation: ThinkPad / ThinkCentre / commercial models that DO
+#               have Recipe Card packs are far more reliable on the single-pack
+#               path (one Inno Setup extract -> pnputil INFs) than the consumer
+#               flow's per-package descriptor dance. The consumer path stays the
+#               only option for ThinkBook / IdeaPad / consumer models that
+#               aren't in catalogv2.xml (the use case v1.8.0 originally added).
+#               Last-resort fallback unchanged: if neither catalog has the
+#               machine type, opens RecipeCardWeb.html in a browser for manual
+#               selection (skipped in headless mode, URL logged instead).
+#               Refactor: factored the v1.7.x inline catalogv2.xml fetch+parse
+#               into Get-LenovoFullPackUrl, and the download+extract+install into
+#               Install-LenovoFullPack. Start-LenovoDriverInstall is now ~30
+#               lines of clear dispatch logic instead of two interleaved paths.
 # v1.10.0 - New switches and observability layer (additive; no vendor logic changed):
 #           (1) -Silent: log-only mode. Disables both GUI and console output; the log
 #               file is still written. Implies -Headless. Internally, the Log() helper
@@ -271,6 +320,7 @@ param(
     [switch]$TestMode,      # v1.10.0 - dry-run: detect + report but do not mutate system.
     [switch]$Diagnostic,    # v1.10.0 - verbose logging (per-step timings, env extras).
     [switch]$NoAnalytics,   # v1.10.0 - skip the Sheets webhook (local JSON still written).
+    [int]$MaxParallelDownloads = 3,  # v1.11.0 - cap for parallel downloads in HP catalog / Dell individual paths.
     [switch]$SkipInstall,
     [switch]$SkipCleanup
 )
@@ -283,7 +333,7 @@ if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" `
 }
 if ($Silent) { $Headless = $true }
 
-$ScriptVersion   = "1.10.0"
+$ScriptVersion   = "1.11.0"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -325,6 +375,7 @@ $script:Silent     = [bool]$Silent
 $script:TestMode   = [bool]$TestMode
 $script:Diagnostic = [bool]$Diagnostic
 $script:NoAnalytics = [bool]$NoAnalytics
+$script:MaxParallelDownloads = $MaxParallelDownloads  # v1.11.0
 
 # =========================
 # FONT CONSTANTS
@@ -1291,6 +1342,181 @@ function Invoke-CurlDownload {
 }
 
 # =========================
+# v1.11.0 - PARALLEL CURL DOWNLOAD
+#
+# Launches up to $MaxConcurrency curl.exe processes at once and polls them
+# together. Designed for the HP catalog softpaq loop and the Dell CatalogPC
+# individual-driver loop, where N small files each come from a fresh CDN
+# connection; running them serially serialises TCP slow-start overhead.
+#
+# Inputs:
+#   $Items: array of @{ Url=...; OutFile=...; Label='Display name' }
+#   $MaxConcurrency: cap (defaults to script-scope $MaxParallelDownloads, min 1)
+#
+# Returns: array of @{ Item=...; Success=$bool; Bytes=long; ErrorMsg=string }
+# in the same order as $Items. Callers can then iterate the returned array
+# and run any post-download serial work (hash verify, extract, install).
+#
+# Analytics: unlike Invoke-CurlDownload which uses MAX(downloads) for the
+# AnalyticsDownloadMB field, this helper SUMS the bytes of the whole batch
+# and adds the sum to AnalyticsDownloadMB. That's strictly more accurate
+# for the multi-file catalog paths. Serial Invoke-CurlDownload keeps its
+# MAX semantics so existing single-pack analytics rows don't change shape.
+#
+# Cancellation: $script:CancelRequested checked every 700ms; when set, every
+# active curl process is killed in parallel and partial files deleted.
+# =========================
+function Invoke-CurlDownloadParallel {
+    param(
+        [Parameter(Mandatory=$true)] [hashtable[]]$Items,
+        [int]$MaxConcurrency = 0
+    )
+    if (-not $Items -or $Items.Count -eq 0) { return @() }
+    if ($MaxConcurrency -le 0) {
+        $MaxConcurrency = if ($script:MaxParallelDownloads -gt 0) { $script:MaxParallelDownloads } else { 3 }
+    }
+    # Above 6 we're just thrashing the CDN and getting throttled. Below 1 makes no sense.
+    $MaxConcurrency = [math]::Min([math]::Max($MaxConcurrency, 1), 6)
+    $total = $Items.Count
+    Log "Parallel download: $total file(s), concurrency=$MaxConcurrency" `
+        -Level "info" -Event "parallel_dl_start" -Context @{ total=$total; concurrency=$MaxConcurrency }
+    SetDownload -Pct 0 -Label "Parallel: 0/$total complete"
+
+    # Result objects (one per input item, indexed identically)
+    $results = New-Object 'System.Collections.Generic.List[hashtable]'
+    foreach ($_ in $Items) {
+        $results.Add(@{ Item=$_; Success=$false; Bytes=0L; ErrorMsg=$null; Proc=$null; Started=$null; LastSize=0L; Stall=0 }) | Out-Null
+    }
+
+    $nextIdx       = 0
+    $activeIdxs    = New-Object 'System.Collections.Generic.List[int]'
+    $completedCnt  = 0
+    $failedCnt     = 0
+    $batchBytes    = 0L
+    $StallLimitSec = 210     # ~3.5 min, matches serial Invoke-CurlDownload
+
+    while ($completedCnt -lt $total) {
+        # Launch more processes up to the concurrency cap
+        while ($activeIdxs.Count -lt $MaxConcurrency -and $nextIdx -lt $total) {
+            $r    = $results[$nextIdx]
+            $item = $r.Item
+            $url  = $item.Url
+            $out  = $item.OutFile
+            $lbl  = if ($item.Label) { $item.Label } else { [System.IO.Path]::GetFileName($out) }
+
+            $psi                 = New-Object System.Diagnostics.ProcessStartInfo
+            $psi.FileName        = "curl.exe"
+            $psi.Arguments       = "--location --fail --connect-timeout 30 " +
+                                   "--retry 10 --retry-delay 5 --retry-all-errors " +
+                                   "--continue-at - " +
+                                   "--user-agent `"Mozilla/5.0 (Windows NT 10.0; Win64; x64)`" " +
+                                   "--output `"$out`" `"$url`""
+            $psi.UseShellExecute = $false
+            $psi.CreateNoWindow  = $true
+            try {
+                $proc            = New-Object System.Diagnostics.Process
+                $proc.StartInfo  = $psi
+                $null = $proc.Start()
+                $r.Proc    = $proc
+                $r.Started = Get-Date
+                $activeIdxs.Add($nextIdx) | Out-Null
+                Log-Diag "  parallel[$nextIdx]: started '$lbl' -> $out"
+            } catch {
+                $r.ErrorMsg = "curl launch failed: $($_.Exception.Message)"
+                $r.Success  = $false
+                $completedCnt++
+                $failedCnt++
+                Log "  parallel[$nextIdx]: launch failed - $($r.ErrorMsg)" -Level "error"
+            }
+            $nextIdx++
+        }
+
+        Start-Sleep -Milliseconds 700
+
+        # Cancel check - bail entire batch
+        if ($script:CancelRequested) {
+            Log "  Parallel cancel detected - killing all active curls." -Level "cancel"
+            foreach ($i in $activeIdxs) {
+                $r = $results[$i]
+                if ($r.Proc -and -not $r.Proc.HasExited) {
+                    try { $r.Proc.Kill() } catch {}
+                    try { $r.Proc.WaitForExit(2000) | Out-Null } catch {}
+                }
+                $of = $r.Item.OutFile
+                if ($of -and (Test-Path $of)) { Remove-Item $of -EA SilentlyContinue }
+                $r.Success  = $false
+                $r.ErrorMsg = "cancelled"
+            }
+            SetDownload -Pct 0 -Label "Cancelled."
+            Stop-DlSpinner -Success $false
+            return $results
+        }
+
+        # Poll each active process: handle exit, stall, progress aggregation
+        $stillActive = New-Object 'System.Collections.Generic.List[int]'
+        foreach ($i in $activeIdxs) {
+            $r = $results[$i]
+            $proc = $r.Proc
+            $of   = $r.Item.OutFile
+            $sz   = if ($of -and (Test-Path $of)) { (Get-Item $of -EA SilentlyContinue).Length } else { 0 }
+            if ($sz -gt $r.LastSize) { $r.Stall = 0; $r.LastSize = $sz } else { $r.Stall++ }
+
+            if ($proc.HasExited) {
+                if ($proc.ExitCode -eq 0 -and (Test-Path $of) -and (Get-Item $of).Length -gt 0) {
+                    $r.Bytes   = (Get-Item $of).Length
+                    $r.Success = $true
+                    $batchBytes += $r.Bytes
+                    $mb = [math]::Round($r.Bytes / 1MB, 1)
+                    $lbl = if ($r.Item.Label) { $r.Item.Label } else { [System.IO.Path]::GetFileName($of) }
+                    Log "  parallel[$i] OK: $lbl ($mb MB)" -Level "info" -Event "parallel_dl_ok"
+                } else {
+                    $r.Success  = $false
+                    $r.ErrorMsg = "curl exit $($proc.ExitCode)"
+                    Log "  parallel[$i] FAIL: $($r.ErrorMsg)" -Level "warn" -Event "parallel_dl_fail"
+                    if (Test-Path $of) { Remove-Item $of -EA SilentlyContinue }
+                    $failedCnt++
+                }
+                $completedCnt++
+            } elseif ($r.Stall -gt ($StallLimitSec * 1000 / 700)) {
+                # Per-process stall: kill just this one, don't affect siblings
+                Log "  parallel[$i] STALLED >$StallLimitSec`s - killing." -Level "warn"
+                try { $proc.Kill() } catch {}
+                try { $proc.WaitForExit(2000) | Out-Null } catch {}
+                if (Test-Path $of) { Remove-Item $of -EA SilentlyContinue }
+                $r.Success  = $false
+                $r.ErrorMsg = "stalled"
+                $completedCnt++
+                $failedCnt++
+            } else {
+                $stillActive.Add($i) | Out-Null
+            }
+        }
+        $activeIdxs = $stillActive
+
+        # UI update
+        $okSoFar = $completedCnt - $failedCnt
+        $pct     = if ($total -gt 0) { [int](($completedCnt / $total) * 100) } else { 0 }
+        if ($pct -ge 100) { $pct = 99 }  # leave 100 for the post-loop final
+        $activeMB = 0
+        foreach ($i in $activeIdxs) { $activeMB += ($results[$i].LastSize / 1MB) }
+        $batchMB  = [math]::Round(($batchBytes / 1MB) + $activeMB, 1)
+        SetDownload -Pct $pct -Label "Parallel: $okSoFar/$total complete ($batchMB MB, $($activeIdxs.Count) active)"
+        Step-AllSpinners
+    }
+
+    # Final accounting
+    $batchMB = [math]::Round($batchBytes / 1MB, 1)
+    $script:AnalyticsDownloadMB = [math]::Round($script:AnalyticsDownloadMB + $batchMB, 1)
+    $ok = ($results | Where-Object { $_.Success }).Count
+    Log "Parallel download finished: $ok/$total OK, total $batchMB MB" `
+        -Level "info" -Event "parallel_dl_done" -Context @{ ok=$ok; total=$total; mb=$batchMB }
+    SetDownload -Pct 100 -Label "Parallel: $ok/$total complete ($batchMB MB)"
+    Stop-DlSpinner -Success ($ok -gt 0)
+    if ($ok -gt 0) { Play-Sound -Event "DownloadComplete" }
+    return $results
+}
+
+# =========================
 # EXTRACTION WATCHER
 # =========================
 function Watch-Extraction {
@@ -1835,26 +2061,45 @@ function Start-DellIndividualDriverInstall {
     Log "Found $($toDownload.Count) driver(s) to download individually."
     if (-not (Test-Path $DriverRoot)) { New-Item -Path $DriverRoot -ItemType Directory -Force | Out-Null }
 
+    # v1.11.0 - PARALLEL DOWNLOAD PHASE for Dell CatalogPC individual drivers.
+    # Same shape as HP: build manifest, batch-download, then iterate survivors
+    # serially for extraction (extraction needs disk I/O exclusivity per file).
+    $dlItems = New-Object 'System.Collections.Generic.List[hashtable]'
+    foreach ($drv in $toDownload) {
+        $driverUrl  = "https://downloads.dell.com/$($drv.Path)"
+        $driverFile = Join-Path $DriverRoot ([System.IO.Path]::GetFileName($drv.Path))
+        $dlItems.Add(@{
+            Url     = $driverUrl
+            OutFile = $driverFile
+            Label   = $drv.DriverName
+        }) | Out-Null
+    }
+    SetProgress 22
+    $dlResults = Invoke-CurlDownloadParallel -Items $dlItems
+    if (Test-Cancelled) { return $false }
+
+    $allDownloaded = $true
+    foreach ($r in $dlResults) {
+        if (-not $r.Success) {
+            Log "  Download failed for '$($r.Item.Label)': $($r.ErrorMsg) - falling back to full pack."
+            $allDownloaded = $false
+        }
+    }
+    if (-not $allDownloaded) { return $null }
+
+    # SERIAL EXTRACT PHASE (one extract dir per file - reuses indexing convention)
     $i = 0
     foreach ($drv in $toDownload) {
         $i++
-        $driverUrl  = "https://downloads.dell.com/$($drv.Path)"
-        $driverFile = Join-Path $DriverRoot ([System.IO.Path]::GetFileName($drv.Path))
-        Log "[$i/$($toDownload.Count)] Downloading: $($drv.DriverName)"
-        SetProgress (20 + [int](($i / $toDownload.Count) * 30))
-        if (-not (Invoke-CurlDownload -Url $driverUrl -OutFile $driverFile)) {
-            Log "  Download failed for '$($drv.DriverName)' - falling back to full pack."
-            return $null
-        }
         if (Test-Cancelled) { return $false }
-
+        $driverFile  = Join-Path $DriverRoot ([System.IO.Path]::GetFileName($drv.Path))
         $extractPath = Join-Path $DriverRoot "Dell_Individual_$i"
-        Log "  Extracting: $($drv.DriverName)..."
+        Log "  Extracting [$i/$($toDownload.Count)]: $($drv.DriverName)..."
+        SetProgress (40 + [int](($i / $toDownload.Count) * 20))
         Start-PackExtraction -PackFile $driverFile -DestPath $extractPath -StallLimitSec 120 -Vendor "Dell"
-        SetProgress (50 + [int](($i / $toDownload.Count) * 10))
     }
 
-    # Install all extracted INFs
+    # Install all extracted INFs (unchanged)
     $anyInstalled = $false
     foreach ($extractDir in (Get-Item (Join-Path $DriverRoot "Dell_Individual_*") -EA SilentlyContinue)) {
         if (Install-DriversFromPath -BasePath $extractDir.FullName) { $anyInstalled = $true }
@@ -2444,15 +2689,24 @@ function Find-HpApplicableSoftpaqs {
     }
 }
 
-function Install-HpSoftpaq {
+function Get-HpSoftpaqOutFile {
+    # Single source of truth for the local SP filename so the parallel download
+    # planner and the post-download installer agree on the path.
+    param([hashtable]$Sp, [string]$DriverRoot)
+    return (Join-Path $DriverRoot "$($Sp.Id).exe")
+}
+
+function Install-HpSoftpaqPostDownload {
+    # v1.11.0 - the post-download (serial) half of the old Install-HpSoftpaq.
+    # Assumes $spFile already exists on disk from a prior (serial or parallel)
+    # download. Does: SHA256 verify -> extract -> SilentInstall.
+    # Returns $true on success, $false on any failure.
     param(
         [hashtable]$Sp,
         [string]$DriverRoot,
         [int]$Index,
         [int]$Total
     )
-    # Download -> SHA256 verify -> extract -> run SilentInstall.
-    # Returns $true on success, $false on any failure.
     Log ""
     Log "----- HP CATALOG [$Index/$Total] $($Sp.Name) (v$($Sp.Version)) -----"
     Log "  SP ID:   $($Sp.Id)"
@@ -2460,18 +2714,15 @@ function Install-HpSoftpaq {
     Log "  Size:    $([math]::Round($Sp.Size/1MB,1)) MB"
     Log "  Install: $($Sp.SilentInstall)"
 
-    if (-not $Sp.Url) { Log "  ERROR: no URL in catalog - skipping."; return $false }
     if (-not $Sp.SilentInstall -or $Sp.SilentInstall -eq 'NA') {
         Log "  No SilentInstall command - skipping (would need user interaction)."
         return $false
     }
-
-    $spFile = Join-Path $DriverRoot "$($Sp.Id).exe"
-    if (-not (Invoke-CurlDownload -Url $Sp.Url -OutFile $spFile)) {
-        Log "  Download failed."
+    $spFile = Get-HpSoftpaqOutFile -Sp $Sp -DriverRoot $DriverRoot
+    if (-not (Test-Path $spFile)) {
+        Log "  Expected file missing on disk ($spFile) - skipping."
         return $false
     }
-    if (Test-Cancelled) { return $false }
 
     Log "  Verifying SHA256..."
     $actual = (Get-FileHash -Path $spFile -Algorithm SHA256).Hash.ToUpper()
@@ -2521,6 +2772,26 @@ function Install-HpSoftpaq {
     }
     Log "  Install reported failure (exit $exit)."
     return $false
+}
+
+function Install-HpSoftpaq {
+    # v1.11.0 - kept as a back-compat wrapper for any callers that still want
+    # the old "do everything for one SP, serially" behaviour. Internally just
+    # runs a 1-item parallel download then the post-download phase.
+    param(
+        [hashtable]$Sp,
+        [string]$DriverRoot,
+        [int]$Index,
+        [int]$Total
+    )
+    if (-not $Sp.Url) { Log "  ERROR: no URL in catalog - skipping."; return $false }
+    $spFile = Get-HpSoftpaqOutFile -Sp $Sp -DriverRoot $DriverRoot
+    if (-not (Invoke-CurlDownload -Url $Sp.Url -OutFile $spFile)) {
+        Log "  Download failed."
+        return $false
+    }
+    if (Test-Cancelled) { return $false }
+    return (Install-HpSoftpaqPostDownload -Sp $Sp -DriverRoot $DriverRoot -Index $Index -Total $Total)
 }
 
 function Start-HpReferenceCatalogInstall {
@@ -2585,21 +2856,74 @@ function Start-HpReferenceCatalogInstall {
 
         if (-not (Test-Path $DriverRoot)) { New-Item -Path $DriverRoot -ItemType Directory -Force | Out-Null }
 
+        # v1.11.0 - PARALLEL DOWNLOAD PHASE
+        # Build a download manifest (skipping anything that's missing a URL or
+        # SilentInstall - those would be no-ops in the install phase anyway),
+        # fetch them all concurrently, then iterate the survivors serially for
+        # SHA verify + extract + install. The serial install phase is unchanged.
+        $dlItems = New-Object 'System.Collections.Generic.List[hashtable]'
+        $dlMap   = @{}   # spId -> sp object, for re-lookup after the download batch
+        foreach ($sp in $softpaqs) {
+            if (-not $sp.Url) {
+                Log "  SKIP: $($sp.Name) has no URL in catalog."
+                continue
+            }
+            if (-not $sp.SilentInstall -or $sp.SilentInstall -eq 'NA') {
+                # Matches the old serial Install-HpSoftpaq's pre-download check -
+                # don't waste bandwidth on a SP we'd just reject in the install phase.
+                Log "  SKIP: $($sp.Name) has no SilentInstall command (would need user interaction)."
+                continue
+            }
+            $outFile = Get-HpSoftpaqOutFile -Sp $sp -DriverRoot $DriverRoot
+            $dlItems.Add(@{
+                Url     = $sp.Url
+                OutFile = $outFile
+                Label   = "$($sp.Id) - $($sp.Name)"
+            }) | Out-Null
+            $dlMap[$sp.Id] = $sp
+        }
+        if ($dlItems.Count -eq 0) {
+            Log "All matched softpaqs were filtered out before download - falling back to full pack."
+            return $null
+        }
+        SetProgress 32
+        $dlResults = Invoke-CurlDownloadParallel -Items $dlItems
+        if (Test-Cancelled) { return $false }
+
+        # Reduce results to the SPs whose download actually succeeded, preserving
+        # the original catalog order so per-INF logs match the manifest.
+        $okSet = @{}
+        foreach ($r in $dlResults) {
+            if ($r.Success) {
+                $name = [System.IO.Path]::GetFileNameWithoutExtension($r.Item.OutFile)
+                $okSet[$name] = $true
+            }
+        }
+        $readySps = @($softpaqs | Where-Object { $okSet[$_.Id] -eq $true })
+        if ($readySps.Count -eq 0) {
+            Log "Parallel download phase produced no usable files - falling back to full pack."
+            return $null
+        }
+        Log "Parallel download phase: $($readySps.Count)/$($softpaqs.Count) softpaq(s) ready for install."
+        SetProgress 50
+
+        # SERIAL INSTALL PHASE (unchanged semantics - pnputil/HPUP need exclusive access)
         $okCount = 0
         $i = 0
-        foreach ($sp in $softpaqs) {
+        foreach ($sp in $readySps) {
             $i++
             if (Test-Cancelled) { return $false }
-            SetProgress (30 + [int](($i / $softpaqs.Count) * 65))
-            SetExtract -Pct ([int](($i / $softpaqs.Count) * 100)) -Label "Catalog SP [$i/$($softpaqs.Count)]: $($sp.Name)"
-            if (Install-HpSoftpaq -Sp $sp -DriverRoot $DriverRoot -Index $i -Total $softpaqs.Count) {
+            SetProgress (50 + [int](($i / $readySps.Count) * 45))
+            SetExtract -Pct ([int](($i / $readySps.Count) * 100)) -Label "Catalog SP [$i/$($readySps.Count)]: $($sp.Name)"
+            if (Install-HpSoftpaqPostDownload -Sp $sp -DriverRoot $DriverRoot -Index $i -Total $readySps.Count) {
                 $okCount++
             }
         }
 
         Log ""
         Log "=== HP CATALOG SUMMARY ==="
-        Log "Installed: $okCount / $($softpaqs.Count)"
+        Log "Downloaded: $($readySps.Count) / $($softpaqs.Count)  (parallel, concurrency=$($script:MaxParallelDownloads))"
+        Log "Installed : $okCount / $($readySps.Count)"
 
         if ($okCount -eq 0) {
             Log "No softpaqs installed via catalog - falling back to full pack."
@@ -2731,21 +3055,32 @@ function Start-HpDriverInstall {
 # =========================
 # LENOVO
 # =========================
-# Two-path Lenovo flow:
+# Two-path Lenovo flow (priority reversed in v1.11.0):
 #
-#   Path 1: Consumer catalog (https://download.lenovo.com/catalog/<MTM>_<OS>.xml)
-#     Same catalog Lenovo System Update uses. Covers ThinkBook/IdeaPad consumer
-#     plus most ThinkPad/ThinkCentre. Returns a list of individual <package>
-#     entries; each package has a descriptor XML containing the silent install
-#     command + SHA256 checksums. We run each package's own installer.
+#   Path 1 (PRIMARY, v1.11.0+): Recipe Card / catalogv2.xml SCCM driver pack
+#     Lenovo's "Recipe Card" web tool at
+#     https://download.lenovo.com/cdrt/ddrc/RecipeCardWeb.html lists the same
+#     packs as catalogv2.xml. One monolithic .exe -> Inno Setup extract ->
+#     pnputil INFs. Simpler and more reliable than per-package descriptors;
+#     covers most commercial ThinkPad / ThinkCentre models.
 #
-#   Path 2 (fallback): catalogv2.xml SCCM driver pack
-#     One monolithic .exe -> Inno Setup extract -> pnputil INFs. Only used if
-#     Path 1 returned nothing (very old / niche commercial models).
+#   Path 2 (FALLBACK): Consumer catalog (download.lenovo.com/catalog/<MTM>_<OS>.xml)
+#     Same catalog Lenovo System Update uses. Used only when path 1 has no
+#     entry - i.e. consumer / ThinkBook / IdeaPad models that don't appear
+#     in catalogv2.xml. The v1.8.x consumer-catalog stack (DetectInstall
+#     evaluator, NVIDIA short-circuit, BIOS deferral, force-bind unbound) all
+#     stay in place and still run when this fallback fires.
 #
-# Helper Invoke-LenovoPackageCommand runs each package's <ExtractCommand>
-# and <Install><Cmdline> via cmd.exe with the placeholder substitutions
-# Lenovo's installer authors expect (%PACKAGEPATH% and %WINDOWS%).
+# Pre-v1.11.0 the order was reversed: v1.8.0 made consumer catalog primary
+# because catalogv2.xml lacks ThinkBook/IdeaPad coverage. The trade-off bit
+# back on ThinkPads where the consumer-catalog path had many more failure
+# modes than a single full-pack install. v1.11.0 restores the
+# full-pack-when-available behaviour while keeping consumer catalog for the
+# models that genuinely need it.
+#
+# Helper Invoke-LenovoPackageCommand runs each consumer-catalog package's
+# <ExtractCommand> and <Install><Cmdline> via cmd.exe with the placeholder
+# substitutions Lenovo's installer authors expect (%PACKAGEPATH% / %WINDOWS%).
 # =========================
 
 # =========================
@@ -3702,6 +4037,83 @@ function Start-LenovoConsumerCatalogInstall {
     return (($okCount + $alreadyInstalledCount + $naCount) -gt 0)
 }
 
+function Get-LenovoFullPackUrl {
+    # v1.11.0 - factored out of the old inline Path-2 code in
+    # Start-LenovoDriverInstall. Returns the SCCM driver pack URL from
+    # catalogv2.xml (Lenovo's "Recipe Card" listing) for the given machine
+    # type, or $null if the machine type isn't listed. Tries the detected
+    # OS first, then the other Windows generation as a fallback.
+    param(
+        [Parameter(Mandatory=$true)] [string]$MachineType,
+        [Parameter(Mandatory=$true)] [ValidateSet('Win10','Win11')] [string]$OsCode
+    )
+    Log "Checking Lenovo Recipe Card / catalogv2.xml for full driver pack..."
+    $catalogFile = Join-Path $env:TEMP "lenovo_catalogv2.xml"
+    if (-not (Invoke-CurlDownload -Url "https://download.lenovo.com/cdrt/td/catalogv2.xml" -OutFile $catalogFile)) {
+        Log "  catalogv2.xml download failed."
+        return $null
+    }
+    if (Test-Cancelled) { return $null }
+
+    try {
+        $bytes    = [System.IO.File]::ReadAllBytes($catalogFile)
+        $rawText  = [System.Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0xFEFF)
+        [xml]$cat = $rawText
+    } catch {
+        Log "  catalogv2.xml parse failed: $($_.Exception.Message)"
+        return $null
+    }
+
+    $osAttr     = $OsCode.ToLower()
+    $osFallback = if ($osAttr -eq 'win11') { 'win10' } else { 'win11' }
+
+    foreach ($model in $cat.ModelList.Model) {
+        $types = @($model.Types.Type)
+        if (-not ($types | Where-Object { $_ -like "$MachineType*" })) { continue }
+        Log "  Matched Recipe Card model: $($model.name)"
+        foreach ($os in @($osAttr, $osFallback)) {
+            $nodes = @($model.SCCM | Where-Object { $_.os -eq $os })
+            if ($nodes.Count -gt 0) {
+                $url = ($nodes | Select-Object -Last 1)."#text"
+                if ($url -match "^https?://") {
+                    Log "  Recipe Card pack URL [$os]: $url"
+                    return $url
+                }
+            }
+        }
+        # Matched the model but no SCCM URL for either OS - no point checking more models
+        break
+    }
+    Log "  No Recipe Card / SCCM pack listed for machine type '$MachineType'."
+    return $null
+}
+
+function Install-LenovoFullPack {
+    # v1.11.0 - factored out of Start-LenovoDriverInstall's inline path-2 code.
+    # Download -> Inno-Setup extract -> pnputil. Same flow that's been used
+    # since pre-v1.8.0; just isolated for clarity.
+    param(
+        [Parameter(Mandatory=$true)] [string]$PackUrl,
+        [Parameter(Mandatory=$true)] [string]$DriverRoot
+    )
+    SetProgress 28
+    if (-not (Test-Path $DriverRoot)) { New-Item -Path $DriverRoot -ItemType Directory -Force | Out-Null }
+    $packFile = Join-Path $DriverRoot ([System.IO.Path]::GetFileName(([System.Uri]$PackUrl).LocalPath))
+    SetProgress 30
+    if (-not (Invoke-CurlDownload -Url $PackUrl -OutFile $packFile)) {
+        Log "Lenovo driver pack download failed."
+        return $false
+    }
+    if (Test-Cancelled) { return $false }
+    SetProgress 55
+
+    $extractPath = Join-Path $DriverRoot "Lenovo_Extracted"
+    Log "Extracting Lenovo pack..."
+    Start-PackExtraction -PackFile $packFile -DestPath $extractPath -StallLimitSec 300 -Vendor "Lenovo"
+    SetProgress 60
+    return (Install-DriversFromPath -BasePath $extractPath)
+}
+
 function Start-LenovoDriverInstall {
     param([string]$DriverRoot)
 
@@ -3730,82 +4142,53 @@ function Start-LenovoDriverInstall {
     # BuildNumber is the unambiguous Win10 vs Win11 discriminator (>=22000 = Win11).
     $buildNum = 0
     try { $buildNum = [int](Get-CimInstance Win32_OperatingSystem).BuildNumber } catch {}
-    $osCode     = if ($buildNum -ge 22000) { 'Win11' } else { 'Win10' }
-    $osAttr     = $osCode.ToLower()  # 'win10' or 'win11' for the legacy SCCM-pack code below
-    $osFallback = if ($osAttr -eq 'win11') { 'win10' } else { 'win11' }
+    $osCode = if ($buildNum -ge 22000) { 'Win11' } else { 'Win10' }
     Log "Detected OS: $osCode (build $buildNum)"
 
     # ------------------------------------------------------------------
-    # PATH 1: Consumer catalog (Lenovo System Update mechanism)
-    #   This is the catalog that ALSO covers ThinkBook/IdeaPad/consumer
-    #   models missing from catalogv2.xml. Try it first.
+    # v1.11.0 PATH PRIORITY REVERSED FROM v1.8.0:
+    #
+    #   PATH 1 (primary): Recipe Card / catalogv2.xml SCCM full driver pack.
+    #     Lenovo's own "Recipe Card" web tool at
+    #     https://download.lenovo.com/cdrt/ddrc/RecipeCardWeb.html lists the
+    #     same packs. Single .exe -> Inno Setup extract -> pnputil INFs.
+    #     Simpler and more reliable than the per-descriptor consumer flow;
+    #     covers most ThinkPad/ThinkCentre commercial models.
+    #
+    #   PATH 2 (fallback): Consumer catalog (download.lenovo.com/catalog/<MTM>_<OS>.xml).
+    #     Only used when the machine type ISN'T listed in catalogv2.xml -
+    #     i.e. consumer / ThinkBook / IdeaPad models that don't get Recipe
+    #     Card packs (the use case that v1.8.0 originally added support for).
+    #     Per-package descriptors, individual installers, the whole v1.8.x
+    #     consumer-catalog stack stays in place untouched but only runs
+    #     when path 1 has nothing.
+    #
+    #   PATH 3: open Lenovo's Recipe Card web tool for manual selection.
     # ------------------------------------------------------------------
     SetProgress 5
-    $consumerOK = Start-LenovoConsumerCatalogInstall -MachineType $machineType -OsCode $osCode -DriverRoot $DriverRoot
-    if ($consumerOK) {
-        Log "Consumer catalog flow succeeded - skipping legacy SCCM pack path."
-        return $true
+    $packUrl = Get-LenovoFullPackUrl -MachineType $machineType -OsCode $osCode
+    if ($packUrl) {
+        Log "Recipe Card / catalogv2.xml has full pack for '$machineType' - using it."
+        return (Install-LenovoFullPack -PackUrl $packUrl -DriverRoot $DriverRoot)
     }
-    Log "Consumer catalog yielded nothing - falling back to legacy SCCM driver pack..."
+    Log "No Recipe Card pack for '$machineType' - trying consumer catalog (v1.8.0 path)..."
     SetProgress 15
 
-    # ------------------------------------------------------------------
-    # PATH 2: Legacy SCCM driver pack (catalogv2.xml)
-    #   Original behaviour - kept as fallback for older / niche models.
-    # ------------------------------------------------------------------
-    Log "Fetching Lenovo catalogv2.xml..."
-    $catalogFile = Join-Path $env:TEMP "lenovo_catalogv2.xml"
-    if (-not (Invoke-CurlDownload -Url "https://download.lenovo.com/cdrt/td/catalogv2.xml" -OutFile $catalogFile)) {
-        Log "Failed to download Lenovo catalog."
-        return $false
-    }
-    if (Test-Cancelled) { return $false }
-    SetProgress 20
-
-    Log "Parsing Lenovo catalog..."
-    SetExtract -Pct 10 -Label "Parsing catalog..."
-    try {
-        $bytes    = [System.IO.File]::ReadAllBytes($catalogFile)
-        $rawText  = [System.Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0xFEFF)
-        [xml]$cat = $rawText
-        Log "Catalog parsed OK."
-    } catch { Log "Failed to parse Lenovo catalog: $($_.Exception.Message)"; return $false }
-    SetExtract -Pct 30 -Label "Catalog parsed"
-    SetProgress 25
-
-    $packUrl = $null
-    foreach ($model in $cat.ModelList.Model) {
-        $types = @($model.Types.Type)
-        if (-not ($types | Where-Object { $_ -like "$machineType*" })) { continue }
-        Log "Matched model: $($model.name)"
-        foreach ($os in @($osAttr, $osFallback)) {
-            $nodes = @($model.SCCM | Where-Object { $_.os -eq $os })
-            if ($nodes.Count -gt 0) {
-                $url = ($nodes | Select-Object -Last 1)."#text"
-                if ($url -match "^https?://") { $packUrl = $url; Log "Driver pack URL [$os]: $packUrl"; break }
-            }
-        }
-        break
+    $consumerOK = Start-LenovoConsumerCatalogInstall -MachineType $machineType -OsCode $osCode -DriverRoot $DriverRoot
+    if ($consumerOK) {
+        Log "Consumer-catalog flow succeeded."
+        return $true
     }
 
-    if (-not $packUrl) {
-        Log "No SCCM driver pack found for machine type '$machineType'."
-        Start-Process "https://download.lenovo.com/cdrt/ddrc/RecipeCardWeb.html"
-        return $false
+    Log "Neither Recipe Card nor consumer catalog had drivers for '$machineType'."
+    if (-not $script:Headless) {
+        Log "Opening Lenovo Recipe Card web tool for manual selection..."
+        try { Start-Process "https://download.lenovo.com/cdrt/ddrc/RecipeCardWeb.html" } catch {}
+    } else {
+        Log "  (headless: skipping web-tool launch)"
+        Log "  Manual URL: https://download.lenovo.com/cdrt/ddrc/RecipeCardWeb.html"
     }
-    SetProgress 28
-    if (-not (Test-Path $DriverRoot)) { New-Item -Path $DriverRoot -ItemType Directory -Force | Out-Null }
-    $packFile = Join-Path $DriverRoot ([System.IO.Path]::GetFileName(([System.Uri]$packUrl).LocalPath))
-    SetProgress 30
-    if (-not (Invoke-CurlDownload -Url $packUrl -OutFile $packFile)) { Log "Lenovo driver pack download failed."; return $false }
-    if (Test-Cancelled) { return $false }
-    SetProgress 55
-
-    $extractPath = Join-Path $DriverRoot "Lenovo_Extracted"
-    Log "Extracting Lenovo pack..."
-    Start-PackExtraction -PackFile $packFile -DestPath $extractPath -StallLimitSec 300 -Vendor "Lenovo"
-    SetProgress 60
-    return (Install-DriversFromPath -BasePath $extractPath)
+    return $false
 }
 
 # =========================
@@ -4431,6 +4814,7 @@ function Start-Install {
     $script:TestMode    = [bool]$TestMode
     $script:Diagnostic  = [bool]$Diagnostic
     $script:NoAnalytics = [bool]$NoAnalytics
+    $script:MaxParallelDownloads = $MaxParallelDownloads  # v1.11.0
 
     $id  = [Security.Principal.WindowsIdentity]::GetCurrent()
     $pri = New-Object Security.Principal.WindowsPrincipal($id)
@@ -4459,6 +4843,7 @@ function Start-Install {
         no_analytics   = $script:NoAnalytics
         skip_install   = [bool]$SkipInstall
         skip_cleanup   = [bool]$SkipCleanup
+        max_parallel_downloads = $script:MaxParallelDownloads
     }
     Log "Log: $LogFile"
     # Surface the active modes prominently - matters most when someone is
