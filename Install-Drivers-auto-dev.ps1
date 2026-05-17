@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.11.1
+# Version: 1.12.0
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -14,6 +14,7 @@
 #   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -TestMode -Diagnostic
 #   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -Silent -NoAnalytics
 #   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -MaxParallelDownloads 5
+#   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -PromptWindowsUpdate
 #
 # Parameters:
 #   -Manufacturer  Override WMI manufacturer detection (Dell, HP, Lenovo, Microsoft)
@@ -39,6 +40,10 @@
 #                  driver pack downloads.
 #   -SkipInstall   Download and extract only, skip pnputil driver installation
 #   -SkipCleanup   Keep C:\DRIVERS after run for inspection
+#   -PromptWindowsUpdate  v1.12.0 - if drivers are still missing at end of install,
+#                  offer to open Windows Update to search for additional drivers.
+#                  In GUI mode, shows a Yes/No/Cancel dialog. In headless mode,
+#                  automatically opens Windows Update if drivers remain unresolved.
 #
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
 #
@@ -48,6 +53,15 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.12.0 - Windows Update integration. New -PromptWindowsUpdate switch enables
+#           end-of-run Windows Update prompting when drivers remain unresolved.
+#           On success: If any drivers are still missing, GUI shows a 3-button
+#           dialog (Yes/No/Cancel) to open Windows Update, skip, or reboot.
+#           Headless mode automatically opens Windows Update (unless -Silent).
+#           On failure: Similar prompt offered if any drivers are still missing.
+#           Helpful for cases where vendor driver packs don't cover all hardware
+#           but Windows Update has additional matches in its catalog.
+#           New helper function Open-WindowsUpdate launches ms-settings:windowsupdate.
 # v1.11.1 - Analytics error legibility. When the Google Apps Script doPost
 #           throws server-side, Apps Script returns HTTP 200 with an HTML
 #           error page instead of plain "OK". Pre-v1.11.1 the script dumped
@@ -333,18 +347,19 @@ param(
     [switch]$NoAnalytics,   # v1.10.0 - skip the Sheets webhook (local JSON still written).
     [int]$MaxParallelDownloads = 3,  # v1.11.0 - cap for parallel downloads in HP catalog / Dell individual paths.
     [switch]$SkipInstall,
-    [switch]$SkipCleanup
+    [switch]$SkipCleanup,
+    [switch]$PromptWindowsUpdate  # v1.12.0 - offer to open Windows Update if drivers still missing at end
 )
 
 # Auto-enable headless when any override param is passed.
 # Silent always implies Headless (no GUI is even more "headless" than -Headless alone).
 if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" `
-    -or $SkipInstall -or $SkipCleanup -or $Silent -or $TestMode -or $Diagnostic -or $NoAnalytics) {
+    -or $SkipInstall -or $SkipCleanup -or $Silent -or $TestMode -or $Diagnostic -or $NoAnalytics -or $PromptWindowsUpdate) {
     $Headless = $true
 }
 if ($Silent) { $Headless = $true }
 
-$ScriptVersion   = "1.11.1"
+$ScriptVersion   = "1.12.0"
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -769,8 +784,31 @@ function Play-Sound {
 }
 
 # =========================
-# BUTTON STATE HELPERS
+# WINDOWS UPDATE HELPER
 # =========================
+function Open-WindowsUpdate {
+    <#
+    .SYNOPSIS
+    Opens Windows Update Settings to allow user to check for and install additional drivers
+    #>
+    Log "Opening Windows Update..."
+    try {
+        # Windows 10/11: launch Settings app to Windows Update
+        # ms-settings:windowsupdate opens directly to Windows Update
+        Start-Process "ms-settings:windowsupdate" -ErrorAction SilentlyContinue
+        Start-Sleep -Milliseconds 500
+    } catch {
+        Log "WARNING: Could not open Windows Update via ms-settings - $($_.Exception.Message)"
+        try {
+            # Fallback: try opening via control.exe
+            Start-Process "control" -ArgumentList "sysdm.cpl" -ErrorAction SilentlyContinue
+        } catch {
+            Log "WARNING: Could not open system settings - $($_.Exception.Message)"
+        }
+    }
+}
+
+
 function Set-ButtonRunning {
     if ($script:Headless) { return }
     $button.Enabled         = $false
@@ -5404,19 +5442,50 @@ function Start-Install {
             "`n`nMissing drivers:  $($script:AnalyticsMissingBefore) -> $($script:AnalyticsMissingAfter)  ($missingDelta resolved)"
         } else { "" }
 
+        # v1.12.0 - Check if Windows Update should be prompted
+        $stillMissing = if ($script:AnalyticsMissingAfter -ge 0) { $script:AnalyticsMissingAfter } else { -1 }
+        if ($PromptWindowsUpdate -and $stillMissing -gt 0) {
+            Log "PromptWindowsUpdate enabled and $stillMissing drivers still missing - will offer Windows Update"
+        }
+
         if ($script:Headless) {
             if (-not $script:Silent) {
                 Write-Host "SUCCESS: Drivers installed for $model.$missingLine"
                 Write-Host "Run complete. Reboot when ready."
                 Write-Host "Report: $ReportFile"
             }
+            # v1.12.0 - In headless mode with PromptWindowsUpdate, open Windows Update if drivers still missing
+            if ($PromptWindowsUpdate -and $stillMissing -gt 0 -and -not $script:Silent) {
+                Start-Sleep -Milliseconds 500
+                Open-WindowsUpdate
+            }
         } else {
-            $result = [System.Windows.Forms.MessageBox]::Show(
-                "Drivers installed successfully for:`n$model$missingLine`n`nReport saved to:`n$ReportFile`n`nReboot now to complete installation?",
-                "Installation Complete", "YesNo", "Information"
-            )
-            if ($result -eq [System.Windows.Forms.DialogResult]::Yes) { Restart-Computer -Force }
-            else { Set-ButtonIdle }
+            $msgText = "Drivers installed successfully for:`n$model$missingLine`n`nReport saved to:`n$ReportFile"
+            # v1.12.0 - Add Windows Update prompt if drivers still missing
+            if ($PromptWindowsUpdate -and $stillMissing -gt 0) {
+                $msgText += "`n`n$stillMissing drivers still missing.`nWould you like to open Windows Update to search for additional drivers?`n`nSelect Yes to open Windows Update, No to skip, or Cancel to reboot."
+                $result = [System.Windows.Forms.MessageBox]::Show(
+                    $msgText,
+                    "Installation Complete", "YesNoCancel", "Information"
+                )
+                if ($result -eq [System.Windows.Forms.DialogResult]::Yes) {
+                    Open-WindowsUpdate
+                    Set-ButtonIdle
+                } elseif ($result -eq [System.Windows.Forms.DialogResult]::Cancel) {
+                    Restart-Computer -Force
+                } else {
+                    Set-ButtonIdle
+                }
+            } else {
+                # Standard completion dialog if no missing drivers or PromptWindowsUpdate not enabled
+                $msgText += "`n`nReboot now to complete installation?"
+                $result = [System.Windows.Forms.MessageBox]::Show(
+                    $msgText,
+                    "Installation Complete", "YesNo", "Information"
+                )
+                if ($result -eq [System.Windows.Forms.DialogResult]::Yes) { Restart-Computer -Force }
+                else { Set-ButtonIdle }
+            }
         }
     } else {
         # On cancel, Send-AnalyticsEvent was already fired above with result="cancelled".
@@ -5432,17 +5501,43 @@ function Start-Install {
         Stop-OverallSpinner -Success $false
         Play-Sound -Event "Failure"
         Log "Driver installation did not complete. Check log: $LogFile"
+        
+        # v1.12.0 - Check if Windows Update should be prompted on failure
+        $stillMissing = if ($script:AnalyticsMissingAfter -ge 0) { $script:AnalyticsMissingAfter } else { -1 }
+        
         if ($script:Headless) {
             if (-not $script:Silent) {
                 Write-Host "FAILED: Driver installation did not complete. Check log: $LogFile"
                 Write-Host "Report: $ReportFile"
             }
+            # v1.12.0 - In headless mode with PromptWindowsUpdate, offer Windows Update on failure if drivers missing
+            if ($PromptWindowsUpdate -and $stillMissing -gt 0 -and -not $script:Silent) {
+                Write-Host "Note: $stillMissing drivers still missing. Consider using Windows Update to find additional drivers."
+                Start-Sleep -Milliseconds 500
+                Open-WindowsUpdate
+            }
         } else {
-            [System.Windows.Forms.MessageBox]::Show(
-                "Driver installation failed or no pack was found.`nCheck the log:`n`n$LogFile`n`nReport: $ReportFile",
-                "Installation Failed", "OK", "Error"
-            )
-            Set-ButtonIdle
+            $msgText = "Driver installation failed or no pack was found.`nCheck the log:`n`n$LogFile`n`nReport: $ReportFile"
+            # v1.12.0 - Add Windows Update prompt if drivers still missing
+            if ($PromptWindowsUpdate -and $stillMissing -gt 0) {
+                $msgText += "`n`n$stillMissing drivers still missing.`nWould you like to open Windows Update to search for additional drivers?"
+                $result = [System.Windows.Forms.MessageBox]::Show(
+                    $msgText,
+                    "Installation Failed", "YesNo", "Warning"
+                )
+                if ($result -eq [System.Windows.Forms.DialogResult]::Yes) {
+                    Open-WindowsUpdate
+                    Set-ButtonIdle
+                } else {
+                    Set-ButtonIdle
+                }
+            } else {
+                [System.Windows.Forms.MessageBox]::Show(
+                    $msgText,
+                    "Installation Failed", "OK", "Error"
+                )
+                Set-ButtonIdle
+            }
         }
     }
 }
