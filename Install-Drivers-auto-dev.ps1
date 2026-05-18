@@ -491,7 +491,7 @@ $title           = New-Object System.Windows.Forms.Label
 $title.AutoSize  = $true
 $title.Font      = $FontTitleBold
 $title.ForeColor = $ColorTextHi
-$title.Location  = New-Object System.Drawing.Point(28, 22)
+$title.Location  = New-Object System.Drawing.Point(16, 22)
 $title.Text      = "Driver Installer"
 $title.UseCompatibleTextRendering = $false
 $form.Controls.Add($title)
@@ -503,7 +503,7 @@ $subtitle           = New-Object System.Windows.Forms.Label
 $subtitle.AutoSize  = $true
 $subtitle.Font      = $FontSubtitle
 $subtitle.ForeColor = $ColorTextMid
-$subtitle.Location  = New-Object System.Drawing.Point(28, 56)
+$subtitle.Location  = New-Object System.Drawing.Point(16, 56)
 $subtitle.Text      = "Detecting hardware…"
 $subtitle.UseCompatibleTextRendering = $false
 $form.Controls.Add($subtitle)
