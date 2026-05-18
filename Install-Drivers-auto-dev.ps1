@@ -469,7 +469,7 @@ $ColorConsoleFg   = [System.Drawing.Color]::FromArgb(209, 250, 229)   # console 
 # FORM
 # =========================
 $form                 = New-Object System.Windows.Forms.Form
-$form.Text            = "Driver Installer Tool  v$SCRIPT_VERSION"
+$form.Text            = "Driver Installer  v$SCRIPT_VERSION"
 $form.Size            = New-Object System.Drawing.Size(612, 628)
 $form.StartPosition   = "CenterScreen"
 $form.FormBorderStyle = "FixedSingle"
@@ -5249,10 +5249,10 @@ function Start-Install {
     if (-not $script:Headless) {
         try { [System.Windows.Forms.Clipboard]::SetText($model) } catch {}
         # v1.11.0 - title stays static; the detected model lives in the subtitle row
-        # for a cleaner header hierarchy. The window title bar still gets the
-        # full string so the taskbar entry is informative.
+        # for a cleaner header hierarchy. The window title bar now matches the subtitle
+        # format for consistency.
         $subtitle.Text  = "$manufacturer  ·  $model"
-        $form.Text      = "Driver Installer  -  $model"
+        $form.Text      = "Driver Installer  -  $manufacturer  ·  $model"
     }
 
     $overrideNote = if ($Manufacturer -or $Model) { "  [OVERRIDDEN via param]" } else { "  (from WMI)" }
@@ -5405,7 +5405,7 @@ function Start-Install {
             $script:AnalyticsManufacturer = "Microsoft"
             $script:AnalyticsModel        = $pickedModel
             $subtitle.Text = "Microsoft  ·  $pickedModel"
-            $form.Text     = "Driver Installer  -  $pickedModel"
+            $form.Text     = "Driver Installer  -  Microsoft  ·  $pickedModel"
             Set-ButtonRunning
             if (-not (Assert-Curl)) { Send-AnalyticsEvent -Result "failure"; Set-ButtonIdle; return }
             $success = Start-MicrosoftSurfaceDriverInstall -DriverRoot $driverRoot -ModelName $pickedModel
