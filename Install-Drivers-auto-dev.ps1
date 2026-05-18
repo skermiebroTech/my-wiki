@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.12.0
+# Version: 1.12.1
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -14,7 +14,7 @@
 #   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -TestMode -Diagnostic
 #   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -Silent -NoAnalytics
 #   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -MaxParallelDownloads 5
-#   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -PromptWindowsUpdate
+#   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -PromptWindowsUpdate:$false
 #
 # Parameters:
 #   -Manufacturer  Override WMI manufacturer detection (Dell, HP, Lenovo, Microsoft)
@@ -40,10 +40,11 @@
 #                  driver pack downloads.
 #   -SkipInstall   Download and extract only, skip pnputil driver installation
 #   -SkipCleanup   Keep C:\DRIVERS after run for inspection
-#   -PromptWindowsUpdate  v1.12.0 - if drivers are still missing at end of install,
-#                  offer to open Windows Update to search for additional drivers.
-#                  In GUI mode, shows a Yes/No/Cancel dialog. In headless mode,
-#                  automatically opens Windows Update if drivers remain unresolved.
+#   -PromptWindowsUpdate  v1.12.1 - ENABLED BY DEFAULT. When drivers remain missing
+#                  at end of install, offer to open Windows Update to search for
+#                  additional drivers. In GUI mode, shows a Yes/No/Cancel dialog.
+#                  In headless mode, automatically opens Windows Update if drivers
+#                  remain unresolved. Pass -PromptWindowsUpdate:$false to disable.
 #
 # Supports: Dell, HP, Lenovo, Microsoft (Surface)
 #
@@ -53,6 +54,13 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.12.1 - Windows Update feature enabled by default + centralized version variable.
+#           (1) -PromptWindowsUpdate now defaults to $true (enabled) instead of requiring
+#               the flag. Users who want to disable it can pass -PromptWindowsUpdate:$false.
+#           (2) Single $SCRIPT_VERSION variable at top of script (line ~368) is now the
+#               only place version needs updating. All references throughout the script
+#               ($form text, analytics, logs, HTML report) automatically use this value.
+#               Eliminates multi-place version bumps and sync errors.
 # v1.12.0 - Windows Update integration. New -PromptWindowsUpdate switch enables
 #           end-of-run Windows Update prompting when drivers remain unresolved.
 #           On success: If any drivers are still missing, GUI shows a 3-button
@@ -348,18 +356,24 @@ param(
     [int]$MaxParallelDownloads = 3,  # v1.11.0 - cap for parallel downloads in HP catalog / Dell individual paths.
     [switch]$SkipInstall,
     [switch]$SkipCleanup,
-    [switch]$PromptWindowsUpdate  # v1.12.0 - offer to open Windows Update if drivers still missing at end
+    [bool]$PromptWindowsUpdate = $true  # v1.12.1 - enabled by default: offer Windows Update if drivers still missing
 )
 
 # Auto-enable headless when any override param is passed.
 # Silent always implies Headless (no GUI is even more "headless" than -Headless alone).
 if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" `
-    -or $SkipInstall -or $SkipCleanup -or $Silent -or $TestMode -or $Diagnostic -or $NoAnalytics -or $PromptWindowsUpdate) {
+    -or $SkipInstall -or $SkipCleanup -or $Silent -or $TestMode -or $Diagnostic -or $NoAnalytics -or $PromptWindowsUpdate -eq $false) {
     $Headless = $true
 }
 if ($Silent) { $Headless = $true }
 
-$ScriptVersion   = "1.12.0"
+# =============================================================
+# VERSION DEFINITION - Single source of truth for all version refs
+# Update this number when making changes to the script
+# =============================================================
+$SCRIPT_VERSION = "1.12.1"
+
+# =============================================================
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
@@ -455,7 +469,7 @@ $ColorConsoleFg   = [System.Drawing.Color]::FromArgb(209, 250, 229)   # console 
 # FORM
 # =========================
 $form                 = New-Object System.Windows.Forms.Form
-$form.Text            = "Driver Installer Tool  v$ScriptVersion"
+$form.Text            = "Driver Installer Tool  v$SCRIPT_VERSION"
 $form.Size            = New-Object System.Drawing.Size(612, 628)
 $form.StartPosition   = "CenterScreen"
 $form.FormBorderStyle = "FixedSingle"
@@ -499,7 +513,7 @@ $versionLabel           = New-Object System.Windows.Forms.Label
 $versionLabel.AutoSize  = $true
 $versionLabel.Font      = $FontUISmall
 $versionLabel.ForeColor = $ColorTextMid           # v1.11.0 bumped from TextLo (gray-500) for readability
-$versionLabel.Text      = "v$ScriptVersion"
+$versionLabel.Text      = "v$SCRIPT_VERSION"
 $versionLabel.Location  = New-Object System.Drawing.Point(540, 30)
 $versionLabel.UseCompatibleTextRendering = $false
 $form.Controls.Add($versionLabel)
@@ -911,7 +925,7 @@ function Log {
         $evt = [ordered]@{
             ts             = $now.ToString('o')
             level          = $Level
-            script_version = $ScriptVersion
+            script_version = $SCRIPT_VERSION
             msg            = $msg
         }
         if ($Event)   { $evt['event']   = $Event }
@@ -1276,7 +1290,7 @@ function Write-HtmlReport {
   <header>
     <div>
       <h1>Driver Installer Report</h1>
-      <div class="v">Script v$ScriptVersion &middot; generated $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')</div>
+      <div class="v">Script v$SCRIPT_VERSION &middot; generated $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')</div>
     </div>
     <span class="badge">$statusLabel</span>
   </header>
@@ -1336,7 +1350,7 @@ function Write-HtmlReport {
     </table>
   </section>
 
-  <footer>Install-Drivers-auto.ps1 v$ScriptVersion &middot; skermiebroTech &middot; github.com/skermiebroTech/my-wiki</footer>
+  <footer>Install-Drivers-auto.ps1 v$SCRIPT_VERSION &middot; skermiebroTech &middot; github.com/skermiebroTech/my-wiki</footer>
 </div>
 </body>
 </html>
@@ -1489,7 +1503,7 @@ function Send-AnalyticsEvent {
   "missing_before":      $($script:AnalyticsMissingBefore),
   "missing_after":       $($script:AnalyticsMissingAfter),
   "duration_sec":        $durationSec,
-  "script_version":      "$ScriptVersion",
+  "script_version":      "$SCRIPT_VERSION",
   "installed_drivers":   "$installedDriversStr",
   "missing_before_list": "$missingBeforeListStr",
   "missing_after_list":  "$missingAfterListStr"
@@ -5189,7 +5203,7 @@ function Start-Install {
         exit
     }
 
-    Log "Driver Installer v$ScriptVersion" -Level "info" -Event "run_start" -Context @{
+    Log "Driver Installer v$SCRIPT_VERSION" -Level "info" -Event "run_start" -Context @{
         log_file       = $LogFile
         events_file    = $EventsLogFile
         analytics_file = $AnalyticsFile
