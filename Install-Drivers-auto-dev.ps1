@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.12.1
+# Version: 1.13.0
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -54,6 +54,11 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.13.0 - Surface Laptop 4 AMD variant added to device catalog.
+#           Surface Laptop 4 now correctly distinguishes between Intel (ID 102924)
+#           and AMD Ryzen 5 (ID 102923) processor variants. Previous versions
+#           incorrectly mapped all "Surface Laptop 4" entries to the Intel driver
+#           pack, causing ARM-incompatible driver downloads on AMD devices.
 # v1.12.1 - Windows Update feature enabled by default + centralized version variable.
 #           (1) -PromptWindowsUpdate now defaults to $true (enabled) instead of requiring
 #               the flag. Users who want to disable it can pass -PromptWindowsUpdate:$false.
@@ -4602,7 +4607,8 @@ $SurfaceDownloadIds = [ordered]@{
     "Surface Laptop 7"                        = "106120"   # verified (Snapdragon)
     "Surface Laptop 6"                        = "105946"   # verified
     "Surface Laptop 5"                        = "104679"   # verified
-    "Surface Laptop 4"                        = "102924"   # verified (Intel)
+    "Surface Laptop 4 with Intel"             = "102924"   # verified (Intel)
+    "Surface Laptop 4 with AMD"               = "102923"   # verified (AMD Ryzen 5)
     "Surface Laptop 3"                        = "100429"   # verified (Intel)
     "Surface Laptop 2"                        = "57515"    # verified
     "Surface Laptop Studio 2"                 = "105610"   # verified
