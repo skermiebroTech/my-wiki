@@ -214,6 +214,7 @@
   },
   "active": "b98051cbc092f948",
   "lastOpenFiles": [
+    "Install-Drivers-WPF.ps1",
     "site/search/search_index.json",
     "site/search",
     "site/Panasonic/panasonic-fzg1/index.html",
@@ -224,7 +225,6 @@
     "site/fp-test/index.html",
     "site/fp-test",
     "site/driver-installation/index.html",
-    "site/driver-installation",
     "docs/cab-file-driver-installation.md",
     "docs/Useful-Links.md",
     "docs/index.md",
