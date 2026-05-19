@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.14.0
+# Version: 1.13.1
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -54,7 +54,7 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
-# v1.14.0 - Re-downloadable driver URLs in the HTML report. Every file
+# v1.13.1 - Re-downloadable driver URLs in the HTML report. Every file
 #           pulled by Invoke-CurlDownload / Invoke-CurlDownloadParallel is
 #           now recorded (URL + filename + size) and classified as either
 #           a DRIVER payload (.exe/.msi/.cab driver pack, softpaq, MSI) or
@@ -410,7 +410,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.14.0"
+$SCRIPT_VERSION = "1.13.1"
 
 # =============================================================
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
@@ -1296,7 +1296,7 @@ function Write-HtmlReport {
             $missingAfterRows = "<li class='muted'>(all devices resolved)</li>"
         }
 
-        # v1.14.0 - build the re-downloadable URL lists. Driver payloads get a
+        # v1.13.1 - build the re-downloadable URL lists. Driver payloads get a
         # clickable link AND the raw URL printed beneath it, so the URL is
         # still recoverable from a printed or PDF'd copy of the report where
         # the hyperlink target would otherwise be lost. Catalog/metadata
@@ -1349,7 +1349,7 @@ function Write-HtmlReport {
   .muted { color: #9ca3af; font-style: italic; list-style: none; margin-left: -20px; }
   .delta-good { color: #1b873f; font-weight: 600; }
   .delta-bad  { color: #c92a2a; font-weight: 600; }
-  /* v1.14.0 - download URL list */
+  /* v1.13.1 - download URL list */
   ul.urls li { margin: 8px 0; word-break: break-all; }
   ul.urls .fn { font-weight: 600; color: #222; }
   ul.urls a { color: #1864ab; }
@@ -1549,7 +1549,7 @@ $script:AnalyticsMissingAfter    = -1
 $script:AnalyticsMissingBeforeList = New-Object System.Collections.Generic.List[string]   # v1.11.0
 $script:AnalyticsMissingAfterList  = New-Object System.Collections.Generic.List[string]   # v1.11.0
 $script:AnalyticsInstalledDrivers = New-Object System.Collections.Generic.List[string]
-# v1.14.0 - every file we successfully pull is recorded here so the HTML
+# v1.13.1 - every file we successfully pull is recorded here so the HTML
 # report can list re-downloadable driver URLs. Each entry is a hashtable:
 #   @{ Url=...; FileName=...; MB=<double>; Kind='driver'|'catalog' }
 # Kind='catalog' = vendor catalog/descriptor/matrix metadata (not a driver
@@ -1557,7 +1557,7 @@ $script:AnalyticsInstalledDrivers = New-Object System.Collections.Generic.List[s
 # softpaq / MSI / installer. Deduped by exact URL.
 $script:AnalyticsDownloadUrls = New-Object System.Collections.Generic.List[hashtable]
 
-# v1.14.0 - classify + record a completed download. Called from both the
+# v1.13.1 - classify + record a completed download. Called from both the
 # serial Invoke-CurlDownload and the parallel Invoke-CurlDownloadParallel
 # success paths. Never throws into the caller - a bad record must not break
 # a download that already succeeded.
@@ -1846,7 +1846,7 @@ function Invoke-CurlDownload {
 
     $finalMB = [math]::Round((Get-Item $OutFile).Length / 1MB, 1)
     if ($finalMB -gt $script:AnalyticsDownloadMB) { $script:AnalyticsDownloadMB = $finalMB }
-    Add-DownloadRecord -Url $Url -OutFile $OutFile -MB $finalMB   # v1.14.0
+    Add-DownloadRecord -Url $Url -OutFile $OutFile -MB $finalMB   # v1.13.1
     Log "  Download complete: $finalMB MB"
     SetDownload -Pct 100 -Label "Complete - $finalMB MB"
     Stop-DlSpinner -Success $true
@@ -1981,7 +1981,7 @@ function Invoke-CurlDownloadParallel {
                     $batchBytes += $r.Bytes
                     $mb = [math]::Round($r.Bytes / 1MB, 1)
                     $lbl = if ($r.Item.Label) { $r.Item.Label } else { [System.IO.Path]::GetFileName($of) }
-                    Add-DownloadRecord -Url $r.Item.Url -OutFile $of -MB $mb   # v1.14.0
+                    Add-DownloadRecord -Url $r.Item.Url -OutFile $of -MB $mb   # v1.13.1
                     Log "  parallel[$i] OK: $lbl ($mb MB)" -Level "info" -Event "parallel_dl_ok"
                 } else {
                     $r.Success  = $false
@@ -5401,7 +5401,7 @@ function Start-Install {
     $script:AnalyticsMissingBeforeList = New-Object System.Collections.Generic.List[string]
     $script:AnalyticsMissingAfterList  = New-Object System.Collections.Generic.List[string]
     $script:AnalyticsInstalledDrivers = New-Object System.Collections.Generic.List[string]
-    $script:AnalyticsDownloadUrls    = New-Object System.Collections.Generic.List[hashtable]   # v1.14.0
+    $script:AnalyticsDownloadUrls    = New-Object System.Collections.Generic.List[hashtable]   # v1.13.1
     $script:AnalyticsStartTime       = Get-Date
     $script:7zInstalled              = $false
     $script:Headless                 = [bool]$Headless
