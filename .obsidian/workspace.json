@@ -214,6 +214,7 @@
   },
   "active": "b98051cbc092f948",
   "lastOpenFiles": [
+    "code.gs",
     "WIP/Install-Drivers-WPF.ps1",
     "WIP/Install-Drivers-Engine.ps1",
     "WIP",
@@ -224,7 +225,6 @@
     "site/Panasonic/panasonic-fzg1/index.html",
     "site/Panasonic/panasonic-fzg1",
     "site/Panasonic",
-    "site/todo/index.html",
     "docs/cab-file-driver-installation.md",
     "docs/Useful-Links.md",
     "docs/index.md",
