@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.13.0
+# Version: 1.14.0
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -54,6 +54,24 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.14.0 - Re-downloadable driver URLs in the HTML report. Every file
+#           pulled by Invoke-CurlDownload / Invoke-CurlDownloadParallel is
+#           now recorded (URL + filename + size) and classified as either
+#           a DRIVER payload (.exe/.msi/.cab driver pack, softpaq, MSI) or
+#           CATALOG metadata (vendor catalog .cab, descriptor/catalog .xml,
+#           HP matrix .html). The HTML report gains a "Driver download URLs"
+#           section listing each driver file as a clickable link plus the
+#           raw URL text (so it survives copy/paste from a printed/saved
+#           report), letting an operator re-fetch the exact same driver
+#           pack later WITHOUT re-running the script or re-resolving the
+#           vendor catalog. A smaller muted "Catalog / metadata sources"
+#           list is included below it for traceability. New script-scope
+#           list $script:AnalyticsDownloadUrls + helper Add-DownloadRecord
+#           (dedupes by URL). Reset per run alongside the other Analytics
+#           lists. No analytics-payload/webhook shape change - this is a
+#           local-report-only addition; the Google Sheet schema is
+#           untouched so existing dashboards keep working. No vendor
+#           resolution logic touched - purely an observability/record add.
 # v1.13.0 - Surface: CPU-aware driver pack selection for dual-CPU models.
 #           Surface Laptop 3 and Surface Laptop 4 each ship as two distinct
 #           hardware variants (Intel vs AMD) with SEPARATE Microsoft Download
@@ -392,7 +410,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.13.0"
+$SCRIPT_VERSION = "1.14.0"
 
 # =============================================================
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
@@ -1278,6 +1296,34 @@ function Write-HtmlReport {
             $missingAfterRows = "<li class='muted'>(all devices resolved)</li>"
         }
 
+        # v1.14.0 - build the re-downloadable URL lists. Driver payloads get a
+        # clickable link AND the raw URL printed beneath it, so the URL is
+        # still recoverable from a printed or PDF'd copy of the report where
+        # the hyperlink target would otherwise be lost. Catalog/metadata
+        # sources are listed separately and muted - kept for traceability,
+        # not for standalone re-download.
+        $driverUrlRows  = ""
+        $catalogUrlRows = ""
+        if ($script:AnalyticsDownloadUrls -and $script:AnalyticsDownloadUrls.Count -gt 0) {
+            foreach ($e in $script:AnalyticsDownloadUrls) {
+                if (-not $e -or [string]::IsNullOrWhiteSpace($e.Url)) { continue }
+                $u  = _He $e.Url
+                $fn = _He $e.FileName
+                $sz = if ($e.MB -gt 0) { " &middot; $($e.MB) MB" } else { "" }
+                if ($e.Kind -eq 'catalog') {
+                    $catalogUrlRows += "<li><span class='fn'>$fn</span><br><a href=`"$u`">$u</a></li>`n"
+                } else {
+                    $driverUrlRows += "<li><span class='fn'>$fn$sz</span><br><a href=`"$u`">$u</a><div class='rawurl'>$u</div></li>`n"
+                }
+            }
+        }
+        if ([string]::IsNullOrWhiteSpace($driverUrlRows)) {
+            $driverUrlRows = "<li class='muted'>(no driver files were downloaded this run)</li>"
+        }
+        if ([string]::IsNullOrWhiteSpace($catalogUrlRows)) {
+            $catalogUrlRows = "<li class='muted'>(none)</li>"
+        }
+
         $html = @"
 <!doctype html>
 <html lang="en">
@@ -1303,6 +1349,13 @@ function Write-HtmlReport {
   .muted { color: #9ca3af; font-style: italic; list-style: none; margin-left: -20px; }
   .delta-good { color: #1b873f; font-weight: 600; }
   .delta-bad  { color: #c92a2a; font-weight: 600; }
+  /* v1.14.0 - download URL list */
+  ul.urls li { margin: 8px 0; word-break: break-all; }
+  ul.urls .fn { font-weight: 600; color: #222; }
+  ul.urls a { color: #1864ab; }
+  ul.urls .rawurl { display: none; color: #6b7280; font-size: 12px; margin-top: 2px; }
+  @media print { ul.urls a { color: #222; text-decoration: none; }
+                  ul.urls .rawurl { display: block; } }
   footer { padding: 12px 28px; color: #9ca3af; font-size: 11px; background: #fafbfc; }
 </style>
 </head>
@@ -1360,6 +1413,26 @@ function Write-HtmlReport {
   <section>
     <h2>Installed drivers / packages</h2>
     <ul>$installedRows</ul>
+  </section>
+
+  <section>
+    <h2>Driver download URLs</h2>
+    <p style="margin:0 0 10px 0;color:#6b7280;font-size:12px;">
+      Direct links to the exact driver file(s) pulled this run. Use these to
+      re-download the same pack later without re-running the script or
+      re-resolving the vendor catalog. Vendor CDN links can expire or be
+      superseded over time.
+    </p>
+    <ul class="urls">$driverUrlRows</ul>
+  </section>
+
+  <section>
+    <h2>Catalog / metadata sources</h2>
+    <p style="margin:0 0 10px 0;color:#9ca3af;font-size:12px;">
+      Intermediate catalog/descriptor files used to locate the driver above.
+      Listed for traceability only - not standalone driver downloads.
+    </p>
+    <ul class="urls">$catalogUrlRows</ul>
   </section>
 
   <section>
@@ -1476,6 +1549,54 @@ $script:AnalyticsMissingAfter    = -1
 $script:AnalyticsMissingBeforeList = New-Object System.Collections.Generic.List[string]   # v1.11.0
 $script:AnalyticsMissingAfterList  = New-Object System.Collections.Generic.List[string]   # v1.11.0
 $script:AnalyticsInstalledDrivers = New-Object System.Collections.Generic.List[string]
+# v1.14.0 - every file we successfully pull is recorded here so the HTML
+# report can list re-downloadable driver URLs. Each entry is a hashtable:
+#   @{ Url=...; FileName=...; MB=<double>; Kind='driver'|'catalog' }
+# Kind='catalog' = vendor catalog/descriptor/matrix metadata (not a driver
+# payload you'd re-download standalone); Kind='driver' = the actual pack /
+# softpaq / MSI / installer. Deduped by exact URL.
+$script:AnalyticsDownloadUrls = New-Object System.Collections.Generic.List[hashtable]
+
+# v1.14.0 - classify + record a completed download. Called from both the
+# serial Invoke-CurlDownload and the parallel Invoke-CurlDownloadParallel
+# success paths. Never throws into the caller - a bad record must not break
+# a download that already succeeded.
+function Add-DownloadRecord {
+    param(
+        [string]$Url,
+        [string]$OutFile,
+        [double]$MB = 0.0
+    )
+    try {
+        if ([string]::IsNullOrWhiteSpace($Url)) { return }
+        foreach ($e in $script:AnalyticsDownloadUrls) {
+            if ($e.Url -eq $Url) { return }   # dedupe by exact URL
+        }
+        $fileName = ""
+        try   { $fileName = [System.IO.Path]::GetFileName(([System.Uri]$Url).LocalPath) }
+        catch { $fileName = [System.IO.Path]::GetFileName($OutFile) }
+        if ([string]::IsNullOrWhiteSpace($fileName)) {
+            $fileName = [System.IO.Path]::GetFileName($OutFile)
+        }
+        # Catalog / metadata heuristic: vendor catalog cabs, descriptor /
+        # catalog XML, the HP driver-pack matrix HTML. Anything else
+        # (.exe / .msi / non-catalog .cab) is a re-downloadable driver.
+        $lf   = $fileName.ToLower()
+        $kind = if ($lf -match 'catalog' -or $lf -match '\.xml$' -or $lf -match '\.html?$') {
+            'catalog'
+        } else {
+            'driver'
+        }
+        $script:AnalyticsDownloadUrls.Add(@{
+            Url      = $Url
+            FileName = $fileName
+            MB       = $MB
+            Kind     = $kind
+        }) | Out-Null
+    } catch {
+        Log-Diag "Add-DownloadRecord skipped a URL: $($_.Exception.Message)"
+    }
+}
 
 function Send-AnalyticsEvent {
     param(
@@ -1725,6 +1846,7 @@ function Invoke-CurlDownload {
 
     $finalMB = [math]::Round((Get-Item $OutFile).Length / 1MB, 1)
     if ($finalMB -gt $script:AnalyticsDownloadMB) { $script:AnalyticsDownloadMB = $finalMB }
+    Add-DownloadRecord -Url $Url -OutFile $OutFile -MB $finalMB   # v1.14.0
     Log "  Download complete: $finalMB MB"
     SetDownload -Pct 100 -Label "Complete - $finalMB MB"
     Stop-DlSpinner -Success $true
@@ -1859,6 +1981,7 @@ function Invoke-CurlDownloadParallel {
                     $batchBytes += $r.Bytes
                     $mb = [math]::Round($r.Bytes / 1MB, 1)
                     $lbl = if ($r.Item.Label) { $r.Item.Label } else { [System.IO.Path]::GetFileName($of) }
+                    Add-DownloadRecord -Url $r.Item.Url -OutFile $of -MB $mb   # v1.14.0
                     Log "  parallel[$i] OK: $lbl ($mb MB)" -Level "info" -Event "parallel_dl_ok"
                 } else {
                     $r.Success  = $false
@@ -5278,6 +5401,7 @@ function Start-Install {
     $script:AnalyticsMissingBeforeList = New-Object System.Collections.Generic.List[string]
     $script:AnalyticsMissingAfterList  = New-Object System.Collections.Generic.List[string]
     $script:AnalyticsInstalledDrivers = New-Object System.Collections.Generic.List[string]
+    $script:AnalyticsDownloadUrls    = New-Object System.Collections.Generic.List[hashtable]   # v1.14.0
     $script:AnalyticsStartTime       = Get-Date
     $script:7zInstalled              = $false
     $script:Headless                 = [bool]$Headless
