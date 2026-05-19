@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.12.1
+# Version: 1.13.0
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -54,6 +54,27 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.13.0 - Surface: CPU-aware driver pack selection for dual-CPU models.
+#           Surface Laptop 3 and Surface Laptop 4 each ship as two distinct
+#           hardware variants (Intel vs AMD) with SEPARATE Microsoft Download
+#           Center packs, but only one model string ("Surface Laptop 4") is
+#           reported by WMI for both. Pre-v1.13.0 the table mapped that single
+#           string to the Intel pack unconditionally, so AMD units (e.g. the
+#           "AMD Ryzen ... Microsoft Surface Edition") downloaded the wrong
+#           Intel MSI - none of the INFs matched the AMD platform devices and
+#           the run produced 0 installed drivers.
+#           Fix: new Get-CpuVendor helper reads Win32_Processor.Manufacturer
+#           (AuthenticAMD / GenuineIntel) with a Name-string + env fallback.
+#           New $SurfaceCpuVariantIds map holds the Intel/AMD Download Center
+#           IDs for the dual-CPU models. After the model -> ID match in
+#           Start-MicrosoftSurfaceDriverInstall, if the matched model has CPU
+#           variants the page ID is overridden to the pack matching the
+#           detected CPU vendor. Confirmed IDs: SL4 Intel=102924 AMD=102923,
+#           SL3 Intel=100429 AMD=100428. $SurfaceDownloadIds keeps the Intel
+#           ID as the default so behaviour on Intel / undetectable-CPU units
+#           is unchanged; only AMD units are redirected. The picker dropdown
+#           and headless .Keys matchers are unaffected (keys stay model
+#           strings). No other vendor logic touched.
 # v1.12.1 - Windows Update feature enabled by default + centralized version variable.
 #           (1) -PromptWindowsUpdate now defaults to $true (enabled) instead of requiring
 #               the flag. Users who want to disable it can pass -PromptWindowsUpdate:$false.
@@ -371,7 +392,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.12.1"
+$SCRIPT_VERSION = "1.13.0"
 
 # =============================================================
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
@@ -4576,6 +4597,13 @@ function Start-LenovoDriverInstall {
 #
 # To add new Surface models: add an entry to $SurfaceDownloadIds below
 #   (value = numeric ID from details.aspx?id=XXXXXX).
+#
+# Dual-CPU models: a few Surface models (Surface Laptop 3, Surface Laptop 4)
+#   report ONE WMI model string but ship as separate Intel and AMD hardware
+#   with separate Download Center packs. For those, keep the Intel ID as the
+#   default in $SurfaceDownloadIds and add an Intel/AMD pair to
+#   $SurfaceCpuVariantIds (below the table). Get-CpuVendor decides which one
+#   to use at runtime.
 # =========================
 
 $SurfaceDownloadIds = [ordered]@{
@@ -4602,8 +4630,8 @@ $SurfaceDownloadIds = [ordered]@{
     "Surface Laptop 7"                        = "106120"   # verified (Snapdragon)
     "Surface Laptop 6"                        = "105946"   # verified
     "Surface Laptop 5"                        = "104679"   # verified
-    "Surface Laptop 4"                        = "102924"   # verified (Intel)
-    "Surface Laptop 3"                        = "100429"   # verified (Intel)
+    "Surface Laptop 4"                        = "102924"   # Intel default - AMD override via $SurfaceCpuVariantIds
+    "Surface Laptop 3"                        = "100429"   # Intel default - AMD override via $SurfaceCpuVariantIds
     "Surface Laptop 2"                        = "57515"    # verified
     "Surface Laptop Studio 2"                 = "105610"   # verified
     "Surface Laptop Studio"                   = "103505"   # verified
@@ -4623,6 +4651,54 @@ $SurfaceDownloadIds = [ordered]@{
     "Surface Studio 2+"                       = "104681"   # verified
     "Surface Studio 2"                        = "57593"    # verified
     "Surface Studio"                          = "54311"    # verified
+}
+
+# ------------------------------------------------------------------
+# Dual-CPU Surface models: same WMI model string, two different
+# hardware platforms (Intel vs AMD), each with its OWN Microsoft
+# Download Center pack. WMI Win32_ComputerSystem.Model reports just
+# "Surface Laptop 4" (or 3) regardless of CPU, so the base
+# $SurfaceDownloadIds table can only hold one ID per model - it keeps
+# the Intel ID as the default. This map supplies the per-CPU IDs;
+# Get-CpuVendor picks the right one at runtime in
+# Start-MicrosoftSurfaceDriverInstall. Keys MUST exactly match the
+# corresponding $SurfaceDownloadIds key (regex/-ilike model match).
+# IDs verified against live Microsoft Download Center pages (May 2026).
+# ------------------------------------------------------------------
+$SurfaceCpuVariantIds = @{
+    "Surface Laptop 4" = @{ Intel = "102924"; AMD = "102923" }
+    "Surface Laptop 3" = @{ Intel = "100429"; AMD = "100428" }
+}
+
+# Helper: determine the CPU vendor ("Intel", "AMD", or "Unknown").
+# Used to pick the correct Microsoft driver pack for dual-CPU Surface
+# models. Primary signal is Win32_Processor.Manufacturer, which on
+# real hardware is the CPUID vendor string "GenuineIntel" or
+# "AuthenticAMD" (this is what the v1.12.x device dump already logs).
+# Falls back to the processor brand string (e.g. the Surface AMD parts
+# report "AMD Ryzen 5 Microsoft Surface (R) Edition") and finally to
+# $env:PROCESSOR_IDENTIFIER. Returns "Unknown" rather than guessing if
+# nothing matches, so callers can keep the safe Intel default.
+function Get-CpuVendor {
+    $vendorRaw = ""
+    $nameRaw   = ""
+    try {
+        $cpu = Get-CimInstance Win32_Processor -EA Stop | Select-Object -First 1
+        if ($cpu) {
+            $vendorRaw = "$($cpu.Manufacturer)".Trim()
+            $nameRaw   = "$($cpu.Name)".Trim()
+        }
+    } catch {
+        Log "  Get-CpuVendor: Win32_Processor query failed: $($_.Exception.Message)" -Level "warn" -Event "cpu_vendor_wmi_error"
+    }
+
+    $probe = "$vendorRaw $nameRaw $env:PROCESSOR_IDENTIFIER"
+
+    if ($probe -match '(?i)AuthenticAMD|\bAMD\b|Ryzen')        { return "AMD" }
+    if ($probe -match '(?i)GenuineIntel|\bIntel\b|Core\(TM\)') { return "Intel" }
+
+    Log "  Get-CpuVendor: could not classify CPU (vendor='$vendorRaw' name='$nameRaw' env='$env:PROCESSOR_IDENTIFIER')" -Level "warn" -Event "cpu_vendor_unknown"
+    return "Unknown"
 }
 
 # Helper: extract MSI contents using msiexec /a (admin install), then install INFs via pnputil.
@@ -4806,10 +4882,12 @@ function Start-MicrosoftSurfaceDriverInstall {
     SetExtract -Pct 5 -Label "Looking up Download Center ID..."
     SetProgress 10
 
-    $pageId = $null
+    $pageId    = $null
+    $matchedKey = $null
     foreach ($entry in $SurfaceDownloadIds.GetEnumerator()) {
         if ($ModelName -match [regex]::Escape($entry.Key)) {
-            $pageId = $entry.Value
+            $pageId     = $entry.Value
+            $matchedKey = $entry.Key
             Log "Matched model '$($entry.Key)' -> Download Center ID: $pageId"
             break
         }
@@ -4817,7 +4895,8 @@ function Start-MicrosoftSurfaceDriverInstall {
     if (-not $pageId) {
         foreach ($entry in $SurfaceDownloadIds.GetEnumerator()) {
             if ($ModelName -ilike "*$($entry.Key)*") {
-                $pageId = $entry.Value
+                $pageId     = $entry.Value
+                $matchedKey = $entry.Key
                 Log "Fuzzy-matched '$($entry.Key)' -> Download Center ID: $pageId"
                 break
             }
@@ -4830,6 +4909,30 @@ function Start-MicrosoftSurfaceDriverInstall {
         Log "Opening Surface driver downloads page for manual selection..."
         Start-Process "https://support.microsoft.com/en-us/surface/drivers-firmware/download-drivers-and-firmware-for-surface-pro"
         return $false
+    }
+
+    # --------------------------------------------------
+    # CPU-aware override for dual-CPU models (Surface Laptop 3 / 4).
+    # WMI reports a single model string for both the Intel and AMD
+    # hardware, but Microsoft publishes a SEPARATE driver pack for
+    # each. The base table defaulted to the Intel ID; if this model
+    # has Intel/AMD variants, switch to the pack matching the CPU.
+    # --------------------------------------------------
+    if ($matchedKey -and $SurfaceCpuVariantIds.ContainsKey($matchedKey)) {
+        $cpuVendor = Get-CpuVendor
+        $variants  = $SurfaceCpuVariantIds[$matchedKey]
+        Log "Model '$matchedKey' has CPU-specific driver packs. Detected CPU vendor: $cpuVendor"
+        if ($cpuVendor -ne "Unknown" -and $variants.ContainsKey($cpuVendor)) {
+            $variantId = $variants[$cpuVendor]
+            if ($variantId -ne $pageId) {
+                Log "  $cpuVendor CPU detected -> overriding Download Center ID $pageId -> $variantId ($matchedKey, $cpuVendor pack)" -Level "info" -Event "surface_cpu_variant_override" -Context @{ model = $matchedKey; cpu = $cpuVendor; from_id = $pageId; to_id = $variantId }
+                $pageId = $variantId
+            } else {
+                Log "  $cpuVendor CPU detected -> already on the correct pack (ID $pageId)"
+            }
+        } else {
+            Log "  WARNING: '$matchedKey' ships in Intel and AMD variants but the CPU vendor could not be determined. Falling back to the default pack (ID $pageId). If this machine is AMD and the install finds no matching drivers, re-run on the device (WMI CPU detection should work there) or download the AMD pack manually from microsoft.com/download." -Level "warn" -Event "surface_cpu_variant_unresolved" -Context @{ model = $matchedKey; default_id = $pageId }
+        }
     }
 
     $detailsUrl  = "https://www.microsoft.com/en-us/download/details.aspx?id=$pageId"
