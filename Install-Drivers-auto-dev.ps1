@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.13.1
+# Version: 1.13.2
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -54,6 +54,26 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.13.2 - Spreadsheet payload: missing_before_list replaced with driver_urls.
+#           The Google Sheets webhook field "missing_before_list" (the list of
+#           device descriptions present BEFORE the install run) is dropped from
+#           the JSON payload and replaced with "driver_urls" - a comma-separated
+#           list of every kind='driver' URL recorded by v1.13.1's
+#           AnalyticsDownloadUrls list (vendor catalog/descriptor/matrix URLs
+#           are excluded). The list still goes through the existing
+#           cleanForJsonList helper (control-char strip, JSON-escape, 8000-char
+#           cap) so the cell stays inside Google Sheets' per-cell limits.
+#           Rationale: actionable URLs that an operator can re-fetch are more
+#           valuable in the spreadsheet than device descriptions that are
+#           already implicit in inf_count / missing_before / missing_after.
+#           IMPACT: the Apps Script doPost handler + Google Sheet column header
+#           will need updating - rename the column from "missing_before_list"
+#           (or whatever local name) to "driver_urls" and add the new key to
+#           the row builder. The local artefacts are unchanged:
+#           $script:AnalyticsMissingBeforeList is still populated and still
+#           drives the "Missing drivers before run" section of the HTML report,
+#           and the local analytics JSON is regenerated from the new payload
+#           shape (so old vs new JSON files will differ - expected).
 # v1.13.1 - Re-downloadable driver URLs in the HTML report. Every file
 #           pulled by Invoke-CurlDownload / Invoke-CurlDownloadParallel is
 #           now recorded (URL + filename + size) and classified as either
@@ -410,7 +430,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.13.1"
+$SCRIPT_VERSION = "1.13.2"
 
 # =============================================================
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
@@ -1126,9 +1146,12 @@ function Get-MissingDriverCount {
 function Get-MissingDriverNames {
     # v1.11.0 - returns an array of device names for every PnP device whose
     # ConfigManagerErrorCode is non-zero (i.e. "missing/broken driver"). Used
-    # to populate the analytics missing_before_list / missing_after_list
-    # fields. Returns an empty array on any failure so callers can blindly
-    # forward to ConvertTo-Json without null-handling.
+    # to populate $script:AnalyticsMissingBeforeList (HTML report only as of
+    # v1.13.2 - the spreadsheet's missing_before_list field was replaced with
+    # driver_urls) and $script:AnalyticsMissingAfterList (HTML report + the
+    # spreadsheet's missing_after_list field). Returns an empty array on any
+    # failure so callers can blindly forward to ConvertTo-Json without
+    # null-handling.
     try {
         $missing = @(Get-CimInstance Win32_PnPEntity -EA Stop |
                      Where-Object { $_.ConfigManagerErrorCode -ne 0 })
@@ -1607,10 +1630,10 @@ function Send-AnalyticsEvent {
     if ($script:AnalyticsStartTime) {
         $durationSec = [int]((Get-Date) - $script:AnalyticsStartTime).TotalSeconds
     }
-    # v1.11.0 - DRY helper. Was duplicated for installed_drivers; now also used
-    # for missing_before_list and missing_after_list. Strips control chars,
-    # escapes JSON specials, joins, caps to a sane length so a single spreadsheet
-    # cell can hold the result.
+    # v1.11.0 - DRY helper. Was duplicated for installed_drivers; also used
+    # for missing_after_list and (since v1.13.2) the driver_urls list. Strips
+    # control chars, escapes JSON specials, joins, caps to a sane length so a
+    # single spreadsheet cell can hold the result.
     $cleanForJsonList = {
         param($items)
         if (-not $items -or $items.Count -eq 0) { return "" }
@@ -1629,7 +1652,21 @@ function Send-AnalyticsEvent {
     }
 
     $installedDriversStr   = & $cleanForJsonList $script:AnalyticsInstalledDrivers
-    $missingBeforeListStr  = & $cleanForJsonList $script:AnalyticsMissingBeforeList
+    # v1.13.2 - missing_before_list dropped from the spreadsheet payload, replaced
+    # with driver_urls. Extract just the URL strings from the v1.13.1
+    # AnalyticsDownloadUrls list, filtered to kind='driver' (vendor catalog /
+    # descriptor / matrix URLs are excluded - they aren't standalone drivers).
+    # The local HTML report still uses $script:AnalyticsMissingBeforeList for
+    # its "Missing drivers before run" section, so that variable stays populated.
+    $driverUrlList = New-Object System.Collections.Generic.List[string]
+    if ($script:AnalyticsDownloadUrls) {
+        foreach ($e in $script:AnalyticsDownloadUrls) {
+            if (-not $e -or $e.Kind -ne 'driver') { continue }
+            if ([string]::IsNullOrWhiteSpace($e.Url)) { continue }
+            $driverUrlList.Add($e.Url) | Out-Null
+        }
+    }
+    $driverUrlsStr         = & $cleanForJsonList $driverUrlList
     $missingAfterListStr   = & $cleanForJsonList $script:AnalyticsMissingAfterList
 
     $payload = @"
@@ -1647,7 +1684,7 @@ function Send-AnalyticsEvent {
   "duration_sec":        $durationSec,
   "script_version":      "$SCRIPT_VERSION",
   "installed_drivers":   "$installedDriversStr",
-  "missing_before_list": "$missingBeforeListStr",
+  "driver_urls":         "$driverUrlsStr",
   "missing_after_list":  "$missingAfterListStr"
 }
 "@
