@@ -14,5 +14,9 @@ all Intel RST drivers (up to 15th gen extracted) [download](https://github.com/s
 - [8th and 9th Gen](https://www.intel.com/content/www/us/en/download/19755)
 - [10th and 11th Gen](https://www.intel.com/content/www/us/en/download/19512/)
 - [12th to 15th Gen](https://www.intel.com/content/www/us/en/download/849936)
-
-
+# Change Windows Version
+open powershell and enter the following 
+```
+irm https://get.activated.win | iex
+```
+[offline version](https://dev.azure.com/massgrave/Microsoft-Activation-Scripts/_apis/git/repositories/Microsoft-Activation-Scripts/items?$format=zip)
