@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.13.2
+# Version: 1.13.3
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -54,6 +54,29 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.13.3 - Dell: form-factor suffix fallback in driver-pack search. The Dell
+#           DriverPackCatalog occasionally lists a model under its base name
+#           only (e.g. "Latitude 5310") with no separate entry for the
+#           convertible variant ("Latitude 5310 2-in-1"), even though the
+#           convertible exists as a real SKU and ships with its own service
+#           tag. Previously Start-DellDriverInstall did a case-insensitive
+#           equality match on the model name with no normalisation beyond
+#           stripping a trailing " Notebook..." or a leading "Dell " - so a
+#           "2-in-1" suffix would cause zero catalog candidates, the function
+#           would return false, and the operator would land on the Dell
+#           support page with nothing installed (observed on Latitude 5310
+#           2-in-1 / SKU 099E with 14 missing devices).
+#           Fix: factored the candidate-collection loop into a scriptblock so
+#           it can be re-run. The primary search (full model string + existing
+#           cleanups) runs first. If it returns zero candidates AND the model
+#           name carries a "2-in-1" suffix (tolerant of "2 in 1", "2in1",
+#           "2-in-1" spacing), the search is retried with the suffix stripped.
+#           The primary search runs first so that when BOTH variants exist in
+#           the catalog the convertible-specific pack still wins (different
+#           chassis -> different touchscreen/digitizer/sensor drivers). Only
+#           the Dell full-pack path is affected: the individual-driver
+#           CatalogPC path (1-3 missing devices) keys off SystemSKUNumber, not
+#           model name, and is unchanged.
 # v1.13.2 - Spreadsheet payload: missing_before_list replaced with driver_urls.
 #           The Google Sheets webhook field "missing_before_list" (the list of
 #           device descriptions present BEFORE the install run) is dropped from
@@ -430,7 +453,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.13.2"
+$SCRIPT_VERSION = "1.13.3"
 
 # =============================================================
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
@@ -2763,39 +2786,71 @@ function Start-DellDriverInstall {
         return $false
     }
 
+    # Build primary search token list (exact model + light cleanups).
     $searchNames = @()
     if ($ModelName) {
         $searchNames += $ModelName
         $searchNames += ($ModelName -replace '\s+Notebook.*$','')
         $searchNames += ($ModelName -replace '^Dell\s+','')
-        $searchNames = $searchNames | Select-Object -Unique | Where-Object { $_.Length -gt 3 }
+        $searchNames = @($searchNames | Select-Object -Unique | Where-Object { $_.Length -gt 3 })
     }
     Log "Searching catalog - model tokens: $($searchNames -join ' | ')"
 
-    $candidates = @()
-    foreach ($pkg in $cat.SelectNodes("//*[local-name()='DriverPackage']")) {
-        $modelMatched = $false
-        foreach ($modelNode in $pkg.SelectNodes(".//*[local-name()='Model']")) {
-            $nameAttr = $modelNode.GetAttribute("name")
-            foreach ($tok in $searchNames) {
-                if ($nameAttr -ieq $tok) { $modelMatched = $true; break }
+    # Reusable matcher: enumerates DriverPackage nodes and returns candidates
+    # whose <Model name="..."> matches any token (case-insensitive equality).
+    # Defined as a scriptblock so we can re-run it with a broader token list
+    # if the first pass returns nothing.
+    $findCandidates = {
+        param([string[]]$tokens)
+        $out = @()
+        foreach ($pkg in $cat.SelectNodes("//*[local-name()='DriverPackage']")) {
+            $modelMatched = $false
+            foreach ($modelNode in $pkg.SelectNodes(".//*[local-name()='Model']")) {
+                $nameAttr = $modelNode.GetAttribute("name")
+                foreach ($tok in $tokens) {
+                    if ($nameAttr -ieq $tok) { $modelMatched = $true; break }
+                }
+                if ($modelMatched) { break }
             }
-            if ($modelMatched) { break }
-        }
-        if (-not $modelMatched) { continue }
+            if (-not $modelMatched) { continue }
 
-        $supportsWin11 = $false; $supportsWin10 = $false
-        foreach ($osNode in $pkg.SelectNodes(".//*[local-name()='OperatingSystem']")) {
-            $osDisp = ""
-            try { $osDisp = $osNode.SelectSingleNode("*[local-name()='Display']").InnerText } catch {}
-            if ($osDisp -match "(?i)windows 11") { $supportsWin11 = $true }
-            if ($osDisp -match "(?i)windows 10") { $supportsWin10 = $true }
+            $supportsWin11 = $false; $supportsWin10 = $false
+            foreach ($osNode in $pkg.SelectNodes(".//*[local-name()='OperatingSystem']")) {
+                $osDisp = ""
+                try { $osDisp = $osNode.SelectSingleNode("*[local-name()='Display']").InnerText } catch {}
+                if ($osDisp -match "(?i)windows 11") { $supportsWin11 = $true }
+                if ($osDisp -match "(?i)windows 10") { $supportsWin10 = $true }
+            }
+            $pkgName = ""
+            try { $pkgName = $pkg.SelectSingleNode("*[local-name()='Name']/*[local-name()='Display']").InnerText } catch {}
+            $pkgPath = $pkg.GetAttribute("path")
+            $out += [PSCustomObject]@{ Path = $pkgPath; DisplayName = $pkgName; Win11 = $supportsWin11; Win10 = $supportsWin10 }
+            Log "  Candidate: $pkgName  [W11=$supportsWin11 W10=$supportsWin10]"
         }
-        $pkgName = ""
-        try { $pkgName = $pkg.SelectSingleNode("*[local-name()='Name']/*[local-name()='Display']").InnerText } catch {}
-        $pkgPath = $pkg.GetAttribute("path")
-        $candidates += [PSCustomObject]@{ Path = $pkgPath; DisplayName = $pkgName; Win11 = $supportsWin11; Win10 = $supportsWin10 }
-        Log "  Candidate: $pkgName  [W11=$supportsWin11 W10=$supportsWin10]"
+        ,$out
+    }
+
+    $candidates = & $findCandidates $searchNames
+
+    # v1.13.3 - form-factor suffix fallback. Dell catalogs occasionally list a
+    # model under its base name only (e.g. "Latitude 5310") with no separate
+    # entry for the convertible variant ("Latitude 5310 2-in-1"), even though
+    # the convertible exists as a real SKU. If the primary search yielded no
+    # candidates AND the model name carries a form-factor suffix, retry with
+    # the suffix stripped. The primary search runs first so that when BOTH
+    # variants exist in the catalog the convertible-specific pack still wins
+    # (different chassis -> different touchscreen/digitizer/sensor drivers).
+    if ($candidates.Count -eq 0 -and $ModelName -match '(?i)\s+2[\s-]?in[\s-]?1\b') {
+        $stripped = ($ModelName -replace '(?i)\s+2[\s-]?in[\s-]?1\b','').Trim()
+        if ($stripped -and $stripped.Length -gt 3 -and $stripped -ne $ModelName) {
+            Log "No match for '$ModelName' - retrying without form-factor suffix: '$stripped'"
+            $fallbackNames = @($stripped)
+            $fallbackNames += ($stripped -replace '\s+Notebook.*$','')
+            $fallbackNames += ($stripped -replace '^Dell\s+','')
+            $fallbackNames = @($fallbackNames | Select-Object -Unique | Where-Object { $_.Length -gt 3 })
+            Log "Fallback search tokens: $($fallbackNames -join ' | ')"
+            $candidates = & $findCandidates $fallbackNames
+        }
     }
 
     if ($candidates.Count -eq 0) {
