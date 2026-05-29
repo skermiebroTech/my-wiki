@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.13.4
+# Version: 1.13.5
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -54,6 +54,30 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.13.5 - Dell CatalogPC: collect-then-rank matching for shared VEN/DEV IDs;
+#           correctly handles the INT3480 Visual Sensing Controller / 2D Imaging
+#           MCU camera companion. v1.13.4's INT check looked for the literal
+#           "INT3480" string in the catalog component path/name - but Dell's
+#           CatalogPC entries don't carry the ACPI INT id there, so the search
+#           always failed and fell back to the GPU pack (which shares 8086/7D45),
+#           leaving the camera at ERR 39 and burning 1.5 GB on the wrong driver
+#           (confirmed in field log 20260528_190046: "VEN+DEV fallback" picked
+#           the Intel Graphics pack again).
+#           Fix: the matcher now COLLECTS every VEN+DEV candidate across the whole
+#           catalog and RANKS them. For a device with an INTxxxx ACPI suffix,
+#           candidates are scored by name/path keywords - imaging/sensing/camera/
+#           MCU/IPU/VSC strongly preferred, graphics/display/iris/arc penalised,
+#           and a direct INT-id reference (if present) weighted highest. If no
+#           candidate scores positive (i.e. the catalog has only the GPU entry for
+#           that VEN/DEV and no real companion driver, as on the 7450), the device
+#           is deliberately left UNRESOLVED rather than mis-installing the GPU pack
+#           and falsely reporting success; PromptWindowsUpdate then offers to
+#           resolve it. The standalone VSC driver
+#           (Intel-2D-Imaging-MCU-Visual-Sensing-Controller-Driver_WXX55, A06) is
+#           not published in CatalogPC for SKU 0CC2 at all - it ships only as a
+#           standalone Dell EXE - so neither the individual path nor the full pack
+#           can supply it; surfacing it for Windows Update is the correct outcome.
+#           Devices with no INT suffix keep first-match-wins (unchanged behaviour).
 # v1.13.4 - Dell CatalogPC: INT-component disambiguation for shared VEN/DEV IDs.
 #           Devices like the Intel 2D Imaging / MCU / Visual Sensing Controller
 #           (Latitude 7450, HardwareID VIDEO\VEN_8086&DEV_7D45&...&INT3480) share
@@ -466,7 +490,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.13.4"
+$SCRIPT_VERSION = "1.13.5"
 
 # =============================================================
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
@@ -2587,7 +2611,31 @@ function Start-DellIndividualDriverInstall {
             break
         }
 
-        $matched = $false
+        # v1.13.5 - COLLECT-THEN-RANK matching.
+        # Previously this loop took the FIRST SoftwareComponent whose PCIInfo
+        # matched VEN+DEV and stopped. That breaks when several distinct
+        # components share one VEN+DEV pair - the classic case being Intel SoC
+        # silicon where the GPU and the Visual Sensing Controller / 2D Imaging
+        # MCU (the ACPI INT3480 camera companion) BOTH advertise 8086/7D45.
+        # The GPU entry sorts first, so the camera always lost and stayed ERR 39
+        # (observed on Latitude 7450 / SKU 0CC2: correct driver is the
+        # "Intel 2D Imaging MCU Visual Sensing Controller" pack, FOLDER13137215M,
+        # but the loop kept grabbing the 1.5 GB Graphics pack instead).
+        #
+        # Fix: gather ALL VEN+DEV candidates across the whole catalog, then pick
+        # the best one by a name-based score. When the device carries an INTxxxx
+        # ACPI suffix ($vd.IntComp), components whose name/path indicate an
+        # imaging / sensing / camera / MCU companion are strongly preferred and
+        # graphics/display entries are penalised. Devices with no INT suffix keep
+        # first-match-wins semantics (score is flat, so the first candidate is
+        # taken - identical to the old behaviour).
+
+        # Keyword sets for INT-companion disambiguation
+        $intPreferKw  = @('imaging','visual sensing','sensing controller','vsc','camera','webcam','mcu','ipu','avstream')
+        $intPenalKw   = @('graphics','display','iris','arc','uhd','video')
+
+        $candidates = [System.Collections.Generic.List[object]]::new()
+
         foreach ($component in $cat.SelectNodes("//*[local-name()='SoftwareComponent']")) {
 
             # Must be a driver (DRVR), not firmware
@@ -2611,87 +2659,85 @@ function Start-DellIndividualDriverInstall {
                 if (-not $modelMatch) { continue }
             }
 
-            # Match hardware ID via PCIInfo deviceID + vendorID attributes.
-            # v1.13.4: when the missing device carries an &INTxxxx sub-component
-            # suffix (stored in $vd.IntComp), a VEN+DEV hit is only accepted
-            # immediately if the catalog entry's path or display name contains
-            # that INT string (confirming it is the VSC/camera component rather
-            # than the GPU that shares the same VEN+DEV).  If the INT string is
-            # absent from the candidate we stash it as a fallback and keep
-            # scanning; the fallback is used only if no INT-specific entry is
-            # ever found.  Devices without an IntComp ($null) are unaffected.
-            $intFallback = $null
+            # Match hardware ID via PCIInfo deviceID + vendorID attributes
+            $hit = $false
             foreach ($pciNode in $component.SelectNodes(".//*[local-name()='PCIInfo']")) {
                 $catVen = $pciNode.GetAttribute("vendorID").ToUpper()
                 $catDev = $pciNode.GetAttribute("deviceID").ToUpper()
                 foreach ($vd in $devVenDev) {
-                    if ($vd.VEN -eq $catVen -and $vd.DEV -eq $catDev) {
-                        $driverPath = $component.GetAttribute("path")
-                        $driverName = ""
-                        try { $driverName = $component.SelectSingleNode("*[local-name()='Name']/*[local-name()='Display']").InnerText } catch {}
+                    if ($vd.VEN -eq $catVen -and $vd.DEV -eq $catDev) { $hit = $true; break }
+                }
+                if ($hit) { break }
+            }
+            if (-not $hit) { continue }
 
-                        # v1.13.4 INT-component disambiguation
-                        if ($vd.IntComp) {
-                            $intPresent = ($driverPath -match [regex]::Escape($vd.IntComp)) -or
-                                          ($driverName -match [regex]::Escape($vd.IntComp))
-                            if ($intPresent) {
-                                Log "  Matched '$($dev.Name)' [INT-specific]"
-                                Log "    Driver : $driverName"
-                                Log "    Path   : $driverPath"
-                                if ($driverPath -and -not ($toDownload | Where-Object { $_.Path -eq $driverPath })) {
-                                    $toDownload.Add([PSCustomObject]@{
-                                        DeviceName = $dev.Name
-                                        DriverName = $driverName
-                                        Path       = $driverPath
-                                    })
-                                }
-                                $matched = $true
-                                break
-                            } elseif (-not $intFallback) {
-                                # VEN+DEV match but wrong component - keep as fallback
-                                $intFallback = [PSCustomObject]@{
-                                    DeviceName = $dev.Name
-                                    DriverName = $driverName
-                                    Path       = $driverPath
-                                }
-                            }
-                        } else {
-                            # No INT suffix - original behaviour
-                            Log "  Matched '$($dev.Name)'"
-                            Log "    Driver : $driverName"
-                            Log "    Path   : $driverPath"
-                            if ($driverPath -and -not ($toDownload | Where-Object { $_.Path -eq $driverPath })) {
-                                $toDownload.Add([PSCustomObject]@{
-                                    DeviceName = $dev.Name
-                                    DriverName = $driverName
-                                    Path       = $driverPath
-                                })
-                            }
-                            $matched = $true
-                            break
-                        }
-                    }
-                }
-                if ($matched) { break }
-            }
-            # v1.13.4 - if INT-specific search exhausted all components with no match,
-            # use the VEN+DEV fallback rather than letting the device go unresolved.
-            if (-not $matched -and $intFallback) {
-                Log "  Matched '$($intFallback.DeviceName)' [VEN+DEV fallback - no INT-specific entry in catalog]"
-                Log "    Driver : $($intFallback.DriverName)"
-                Log "    Path   : $($intFallback.Path)"
-                if ($intFallback.Path -and -not ($toDownload | Where-Object { $_.Path -eq $intFallback.Path })) {
-                    $toDownload.Add($intFallback)
-                }
-                $matched = $true
-            }
-            if ($matched) { break }
+            $driverPath = $component.GetAttribute("path")
+            $driverName = ""
+            try { $driverName = $component.SelectSingleNode("*[local-name()='Name']/*[local-name()='Display']").InnerText } catch {}
+
+            $candidates.Add([PSCustomObject]@{
+                DriverName = $driverName
+                Path       = $driverPath
+            })
         }
 
-        if (-not $matched) {
+        if ($candidates.Count -eq 0) {
             Log "  No CatalogPC match for '$($dev.Name)' - will fall back to full pack."
             $allMatched = $false
             break
+        }
+
+        # Does this device carry an INTxxxx ACPI companion suffix?
+        $devInt = ($devVenDev | Where-Object { $_.IntComp } | Select-Object -First 1).IntComp
+
+        $chosen = $null
+        if ($devInt) {
+            # Score every candidate; higher = more likely the INT companion driver.
+            $best = $null; $bestScore = [int]::MinValue
+            foreach ($c in $candidates) {
+                $hay = ("{0} {1}" -f $c.DriverName, $c.Path).ToLower()
+                $score = 0
+                # Direct INT-id reference in name/path is the strongest signal
+                if ($hay -match [regex]::Escape($devInt.ToLower())) { $score += 100 }
+                foreach ($kw in $intPreferKw) { if ($hay.Contains($kw)) { $score += 10 } }
+                foreach ($kw in $intPenalKw)  { if ($hay.Contains($kw)) { $score -= 10 } }
+                if ($score -gt $bestScore) { $bestScore = $score; $best = $c }
+            }
+            $chosen = $best
+            if ($bestScore -le 0) {
+                # No candidate looks like an imaging/sensing companion. The
+                # correct INT driver is NOT in CatalogPC for this SKU - do not
+                # silently install the GPU pack and report success. Surface it
+                # so the operator (or Windows Update) can resolve it instead.
+                Log "  '$($dev.Name)' [$devInt]: VEN+DEV candidates exist but none are an imaging/sensing companion driver."
+                Log "    Best candidate was '$($best.DriverName)' (score $bestScore) - NOT installing it for this device."
+                Log "    This INT companion driver is not in CatalogPC for SKU $systemSKU; leaving for Windows Update / manual install."
+                $chosen = $null
+            }
+        } else {
+            # No INT suffix - original first-match-wins behaviour.
+            $chosen = $candidates[0]
+        }
+
+        if ($chosen) {
+            Log "  Matched '$($dev.Name)'"
+            Log "    Driver : $($chosen.DriverName)"
+            Log "    Path   : $($chosen.Path)"
+            if ($chosen.Path -and -not ($toDownload | Where-Object { $_.Path -eq $chosen.Path })) {
+                $toDownload.Add([PSCustomObject]@{
+                    DeviceName = $dev.Name
+                    DriverName = $chosen.DriverName
+                    Path       = $chosen.Path
+                })
+            }
+        } else {
+            # INT companion not resolvable from CatalogPC. Per v1.13.5 we do NOT
+            # fall back to the full pack just for this - the full Dell pack does
+            # not contain it either (it ships only via the standalone VSC EXE),
+            # and falling back would re-download gigabytes for nothing. Mark this
+            # device unresolved-but-tolerated so the run still completes and
+            # PromptWindowsUpdate can pick it up.
+            $script:DellIntUnresolved = $true
         }
     }
 
