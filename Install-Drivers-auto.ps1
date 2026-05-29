@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.13.3
+# Version: 1.13.4
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -54,6 +54,19 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.13.4 - Dell CatalogPC: INT-component disambiguation for shared VEN/DEV IDs.
+#           Devices like the Intel 2D Imaging / MCU / Visual Sensing Controller
+#           (Latitude 7450, HardwareID VIDEO\VEN_8086&DEV_7D45&...&INT3480) share
+#           their PCI VEN+DEV with the Intel GPU. Previously the CatalogPC lookup
+#           matched the first SoftwareComponent with VEN=8086/DEV=7D45, which was
+#           always the Graphics driver; the VSC driver was never downloaded and the
+#           device remained unresolved (ERR 39) after install.
+#           Fix: the VEN/DEV parser now also captures any trailing &INTxxxx component
+#           ID and stores it on the lookup entry (IntComp field). During catalog
+#           matching, if the winning candidate does not reference that INT string in
+#           its path or component-name, the loop continues searching for a better
+#           match before falling back to the VEN+DEV-only hit. Devices without an
+#           INT suffix are unaffected (IntComp is $null -> old code path runs).
 # v1.13.3 - Dell: form-factor suffix fallback in driver-pack search. The Dell
 #           DriverPackCatalog occasionally lists a model under its base name
 #           only (e.g. "Latitude 5310") with no separate entry for the
@@ -453,7 +466,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.13.3"
+$SCRIPT_VERSION = "1.13.4"
 
 # =============================================================
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
@@ -2552,11 +2565,19 @@ function Start-DellIndividualDriverInstall {
                 $dev2 = $Matches[1].ToUpper()
             }
             if ($ven -and $dev2) {
+                # v1.13.4 - also capture trailing &INTxxxx sub-component ID
+                # (e.g. &INT3480 on the Visual Sensing Controller) so the
+                # catalog match loop can prefer the correct entry when multiple
+                # components share the same PCI VEN+DEV pair.
+                $intComp = $null
+                if ($hwId -match '&(INT[0-9A-Fa-f]+)(?:&|$)') { $intComp = $Matches[1].ToUpper() }
+
                 $key = "$ven|$dev2"
                 if (-not $seen[$key]) {
                     $seen[$key] = $true
-                    $devVenDev += [PSCustomObject]@{ VEN = $ven; DEV = $dev2 }
-                    Log "    Parsed VEN=$ven DEV=$dev2 from: $hwId"
+                    $devVenDev += [PSCustomObject]@{ VEN = $ven; DEV = $dev2; IntComp = $intComp }
+                    $intNote = if ($intComp) { " INT=$intComp" } else { "" }
+                    Log "    Parsed VEN=$ven DEV=$dev2$intNote from: $hwId"
                 }
             }
         }
@@ -2590,7 +2611,16 @@ function Start-DellIndividualDriverInstall {
                 if (-not $modelMatch) { continue }
             }
 
-            # Match hardware ID via PCIInfo deviceID + vendorID attributes
+            # Match hardware ID via PCIInfo deviceID + vendorID attributes.
+            # v1.13.4: when the missing device carries an &INTxxxx sub-component
+            # suffix (stored in $vd.IntComp), a VEN+DEV hit is only accepted
+            # immediately if the catalog entry's path or display name contains
+            # that INT string (confirming it is the VSC/camera component rather
+            # than the GPU that shares the same VEN+DEV).  If the INT string is
+            # absent from the candidate we stash it as a fallback and keep
+            # scanning; the fallback is used only if no INT-specific entry is
+            # ever found.  Devices without an IntComp ($null) are unaffected.
+            $intFallback = $null
             foreach ($pciNode in $component.SelectNodes(".//*[local-name()='PCIInfo']")) {
                 $catVen = $pciNode.GetAttribute("vendorID").ToUpper()
                 $catDev = $pciNode.GetAttribute("deviceID").ToUpper()
@@ -2599,21 +2629,61 @@ function Start-DellIndividualDriverInstall {
                         $driverPath = $component.GetAttribute("path")
                         $driverName = ""
                         try { $driverName = $component.SelectSingleNode("*[local-name()='Name']/*[local-name()='Display']").InnerText } catch {}
-                        Log "  Matched '$($dev.Name)'"
-                        Log "    Driver : $driverName"
-                        Log "    Path   : $driverPath"
-                        if ($driverPath -and -not ($toDownload | Where-Object { $_.Path -eq $driverPath })) {
-                            $toDownload.Add([PSCustomObject]@{
-                                DeviceName = $dev.Name
-                                DriverName = $driverName
-                                Path       = $driverPath
-                            })
+
+                        # v1.13.4 INT-component disambiguation
+                        if ($vd.IntComp) {
+                            $intPresent = ($driverPath -match [regex]::Escape($vd.IntComp)) -or
+                                          ($driverName -match [regex]::Escape($vd.IntComp))
+                            if ($intPresent) {
+                                Log "  Matched '$($dev.Name)' [INT-specific]"
+                                Log "    Driver : $driverName"
+                                Log "    Path   : $driverPath"
+                                if ($driverPath -and -not ($toDownload | Where-Object { $_.Path -eq $driverPath })) {
+                                    $toDownload.Add([PSCustomObject]@{
+                                        DeviceName = $dev.Name
+                                        DriverName = $driverName
+                                        Path       = $driverPath
+                                    })
+                                }
+                                $matched = $true
+                                break
+                            } elseif (-not $intFallback) {
+                                # VEN+DEV match but wrong component - keep as fallback
+                                $intFallback = [PSCustomObject]@{
+                                    DeviceName = $dev.Name
+                                    DriverName = $driverName
+                                    Path       = $driverPath
+                                }
+                            }
+                        } else {
+                            # No INT suffix - original behaviour
+                            Log "  Matched '$($dev.Name)'"
+                            Log "    Driver : $driverName"
+                            Log "    Path   : $driverPath"
+                            if ($driverPath -and -not ($toDownload | Where-Object { $_.Path -eq $driverPath })) {
+                                $toDownload.Add([PSCustomObject]@{
+                                    DeviceName = $dev.Name
+                                    DriverName = $driverName
+                                    Path       = $driverPath
+                                })
+                            }
+                            $matched = $true
+                            break
                         }
-                        $matched = $true
-                        break
                     }
                 }
                 if ($matched) { break }
+            }
+            # v1.13.4 - if INT-specific search exhausted all components with no match,
+            # use the VEN+DEV fallback rather than letting the device go unresolved.
+            if (-not $matched -and $intFallback) {
+                Log "  Matched '$($intFallback.DeviceName)' [VEN+DEV fallback - no INT-specific entry in catalog]"
+                Log "    Driver : $($intFallback.DriverName)"
+                Log "    Path   : $($intFallback.Path)"
+                if ($intFallback.Path -and -not ($toDownload | Where-Object { $_.Path -eq $intFallback.Path })) {
+                    $toDownload.Add($intFallback)
+                }
+                $matched = $true
             }
             if ($matched) { break }
         }
