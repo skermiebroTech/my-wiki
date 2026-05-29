@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.13.5
+# Version: 1.13.6
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -54,6 +54,30 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.13.6 - Dell: INT-companion fallback table for drivers that aren't in any
+#           catalog. The INT3480 Visual Sensing Controller / 2D Imaging MCU
+#           (Latitude 7450 camera companion) ships ONLY as a standalone Dell EXE -
+#           it is absent from CatalogPC.cab AND from the full driver pack - so
+#           v1.13.5's collect-then-rank logic correctly resolved nothing and left
+#           the camera for Windows Update (confirmed in log 20260529_141035: the
+#           only VEN+DEV candidate was the Intel Management Engine installer,
+#           score 0, NOT installed). That was the right call given the data, but
+#           it still left the camera unresolved.
+#           Fix: added $intCompanionFallback, a hashtable keyed on the ACPI INT id
+#           (e.g. INT3480) holding known-good standalone Dell driver URLs. When an
+#           INT-companion device has no positive-scoring CatalogPC candidate, the
+#           individual-driver path now consults this table; a hit is queued for
+#           download via a new explicit absolute Url field on the $toDownload
+#           items (the download/extract/install path already handles a normal Dell
+#           EXE - 7-Zip extract then pnputil). INT3480 is pre-populated with the
+#           Intel 2D Imaging MCU VSC driver (WXX55, 73.22000.5.14, A06); SKUs is
+#           left empty so it applies to any model exposing INT3480.
+#           A failed fallback download does NOT trigger the full-pack fallback
+#           (the pack doesn't contain it either) - the device is just left for
+#           Windows Update, and the run still completes. The fallback URL is
+#           recorded by Add-DownloadRecord like any driver, so it appears in the
+#           HTML report's re-downloadable list and the analytics driver_urls.
+#           To cover more models/components, add entries to $intCompanionFallback.
 # v1.13.5 - Dell CatalogPC: collect-then-rank matching for shared VEN/DEV IDs;
 #           correctly handles the INT3480 Visual Sensing Controller / 2D Imaging
 #           MCU camera companion. v1.13.4's INT check looked for the literal
@@ -490,7 +514,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.13.5"
+$SCRIPT_VERSION = "1.13.6"
 
 # =============================================================
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
@@ -2495,6 +2519,40 @@ function Start-DellIndividualDriverInstall {
 
     Log "=== DELL: Individual driver mode (<=3 missing devices) ==="
 
+    # v1.13.6 - INT-companion fallback table.
+    # Some Intel SoC ACPI companion devices (Visual Sensing Controller / 2D
+    # Imaging MCU, the INTxxxx camera companions) share their PCI VEN+DEV with
+    # the GPU and are NOT published in Dell's CatalogPC at all - they ship only
+    # as standalone Dell EXEs. CatalogPC matching (the collect-then-rank logic
+    # below) therefore can never resolve them and correctly leaves them
+    # unresolved. This table provides the known-good standalone driver URL so the
+    # individual-driver path can still install them automatically.
+    #
+    # Keyed on the ACPI INT id (uppercase). Each entry MUST be a direct download
+    # URL to a Dell driver EXE (extracts via 7-Zip like any catalog EXE). The
+    # optional SKUs array scopes an entry to specific SystemSKUNumbers; an empty
+    # SKUs array means "any model with this INT id". When multiple entries match
+    # an INT id, the first SKU-specific match wins, else the first any-SKU entry.
+    #
+    # Maintenance note: these URLs are version-pinned. When Dell supersedes a
+    # driver the old FOLDER path keeps working for a long time, but if a download
+    # 404s the run still completes (device just stays unresolved -> Windows
+    # Update). Update the URL here when you have a newer A-rev on hand.
+    $intCompanionFallback = @{
+        # Intel 2D Imaging / MCU / Visual Sensing Controller (INT3480).
+        # Covers Latitude 7450 (SKU 0CC2) and other Meteor Lake Latitude/Precision
+        # units that expose the camera companion as DISPLAY\INT3480. Leave SKUs
+        # empty so it applies to any model presenting INT3480 - the driver is the
+        # generic Intel VSC package, not model-specific.
+        'INT3480' = @(
+            @{
+                Name = 'Intel 2D Imaging / MCU / Visual Sensing Controller Driver,73.22000.5.14,A06'
+                Url  = 'https://dl.dell.com/FOLDER13137215M/3/Intel-2D-Imaging-MCU-Visual-Sensing-Controller-Driver_WXX55_WIN64_73.22000.5.14_A06_02.EXE'
+                SKUs = @()
+            }
+        )
+    }
+
     # Get missing devices and their hardware IDs
     Log "Enumerating missing devices..."
     $missingDevices = @()
@@ -2728,16 +2786,43 @@ function Start-DellIndividualDriverInstall {
                     DeviceName = $dev.Name
                     DriverName = $chosen.DriverName
                     Path       = $chosen.Path
+                    Url        = $null
                 })
             }
         } else {
-            # INT companion not resolvable from CatalogPC. Per v1.13.5 we do NOT
-            # fall back to the full pack just for this - the full Dell pack does
-            # not contain it either (it ships only via the standalone VSC EXE),
-            # and falling back would re-download gigabytes for nothing. Mark this
-            # device unresolved-but-tolerated so the run still completes and
-            # PromptWindowsUpdate can pick it up.
-            $script:DellIntUnresolved = $true
+            # v1.13.6 - INT companion not resolvable from CatalogPC. Before giving
+            # up, consult the INT-companion fallback table for a known standalone
+            # driver URL (these devices ship only as standalone Dell EXEs and are
+            # never in CatalogPC or the full pack). If we have an entry, queue it
+            # for download with an explicit absolute Url. Otherwise leave the
+            # device unresolved so PromptWindowsUpdate can pick it up - we still do
+            # NOT fall back to the multi-GB full pack, which doesn't contain it.
+            $fb = $null
+            if ($devInt -and $intCompanionFallback.ContainsKey($devInt)) {
+                $entries = @($intCompanionFallback[$devInt])
+                # Prefer a SKU-specific entry, else the first any-SKU entry.
+                $fb = $entries | Where-Object { $_.SKUs -and ($_.SKUs -contains $systemSKU) } | Select-Object -First 1
+                if (-not $fb) {
+                    $fb = $entries | Where-Object { -not $_.SKUs -or $_.SKUs.Count -eq 0 } | Select-Object -First 1
+                }
+            }
+
+            if ($fb) {
+                Log "  Matched '$($dev.Name)' [INT-companion fallback table: $devInt]"
+                Log "    Driver : $($fb.Name)"
+                Log "    URL    : $($fb.Url)"
+                if (-not ($toDownload | Where-Object { $_.Url -eq $fb.Url })) {
+                    $toDownload.Add([PSCustomObject]@{
+                        DeviceName = $dev.Name
+                        DriverName = $fb.Name
+                        Path       = $null
+                        Url        = $fb.Url
+                    })
+                }
+            } else {
+                Log "  '$($dev.Name)' [$devInt]: no CatalogPC candidate and no fallback-table entry - leaving for Windows Update / manual install."
+                $script:DellIntUnresolved = $true
+            }
         }
     }
 
@@ -2754,10 +2839,18 @@ function Start-DellIndividualDriverInstall {
     # v1.11.0 - PARALLEL DOWNLOAD PHASE for Dell CatalogPC individual drivers.
     # Same shape as HP: build manifest, batch-download, then iterate survivors
     # serially for extraction (extraction needs disk I/O exclusivity per file).
+    # v1.13.6 - items may carry an explicit absolute Url (INT-companion fallback
+    # table) instead of a catalog-relative Path. Honor Url when present; otherwise
+    # build the URL from the catalog Path as before.
     $dlItems = New-Object 'System.Collections.Generic.List[hashtable]'
     foreach ($drv in $toDownload) {
-        $driverUrl  = "https://downloads.dell.com/$($drv.Path)"
-        $driverFile = Join-Path $DriverRoot ([System.IO.Path]::GetFileName($drv.Path))
+        if ($drv.Url) {
+            $driverUrl  = $drv.Url
+            $driverFile = Join-Path $DriverRoot ([System.IO.Path]::GetFileName(([uri]$drv.Url).AbsolutePath))
+        } else {
+            $driverUrl  = "https://downloads.dell.com/$($drv.Path)"
+            $driverFile = Join-Path $DriverRoot ([System.IO.Path]::GetFileName($drv.Path))
+        }
         $dlItems.Add(@{
             Url     = $driverUrl
             OutFile = $driverFile
@@ -2768,21 +2861,56 @@ function Start-DellIndividualDriverInstall {
     $dlResults = Invoke-CurlDownloadParallel -Items $dlItems
     if (Test-Cancelled) { return $false }
 
+    # v1.13.6 - a failed download of a FALLBACK-TABLE item (absolute Url) must NOT
+    # trigger the full-pack fallback: the full pack doesn't contain it, so that
+    # would mean a needless multi-GB download to still not get the driver. Treat a
+    # fallback-item failure as "leave unresolved" (PromptWindowsUpdate handles it)
+    # and drop it from the download set. A failed CATALOG item keeps the original
+    # behaviour (return $null -> full pack), since the pack genuinely may cover it.
     $allDownloaded = $true
+    $failedUrls = @{}
     foreach ($r in $dlResults) {
         if (-not $r.Success) {
-            Log "  Download failed for '$($r.Item.Label)': $($r.ErrorMsg) - falling back to full pack."
-            $allDownloaded = $false
+            $isFallback = [bool](@($toDownload | Where-Object { $_.Url -and $_.Url -eq $r.Item.Url }).Count)
+            if ($isFallback) {
+                Log "  Fallback-table download failed for '$($r.Item.Label)': $($r.ErrorMsg) - leaving device for Windows Update."
+                $failedUrls[$r.Item.Url] = $true
+                $script:DellIntUnresolved = $true
+            } else {
+                Log "  Download failed for '$($r.Item.Label)': $($r.ErrorMsg) - falling back to full pack."
+                $allDownloaded = $false
+            }
         }
     }
     if (-not $allDownloaded) { return $null }
+
+    # Drop any fallback items that failed to download so the extract/install
+    # phase below doesn't try to process a missing file.
+    if ($failedUrls.Count -gt 0) {
+        $surv = [System.Collections.Generic.List[object]]::new()
+        foreach ($drv in $toDownload) {
+            if ($drv.Url -and $failedUrls.ContainsKey($drv.Url)) { continue }
+            $surv.Add($drv)
+        }
+        $toDownload = $surv
+        if ($toDownload.Count -eq 0) {
+            Log "  All queued individual drivers were fallback items that failed - nothing to install."
+            return $true
+        }
+    }
 
     # SERIAL EXTRACT PHASE (one extract dir per file - reuses indexing convention)
     $i = 0
     foreach ($drv in $toDownload) {
         $i++
         if (Test-Cancelled) { return $false }
-        $driverFile  = Join-Path $DriverRoot ([System.IO.Path]::GetFileName($drv.Path))
+        # v1.13.6 - derive filename from explicit Url when present, else catalog Path.
+        $fileName = if ($drv.Url) {
+            [System.IO.Path]::GetFileName(([uri]$drv.Url).AbsolutePath)
+        } else {
+            [System.IO.Path]::GetFileName($drv.Path)
+        }
+        $driverFile  = Join-Path $DriverRoot $fileName
         $extractPath = Join-Path $DriverRoot "Dell_Individual_$i"
         Log "  Extracting [$i/$($toDownload.Count)]: $($drv.DriverName)..."
         SetProgress (40 + [int](($i / $toDownload.Count) * 20))
