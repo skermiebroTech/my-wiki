@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.13.2
+# Version: 1.14.0
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -11,13 +11,14 @@
 #   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -Manufacturer Dell
 #   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -Manufacturer HP -Model "EliteBook x360 1030 G8 Notebook PC"
 #   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -Manufacturer Lenovo -MachineType 20XX -SkipInstall -SkipCleanup
+#   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -Manufacturer Dynabook
 #   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -TestMode -Diagnostic
 #   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -Silent -NoAnalytics
 #   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -MaxParallelDownloads 5
 #   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -PromptWindowsUpdate:$false
 #
 # Parameters:
-#   -Manufacturer  Override WMI manufacturer detection (Dell, HP, Lenovo, Microsoft)
+#   -Manufacturer  Override WMI manufacturer detection (Dell, HP, Lenovo, Microsoft, Dynabook)
 #   -Model         Override WMI model detection
 #   -Headless      Skip GUI, write to console only (auto-set when any param is passed)
 #   -Silent        Like -Headless but ALSO suppresses console output (log file only).
@@ -46,7 +47,7 @@
 #                  In headless mode, automatically opens Windows Update if drivers
 #                  remain unresolved. Pass -PromptWindowsUpdate:$false to disable.
 #
-# Supports: Dell, HP, Lenovo, Microsoft (Surface)
+# Supports: Dell, HP, Lenovo, Microsoft (Surface), Dynabook (formerly Toshiba)
 #
 # Output files written to %USERPROFILE%\Downloads\ (timestamped, one set per run):
 #   DriverInstaller_<ts>.log         - human-readable text log (always)
@@ -54,6 +55,28 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.14.0 - Dynabook (formerly Toshiba) support. New vendor handler
+#           Start-DynabookDriverInstall + dispatch branch (Manufacturer matches
+#           "Dynabook" or "Toshiba"). Unlike Dell/HP/Lenovo, Dynabook publishes a
+#           WSUS/SCUP "SystemsManagementCatalog" (Dynabook_DriverPack_Catalog.cab
+#           on the Americas content server) - NOT a model->one-pack catalog but a
+#           flat list of ~627 individual self-contained silent .exe installers,
+#           each gated by WSUS applicability rules. The handler downloads + expands
+#           the catalog CAB, then EVALUATES each package's <IsInstallable> rule
+#           against the live machine:
+#             - WmiQuery on Win32_ComputerSystem Manufacturer/Model/SystemSKUNumber
+#               (which machine) and Win32_PnPEntity DeviceID/Name (which device is
+#               actually present - critical, since matching on model alone pulls
+#               1.8-4.4 GB incl. 1 GB GPU packs the unit may not have)
+#             - WindowsVersion (target OS build; EqualTo/GreaterThanOrEqualTo/etc.)
+#             - Processor Architecture (all amd64)
+#           Matching packages are de-duped to the newest version per driver, then
+#           each .exe is downloaded and run with its catalog-declared silent args
+#           (-s -scm | /sms /supresspopup | -s) and catalog-declared success codes.
+#           Closest existing analogue is the Lenovo consumer-catalog path. Catalog
+#           is Americas-only (the sole public machine-readable one); the driver
+#           payloads on content.us.dynabook.com are region-neutral. Older
+#           Toshiba-branded units are covered too (rules OR Dynabook/TOSHIBA).
 # v1.13.2 - Spreadsheet payload: missing_before_list replaced with driver_urls.
 #           The Google Sheets webhook field "missing_before_list" (the list of
 #           device descriptions present BEFORE the install run) is dropped from
@@ -5229,6 +5252,415 @@ function Start-MicrosoftSurfaceDriverInstall {
 }
 
 # =========================
+# DYNABOOK  (formerly Toshiba)
+#
+# Dynabook does NOT publish a Dell/HP/Lenovo-style "model -> one driver pack"
+# catalog. It publishes a WSUS/SCUP "SystemsManagementCatalog" CAB on the
+# Americas content server:
+#   https://content.us.dynabook.com/content/support/downloads/Dynabook_DriverPack_Catalog.cab
+# Inside is a flat list of ~627 <SoftwareDistributionPackage> entries. Each is a
+# self-contained, self-extracting SILENT .exe driver installer hosted on the same
+# content server, gated by a WSUS <IsInstallable> applicability rule built from:
+#   - <bar:WmiQuery> on Win32_ComputerSystem Manufacturer / Model / SystemSKUNumber
+#       => which MACHINE the package targets (LIKE '%token%' = case-insensitive substring)
+#   - <bar:WmiQuery> on Win32_PnPEntity DeviceID / Name
+#       => which DEVICE must be present. Honouring this is essential: matching on
+#          model alone pulls 1.8-4.4 GB per model (incl. ~1 GB GPU packs the unit
+#          may not even have). Filtering by present hardware collapses that.
+#   - <bar:WindowsVersion>  => target OS build (EqualTo / GreaterThanOrEqualTo / LessThan ...)
+#   - <bar:Processor Architecture="9">  => amd64
+# combined with <lar:And> / <lar:Or>. We evaluate that boolean tree against the
+# live machine, de-dupe matches to the newest version per driver, then download
+# each .exe and run it with its catalog-declared <cmd:CommandLineInstallerData>
+# Program + Arguments and ReturnCode success set. Closest existing analogue is the
+# Lenovo consumer-catalog path. Catalog is Americas-only (the only public
+# machine-readable one); the .exe payloads are region-neutral. Older Toshiba-
+# branded units are covered too - those packages OR Dynabook/TOSHIBA in their rule.
+# =========================
+
+$script:DynabookCatalogUrl = "https://content.us.dynabook.com/content/support/downloads/Dynabook_DriverPack_Catalog.cab"
+
+# Evaluate a single <bar:WmiQuery> WqlQuery string against the live machine.
+# A WQL "where A like x or B like y" is a flat OR, so we OR all LIKE clauses.
+function Test-DynabookWqlMatch {
+    param([string]$Query, [pscustomobject]$Ctx)
+    if ([string]::IsNullOrWhiteSpace($Query)) { return $true }
+    $q     = $Query.ToLower()
+    $table = if ($q -match 'from\s+(\w+)') { $Matches[1] } else { '' }
+    $isPnp = $table -like '*pnpentity*'
+    $clauses = [regex]::Matches($q, "(\w+)\s+like\s+'%(.*?)%'")
+    if ($clauses.Count -eq 0) { return $true }
+    foreach ($c in $clauses) {
+        $field = $c.Groups[1].Value
+        # WQL escapes a literal backslash as '\\' - collapse it back so the
+        # pattern (e.g. usb\vid_2c7c&pid_012f) matches a live DeviceID.
+        $pat = $c.Groups[2].Value -replace '\\\\', '\'
+        if ([string]::IsNullOrEmpty($pat)) { continue }
+        if ($isPnp) {
+            foreach ($d in $Ctx.PnpIds)   { if ($d.Contains($pat)) { return $true } }
+            foreach ($n in $Ctx.PnpNames) { if ($n.Contains($pat)) { return $true } }
+        } elseif ($field -eq 'manufacturer')    { if ($Ctx.Manufacturer.Contains($pat)) { return $true } }
+        elseif   ($field -eq 'systemskunumber') { if ($Ctx.Sku.Contains($pat))          { return $true } }
+        elseif   ($field -eq 'model')           { if ($Ctx.Model.Contains($pat))         { return $true } }
+        else { if ($Ctx.Model.Contains($pat) -or $Ctx.Sku.Contains($pat)) { return $true } }
+    }
+    return $false
+}
+
+# Evaluate a <bar:WindowsVersion> applicability node against the live OS.
+function Test-DynabookWinVer {
+    param([System.Xml.XmlElement]$Node, [pscustomobject]$Ctx)
+    $comp = $Node.GetAttribute('Comparison'); if (-not $comp) { $comp = 'EqualTo' }
+    $bn = $Node.GetAttribute('BuildNumber')
+    if ($bn) {
+        $b = [int]$bn
+        $ok = switch ($comp) {
+            'EqualTo'              { $Ctx.Build -eq $b }
+            'GreaterThanOrEqualTo' { $Ctx.Build -ge $b }
+            'GreaterThan'          { $Ctx.Build -gt $b }
+            'LessThan'             { $Ctx.Build -lt $b }
+            'LessThanOrEqualTo'    { $Ctx.Build -le $b }
+            default                { $Ctx.Build -eq $b }
+        }
+        if (-not $ok) { return $false }
+    }
+    $mj = $Node.GetAttribute('MajorVersion')
+    if ($mj -ne '' -and [int]$mj -ne $Ctx.OsMajor) { return $false }
+    $mn = $Node.GetAttribute('MinorVersion')
+    if ($mn -ne '' -and [int]$mn -ne $Ctx.OsMinor) { return $false }
+    $pt = $Node.GetAttribute('ProductType')
+    if ($pt -ne '' -and [int]$pt -ne $Ctx.ProductType) { return $false }
+    return $true
+}
+
+# Recursively evaluate an applicability sub-tree (<lar:And>/<lar:Or>/<lar:Not>
+# wrapping WmiQuery / WindowsVersion / Processor leaves).
+function Test-DynabookRuleNode {
+    param([System.Xml.XmlElement]$Node, [pscustomobject]$Ctx)
+    switch ($Node.LocalName) {
+        'And' {
+            foreach ($c in $Node.ChildNodes) {
+                if ($c -is [System.Xml.XmlElement]) {
+                    if (-not (Test-DynabookRuleNode -Node $c -Ctx $Ctx)) { return $false }
+                }
+            }
+            return $true
+        }
+        'Or' {
+            foreach ($c in $Node.ChildNodes) {
+                if ($c -is [System.Xml.XmlElement]) {
+                    if (Test-DynabookRuleNode -Node $c -Ctx $Ctx) { return $true }
+                }
+            }
+            return $false
+        }
+        'Not' {
+            foreach ($c in $Node.ChildNodes) {
+                if ($c -is [System.Xml.XmlElement]) {
+                    return (-not (Test-DynabookRuleNode -Node $c -Ctx $Ctx))
+                }
+            }
+            return $true
+        }
+        'WmiQuery'       { return (Test-DynabookWqlMatch -Query $Node.GetAttribute('WqlQuery') -Ctx $Ctx) }
+        'WindowsVersion' { return (Test-DynabookWinVer -Node $Node -Ctx $Ctx) }
+        'Processor' {
+            $a = $Node.GetAttribute('Architecture')
+            if     ($a -eq '9')  { return $Ctx.Is64 }       # amd64
+            elseif ($a -eq '12') { return $Ctx.IsArm64 }    # arm64
+            else                 { return $true }           # x86 / unspecified -> don't block
+        }
+        # FileExists (2 packages) and any unknown leaf: be permissive so we never
+        # wrongly suppress a driver the machine genuinely needs.
+        default { return $true }
+    }
+}
+
+# Run a single Dynabook SCUP installer .exe silently, pumping the UI/spinners
+# and honouring cancellation. Mirrors Invoke-LenovoPackageCommand.
+function Invoke-DynabookInstaller {
+    param([string]$ExePath, [string]$Arguments, [string]$WorkingDir, [int]$TimeoutSec = 1800)
+    try {
+        $psi                  = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName         = $ExePath
+        $psi.Arguments        = $Arguments
+        $psi.WorkingDirectory = $WorkingDir
+        $psi.UseShellExecute  = $false
+        $psi.CreateNoWindow   = $true
+        $proc                 = New-Object System.Diagnostics.Process
+        $proc.StartInfo       = $psi
+        $proc.Start() | Out-Null
+
+        $deadline = (Get-Date).AddSeconds($TimeoutSec)
+        while (-not $proc.HasExited) {
+            Start-Sleep -Milliseconds 500
+            Step-AllSpinners
+            [System.Windows.Forms.Application]::DoEvents()
+            if ((Get-Date) -gt $deadline) {
+                Log "  WARNING: installer exceeded $TimeoutSec s - killing."
+                try { $proc.Kill() } catch {}
+                return -9999
+            }
+            if ($script:CancelRequested) {
+                try { $proc.Kill() } catch {}
+                return -9998
+            }
+        }
+        return $proc.ExitCode
+    } catch {
+        Log "  Installer exec error: $($_.Exception.Message)"
+        return -9997
+    }
+}
+
+function Start-DynabookDriverInstall {
+    param([string]$DriverRoot, [string]$ModelName)
+
+    Log "=== DYNABOOK: Starting automated driver install ==="
+    SetDownload -Pct 0 -Label "Waiting..."
+    SetExtract  -Pct 0 -Label "Waiting..."
+
+    # --- live machine context (everything the applicability rules can query) ---
+    $cs = $null; try { $cs = Get-CimInstance Win32_ComputerSystem } catch {}
+    $sku = ""; if ($cs -and $cs.SystemSKUNumber) { $sku = $cs.SystemSKUNumber.Trim() }
+    $modelLive = if ($ModelName) { $ModelName } elseif ($cs) { $cs.Model.Trim() } else { "" }
+    $manLive   = if ($cs -and $cs.Manufacturer) { $cs.Manufacturer.Trim() } else { "Dynabook" }
+    try { $script:AnalyticsSerial = (Get-CimInstance Win32_BIOS).SerialNumber.Trim() } catch {}
+    Log "Model      : $modelLive"
+    Log "SystemSKU  : $(if ($sku) { $sku } else { '(empty)' })"
+
+    $os = $null; try { $os = Get-CimInstance Win32_OperatingSystem } catch {}
+    $build = 0; if ($os) { try { $build = [int]$os.BuildNumber } catch {} }
+    $osMajor = 10; $osMinor = 0; $prodType = 1
+    if ($os) {
+        try { $v = [version]$os.Version; $osMajor = $v.Major; $osMinor = $v.Minor } catch {}
+        try { $prodType = [int]$os.ProductType } catch {}
+    }
+    Log "OS         : build $build ($(if ($build -ge 22000) { 'Windows 11' } else { 'Windows 10' }))"
+
+    # Snapshot every PnP device once (DeviceID + Name, lowercased) so the
+    # device-present rules can be evaluated without re-querying WMI per package.
+    $pnpIds   = New-Object System.Collections.Generic.List[string]
+    $pnpNames = New-Object System.Collections.Generic.List[string]
+    try {
+        foreach ($p in Get-CimInstance Win32_PnPEntity) {
+            if ($p.DeviceID) { $pnpIds.Add($p.DeviceID.ToLower()) | Out-Null }
+            if ($p.Name)     { $pnpNames.Add($p.Name.ToLower())   | Out-Null }
+        }
+    } catch { Log "  WARNING: could not enumerate PnP devices - $($_.Exception.Message)" }
+    Log "PnP devices: $($pnpIds.Count)"
+
+    $ctx = [PSCustomObject]@{
+        Manufacturer = $manLive.ToLower()
+        Model        = $modelLive.ToLower()
+        Sku          = $sku.ToLower()
+        Build        = $build
+        OsMajor      = $osMajor
+        OsMinor      = $osMinor
+        ProductType  = $prodType
+        Is64         = [Environment]::Is64BitOperatingSystem
+        IsArm64      = ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64')
+        PnpIds       = $pnpIds
+        PnpNames     = $pnpNames
+    }
+
+    if (-not (Test-Path $DriverRoot)) { New-Item -ItemType Directory -Path $DriverRoot -Force | Out-Null }
+
+    # --- download + expand the catalog CAB ---
+    Log "Downloading Dynabook driver pack catalog..."
+    SetExtract -Pct 5 -Label "Downloading catalog..."
+    SetProgress 8
+    $catCab = Join-Path $env:TEMP "Dynabook_DriverPack_Catalog.cab"
+    Remove-Item $catCab -EA SilentlyContinue
+    if (-not (Invoke-CurlDownload -Url $script:DynabookCatalogUrl -OutFile $catCab)) {
+        Log "Failed to download Dynabook catalog from $script:DynabookCatalogUrl"
+        return $false
+    }
+    if (Test-Cancelled) { return $false }
+
+    # Sanity: real CAB starts with the "MSCF" magic. CDN edges sometimes return a
+    # small HTML error body with a 200 status.
+    $magic = $null
+    try {
+        $fs = [System.IO.File]::OpenRead($catCab)
+        $buf = New-Object byte[] 4; [void]$fs.Read($buf, 0, 4); $fs.Close()
+        $magic = -join ($buf | ForEach-Object { [char]$_ })
+    } catch {}
+    if ($magic -ne 'MSCF') {
+        Log "Dynabook catalog download isn't a CAB (magic='$magic', expected 'MSCF')."
+        return $false
+    }
+
+    $catDir = Join-Path $env:TEMP "Dynabook_Catalog"
+    if (Test-Path $catDir) { Remove-Item $catDir -Recurse -Force -EA SilentlyContinue }
+    New-Item -ItemType Directory -Path $catDir -Force | Out-Null
+    $xmlName = "Dynabook_DriverPack_Catalog.xml"
+    $catXml  = Join-Path $catDir $xmlName
+
+    Log "Extracting catalog XML..."
+    SetExtract -Pct 12 -Label "Extracting catalog..."
+
+    # expand.exe is fussy about arg passing; use Start-Process with a split arg
+    # array (same approach as the HP catalog path). The CAB also holds 600+ .cer
+    # files we don't want, so filter to just the XML.
+    function _DynaExpand {
+        param([string[]]$ExpArgs)
+        $logf = Join-Path $env:TEMP "dynabook_expand.log"
+        Remove-Item $logf -EA SilentlyContinue
+        try {
+            $p = Start-Process -FilePath "expand.exe" -ArgumentList $ExpArgs `
+                    -NoNewWindow -Wait -PassThru -RedirectStandardOutput $logf -EA Stop
+            if (Test-Path $logf) {
+                foreach ($l in (Get-Content $logf)) { Log "    expand: $l" }
+                Remove-Item $logf -EA SilentlyContinue
+            }
+            return $p.ExitCode
+        } catch { Log "    expand error: $($_.Exception.Message)"; return -1 }
+    }
+
+    $null = _DynaExpand @($catCab, "-F:$xmlName", $catDir)
+    if (-not (Test-Path $catXml) -or (Get-Item $catXml).Length -eq 0) {
+        Log "  Filtered extract didn't produce the XML - retrying with -F:*"
+        $null = _DynaExpand @("-F:*", $catCab, $catDir)
+        $found = Get-ChildItem $catDir -Filter "*.xml" -Recurse -EA SilentlyContinue | Select-Object -First 1
+        if ($found) { $catXml = $found.FullName }
+    }
+    if (-not (Test-Path $catXml) -or (Get-Item $catXml).Length -eq 0) {
+        Log "Dynabook catalog CAB extraction failed."
+        return $false
+    }
+
+    # --- parse + evaluate applicability ---
+    [xml]$cat = $null
+    try {
+        $raw = [System.IO.File]::ReadAllText($catXml).TrimStart([char]0xFEFF)
+        $cat = [xml]$raw
+    } catch { Log "Failed to parse Dynabook catalog XML: $($_.Exception.Message)"; return $false }
+
+    $pkgNodes = $cat.SelectNodes("//*[local-name()='SoftwareDistributionPackage']")
+    Log "Catalog lists $($pkgNodes.Count) package(s). Evaluating applicability for this machine..."
+    SetExtract -Pct 20 -Label "Matching drivers..."
+    SetProgress 15
+
+    $applicable = New-Object System.Collections.Generic.List[object]
+    foreach ($pk in $pkgNodes) {
+        $ii = $pk.SelectSingleNode("*[local-name()='InstallableItem']")
+        if (-not $ii) { continue }
+        $rule = $ii.SelectSingleNode("*[local-name()='ApplicabilityRules']/*[local-name()='IsInstallable']")
+        if (-not $rule) { continue }
+        $rootLogic = $null
+        foreach ($c in $rule.ChildNodes) { if ($c -is [System.Xml.XmlElement]) { $rootLogic = $c; break } }
+        if (-not $rootLogic) { continue }
+        if (-not (Test-DynabookRuleNode -Node $rootLogic -Ctx $ctx)) { continue }
+
+        $cli = $ii.SelectSingleNode("*[local-name()='CommandLineInstallerData']")
+        $of  = $ii.SelectSingleNode("*[local-name()='OriginFile']")
+        if (-not $cli -or -not $of) { continue }
+        $uri = $of.GetAttribute("OriginUri")
+        $fn  = $of.GetAttribute("FileName")
+        if (-not $uri -or -not $fn) { continue }
+        $sz  = 0; try { $sz = [long]$of.GetAttribute("Size") } catch {}
+        $instArgs = $cli.GetAttribute("Arguments")
+        $title = $fn
+        try { $title = $pk.SelectSingleNode("*[local-name()='LocalizedProperties']/*[local-name()='Title']").InnerText.Trim() } catch {}
+        $succ = New-Object System.Collections.Generic.List[int]
+        foreach ($r in $cli.SelectNodes("*[local-name()='ReturnCode']")) {
+            if ($r.GetAttribute("Result") -eq "Succeeded") { try { $succ.Add([int]$r.GetAttribute("Code")) | Out-Null } catch {} }
+        }
+        if ($succ.Count -eq 0) { $succ.Add(0) | Out-Null; $succ.Add(3010) | Out-Null }
+
+        $applicable.Add([PSCustomObject]@{
+            Title = $title; Url = $uri; FileName = $fn; Size = $sz; Args = $instArgs; Success = $succ
+        }) | Out-Null
+    }
+
+    # Collapse multiple builds/versions of the SAME driver down to the newest
+    # version (catalog often lists one entry per feature update). Device key =
+    # the title with the trailing version + release code stripped.
+    $byKey = @{}
+    foreach ($m in $applicable) {
+        $key = ($m.Title -replace '(?i)\s*v?\.?\s*\d+(\.\d+){1,}.*$', '').Trim().ToLower()
+        if ([string]::IsNullOrWhiteSpace($key)) { $key = $m.FileName.ToLower() }
+        $ver = [version]"0.0"
+        $vm = [regex]::Match($m.Title, '(\d+(?:\.\d+){1,})')
+        if ($vm.Success) { try { $ver = [version]$vm.Groups[1].Value } catch {} }
+        if ($byKey.ContainsKey($key)) {
+            if ($ver -gt $byKey[$key].Ver) { $byKey[$key] = @{ Pkg = $m; Ver = $ver } }
+        } else {
+            $byKey[$key] = @{ Pkg = $m; Ver = $ver }
+        }
+    }
+    $chosen = @($byKey.Values | ForEach-Object { $_.Pkg })
+
+    if ($chosen.Count -eq 0) {
+        Log "No applicable Dynabook driver packages matched this machine."
+        Log "  (Model='$modelLive', SystemSKU='$sku', build=$build)"
+        Log "  The catalog covers Dynabook Americas commercial models (Tecra / Portege / Satellite Pro)."
+        if (-not $script:Headless) {
+            Log "Opening Dynabook driver download page for manual selection..."
+            try { Start-Process "https://support.dynabook.com/drivers" } catch {}
+        } else {
+            Log "  Manual URL: https://support.dynabook.com/drivers"
+        }
+        return $false
+    }
+
+    $totalBytes = ($chosen | Measure-Object Size -Sum).Sum
+    $totalMB = [math]::Round($totalBytes / 1MB, 0)
+    Log "Matched $($chosen.Count) applicable driver package(s)  (~${totalMB} MB to download):"
+    foreach ($m in $chosen) { Log "  - $($m.Title)  [$([math]::Round($m.Size / 1MB, 0)) MB]" }
+
+    # --- download + install ---
+    $pkgRoot = Join-Path $DriverRoot "Dynabook"
+    if (-not (Test-Path $pkgRoot)) { New-Item -ItemType Directory -Path $pkgRoot -Force | Out-Null }
+
+    $total = $chosen.Count; $idx = 0; $okCount = 0; $failCount = 0; $rebootNeeded = $false
+    foreach ($m in $chosen) {
+        $idx++
+        if (Test-Cancelled) { Log "Cancelled at $idx/$total."; break }
+        $overall = 20 + [int](($idx / $total) * 75)
+        SetProgress $overall
+        Log ""
+        Log "----- [$idx/$total] $($m.Title) -----"
+
+        $dest = Join-Path $pkgRoot $m.FileName
+        SetDownload -Pct 0 -Label "Downloading $($m.FileName)..."
+        if (-not (Invoke-CurlDownload -Url $m.Url -OutFile $dest)) {
+            Log "  Download failed - skipping."
+            $failCount++; continue
+        }
+        if (Test-Cancelled) { break }
+
+        if ($SkipInstall) {
+            Log "  -SkipInstall set: downloaded only, not running installer."
+            $okCount++; continue
+        }
+
+        SetExtract -Pct 50 -Label "Installing $($m.Title)..."
+        Log "  Running: $($m.FileName) $($m.Args)"
+        $rc = Invoke-DynabookInstaller -ExePath $dest -Arguments $m.Args -WorkingDir $pkgRoot
+        if ($m.Success -contains $rc) {
+            Log "  OK (exit $rc)"
+            $okCount++
+            $script:AnalyticsInstalledDrivers.Add($m.Title) | Out-Null
+            if ($rc -eq 3010 -or $rc -eq 2 -or $rc -eq 3) { $rebootNeeded = $true }
+        } elseif ($rc -eq -9998) {
+            Log "  Cancelled during install."
+            break
+        } else {
+            Log "  WARNING: installer returned exit $rc (treating as failure)."
+            $failCount++
+        }
+    }
+
+    Log ""
+    Log "Dynabook summary: $okCount ok, $failCount failed, of $total matched package(s)."
+    if ($rebootNeeded) { Log "  One or more installers requested a reboot." }
+    SetExtract -Pct 100 -Label "Dynabook drivers processed"
+    return ($okCount -gt 0)
+}
+
+# =========================
 # DEVICE INFO DUMP
 # =========================
 function Write-DeviceInfo {
@@ -5633,6 +6065,9 @@ function Start-Install {
     } elseif ($manufacturer -match "Microsoft") {
         if (-not (Assert-Curl)) { Send-AnalyticsEvent -Result "failure"; Set-ButtonIdle; return }
         $success = Start-MicrosoftSurfaceDriverInstall -DriverRoot $driverRoot -ModelName $model
+    } elseif ($manufacturer -match "Dynabook|Toshiba") {
+        if (-not (Assert-Curl)) { Send-AnalyticsEvent -Result "failure"; Set-ButtonIdle; return }
+        $success = Start-DynabookDriverInstall -DriverRoot $driverRoot -ModelName $model
     } else {
         # Unknown manufacturer (e.g. "OEMBY", blank, generic OEM string).
         # In headless mode: if -Model was explicitly passed and looks like a Surface, run it.
