@@ -65,14 +65,28 @@
 #           the Settings app. Motivating case: Dell Vostro 5320 (field log
 #           v1.13.6) - absent from DriverPackCatalog AND its SystemSKU not listed
 #           in CatalogPC, so all 17 missing Intel chipset/Wi-Fi/audio/serial-IO/
-#           DPTF/GNA devices were left unresolved. WUA covers exactly these. The
-#           pass is gated by -PromptWindowsUpdate (default on), skipped in
-#           TestMode and on cancel, and runs automatically in headless. If WU
-#           resolves everything the run is reported as success even when the
-#           vendor pack was missing; the device count is re-scanned afterward so
-#           analytics/report/dialogs reflect the post-WU state. The existing
-#           Open-WindowsUpdate (Settings launcher) remains as the residual prompt
-#           for anything WU still can't supply (e.g. GPU/Bluetooth at that moment).
+#           DPTF/GNA devices were left unresolved. WUA covers most of these.
+#
+#           Second fallback tier: Install-DriversFromMsUpdateCatalog scrapes the
+#           public Microsoft Update Catalog (catalog.update.microsoft.com) by
+#           hardware ID, resolves the .cab via DownloadDialog.aspx, expands it and
+#           pnputil-installs. It runs only if the WUA pass still leaves devices
+#           missing, and it catches the OEM/platform drivers WUA's Type='Driver'
+#           search skips (Intel DPTF/Dynamic Tuning, serial-IO, GNA - the ACPI\
+#           INTC* leftovers on the Vostro). curl.exe drives both HTTP calls to
+#           dodge Invoke-WebRequest's IE-engine/TLS-1.2 issues on a fresh image;
+#           pnputil binds only INFs matching a present device so over-broad hits
+#           are harmless. Capped at $script:MsCatalogMaxDrivers (30) packages.
+#
+#           Both tiers are vendor-agnostic - they run for Dell/HP/Lenovo/Surface/
+#           Dynabook alike via the shared end-of-run path in Start-Install. The
+#           chain is gated by -PromptWindowsUpdate (default on), skipped in
+#           TestMode and on cancel, and runs automatically in headless. If the
+#           fallbacks resolve everything the run is reported as success even when
+#           the vendor pack was missing; the device count is re-scanned afterward
+#           so analytics/report/dialogs reflect the post-fallback state. The
+#           existing Open-WindowsUpdate (Settings launcher) remains as the residual
+#           prompt for anything still unsupplied (e.g. GPU/Bluetooth at that moment).
 #
 # v1.14.0 - Dynabook (formerly Toshiba) support. New vendor handler
 #           Start-DynabookDriverInstall + dispatch branch (Manufacturer matches
@@ -1078,6 +1092,163 @@ function Install-DriversViaWindowsUpdate {
         Log "  NOTE: a reboot is required to finish applying some Windows Update drivers."
     }
     return $installedCount
+}
+
+# =========================
+# MICROSOFT UPDATE CATALOG DRIVER FALLBACK (scrape-by-hardware-ID)
+# =========================
+# v1.15.0 - Final, vendor-agnostic tier, tried only after BOTH the vendor handler
+# and the WUA fallback leave devices unresolved. The Microsoft Update Catalog
+# (catalog.update.microsoft.com) is a public web front-end over the same content
+# CDN, but it surfaces driver packages that the WUA "Type='Driver'" search does
+# NOT return - notably OEM/platform drivers like Intel DPTF / Dynamic Tuning,
+# serial-IO, GNA and similar (exactly the ACPI\INTC* devices left over on the
+# Dell Vostro 5320). We scrape it by hardware ID, resolve the .cab download URL,
+# expand it and pnputil-install. curl.exe is used for both HTTP calls so we avoid
+# the IE-engine HTML-parse and TLS-1.2 pitfalls of Invoke-WebRequest on a fresh
+# image; pnputil only binds INFs that actually match a present device, so a
+# slightly over-broad catalog hit is harmless.
+$script:MsCatalogMaxDrivers = 30   # safety cap on how many catalog cabs to pull
+
+function Get-MsCatalogDriverGuid {
+    # Search the catalog for one hardware-ID term; return the top result's update
+    # GUID, or $null if there are no matches.
+    param([string]$Term)
+    $enc = [uri]::EscapeDataString($Term)
+    $url = "https://www.catalog.update.microsoft.com/Search.aspx?q=$enc"
+    $html = ""
+    try {
+        $html = (& curl.exe --silent --location --max-time 40 --connect-timeout 15 `
+            --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" "$url" 2>$null) -join "`n"
+    } catch { return $null }
+    if (-not $html) { return $null }
+    # Each result row exposes <a id="<GUID>_link" ...>Title</a>; the first is the
+    # catalog's best match for this hardware ID.
+    $m = [regex]::Match($html, '(?is)<a[^>]*id="([0-9a-f\-]{36})_link"[^>]*>')
+    if ($m.Success) { return $m.Groups[1].Value }
+    return $null
+}
+
+function Resolve-MsCatalogDownloadUrls {
+    # POST the update GUID to DownloadDialog.aspx, which echoes the real CDN
+    # download URLs back inside a JS blob. Return the .cab URLs.
+    param([string]$Guid)
+    $body = 'updateIDs=[{"size":0,"languages":"","uidInfo":"' + $Guid + '","updateID":"' + $Guid + '"}]'
+    $bodyFile = Join-Path $env:TEMP "mscat_dl_$Guid.txt"
+    [System.IO.File]::WriteAllText($bodyFile, $body)
+    $resp = ""
+    try {
+        $resp = (& curl.exe --silent --max-time 40 --connect-timeout 15 -X POST `
+            --header "Content-Type: application/x-www-form-urlencoded" `
+            --data "@$bodyFile" `
+            --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" `
+            "https://www.catalog.update.microsoft.com/DownloadDialog.aspx" 2>$null) -join "`n"
+    } catch {}
+    Remove-Item $bodyFile -EA SilentlyContinue
+    $urls = @()
+    foreach ($mm in [regex]::Matches($resp, "(?i)url\s*=\s*'([^']+)'")) {
+        $u = $mm.Groups[1].Value
+        if ($u -match '^https?://' -and $u -match '\.cab(\?|$)') { $urls += $u }
+    }
+    return @($urls | Select-Object -Unique)
+}
+
+function Install-DriversFromMsUpdateCatalog {
+    # Returns [int] number of devices resolved (missing-count delta) by this pass.
+    param([string]$DriverRoot)
+    if ($script:TestMode) { Log "Microsoft Update Catalog skipped (TestMode dry-run)."; return 0 }
+    if (Test-Cancelled) { return 0 }
+
+    Log "=== MS UPDATE CATALOG: scraping drivers by hardware ID (final fallback) ==="
+    SetDownload -Pct 0 -Label "Searching Microsoft Update Catalog..."
+
+    # Enumerate still-missing devices with their hardware + compatible IDs.
+    $missing = @()
+    try {
+        $missing = @(Get-CimInstance Win32_PnPEntity |
+            Where-Object { $_.ConfigManagerErrorCode -ne 0 } |
+            Select-Object Name, DeviceID,
+                @{N='HardwareIDs';E={
+                    try {
+                        $p = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Enum\$($_.DeviceID)" -EA Stop
+                        @(@($p.HardwareID) + @($p.CompatibleIDs)) | Where-Object { $_ }
+                    } catch { @() }
+                }})
+    } catch {
+        Log "  Could not enumerate missing devices: $($_.Exception.Message)"
+        return 0
+    }
+    if ($missing.Count -eq 0) { Log "  No missing devices to resolve."; return 0 }
+
+    # For each device, search by its hardware IDs (most specific first) and take
+    # the top driver result. De-dup GUIDs across devices so we never fetch the
+    # same cab twice.
+    $guidToDevice = [ordered]@{}
+    foreach ($dev in $missing) {
+        if (Test-Cancelled) { return 0 }
+        if ($guidToDevice.Count -ge $script:MsCatalogMaxDrivers) { Log "  Catalog cap ($($script:MsCatalogMaxDrivers)) reached - stopping search."; break }
+
+        # Build an ordered, de-duped term list from this device's hardware AND
+        # compatible IDs (HardwareIDs here already concatenates both). For Intel
+        # ACPI devices the IDs look like ACPI\VEN_INTC&DEV_1055, ACPI\INTC1055
+        # and *INTC1055 - none of which the catalog free-text search reliably
+        # matches, so we ALSO add the bare "INTC1055" token, which is what the
+        # catalog actually indexes for Intel Dynamic Tuning / platform packages.
+        $terms = [System.Collections.Generic.List[string]]::new()
+        foreach ($id in @($dev.HardwareIDs) | Where-Object { $_ }) {
+            if (-not $terms.Contains($id)) { $terms.Add($id) }
+            if ($id -match '(INTC[0-9A-Fa-f]{4})') {
+                $bare = $Matches[1].ToUpper()
+                if (-not $terms.Contains($bare)) { $terms.Add($bare) }
+            }
+        }
+        $terms = @($terms | Select-Object -First 8)
+
+        Log "  Searching catalog for '$($dev.Name)' ($($terms.Count) term(s))..."
+        $hit = $null
+        foreach ($term in $terms) {
+            $g = Get-MsCatalogDriverGuid -Term $term
+            Log "    query: $term  ->  $(if ($g) { $g } else { 'no match' })"
+            Start-Sleep -Milliseconds 400   # be gentle on the catalog endpoint
+            if ($g) { $hit = $g; break }
+        }
+        if (-not $hit) { Log "  '$($dev.Name)' -> no catalog driver found." ; continue }
+        if (-not $guidToDevice.Contains($hit)) { $guidToDevice[$hit] = $dev.Name }
+    }
+
+    if ($guidToDevice.Count -eq 0) { Log "  No catalog drivers matched any missing device."; return 0 }
+    Log "  $($guidToDevice.Count) catalog driver package(s) to fetch."
+
+    $catRoot = Join-Path $DriverRoot "MSCatalog"
+    if (-not (Test-Path $catRoot)) { New-Item -Path $catRoot -ItemType Directory -Force | Out-Null }
+
+    $idx = 0
+    foreach ($guid in @($guidToDevice.Keys)) {
+        if (Test-Cancelled) { break }
+        $idx++
+        $devName = $guidToDevice[$guid]
+        Log "  [$idx/$($guidToDevice.Count)] Resolving download for '$devName'..."
+        $urls = Resolve-MsCatalogDownloadUrls -Guid $guid
+        if (-not $urls -or $urls.Count -eq 0) { Log "    No .cab download URL returned - skipping."; continue }
+        $outFile = Join-Path $catRoot ("mscat_{0}.cab" -f $idx)
+        SetProgress (80 + [int](($idx / $guidToDevice.Count) * 8))
+        if (-not (Invoke-CurlDownload -Url $urls[0] -OutFile $outFile)) { Log "    Download failed - skipping."; continue }
+        if (Test-Cancelled) { break }
+        $extractDir = Join-Path $catRoot ("MSCat_{0}" -f $idx)
+        Start-PackExtraction -PackFile $outFile -DestPath $extractDir -StallLimitSec 120
+    }
+
+    # Install everything extracted - pnputil binds only INFs matching a present
+    # device, so unrelated payloads are no-ops. Measure the missing-count delta
+    # so the return value reflects what actually got fixed.
+    $before = Get-MissingDriverCount
+    foreach ($extractDir in (Get-Item (Join-Path $catRoot "MSCat_*") -EA SilentlyContinue)) {
+        Install-DriversFromPath -BasePath $extractDir.FullName | Out-Null
+    }
+    $after = Get-MissingDriverCount
+    $resolved = [math]::Max(0, $before - $after)
+    Log "  Microsoft Update Catalog resolved $resolved device(s)."
+    return $resolved
 }
 
 
@@ -6413,25 +6584,44 @@ function Start-Install {
     Log "Devices resolved by this install: $missingDelta"
     Write-MissingDriverDetails
 
-    # v1.15.0 - Universal vendor-pack-free fallback. If devices are STILL missing
+    # v1.15.0 - Universal vendor-pack-free fallbacks. If devices are STILL missing
     # drivers after the vendor path (or because there was no vendor pack at all -
-    # e.g. the Dell Vostro 5320), ask Windows Update directly for driver-class
-    # updates and install them in-place. Headless gets this automatically; it's
-    # the difference between "17 devices left unresolved" and a clean machine.
+    # e.g. the Dell Vostro 5320), try two vendor-agnostic sources in order:
+    #   1. Windows Update Agent  (driver-class updates, installed in-place)
+    #   2. Microsoft Update Catalog (scrape-by-hardware-ID; catches OEM/platform
+    #      drivers - Intel DPTF, serial-IO, etc. - that the WUA search skips)
+    # Headless gets both automatically; this is the difference between "17 devices
+    # left unresolved" and a (near-)clean machine.
     if ($PromptWindowsUpdate -and -not $script:CancelRequested -and -not $script:TestMode `
         -and $script:AnalyticsMissingAfter -gt 0) {
-        $wuInstalled = Install-DriversViaWindowsUpdate
-        if ($wuInstalled -gt 0) {
-            Log "Re-scanning devices after Windows Update driver install..."
+        $fallbackFixed = 0
+        $fallbackFixed += [int](Install-DriversViaWindowsUpdate)
+
+        # Only escalate to the catalog scrape if WU didn't already clear everything.
+        if (-not $script:CancelRequested -and (Get-MissingDriverCount) -gt 0) {
+            $fallbackFixed += [int](Install-DriversFromMsUpdateCatalog -DriverRoot $driverRoot)
+        }
+
+        if ($fallbackFixed -gt 0) {
+            Log "Re-scanning devices after fallback driver installs..."
             $script:AnalyticsMissingAfter = Get-MissingDriverCount
             $script:AnalyticsMissingAfterList.Clear()
             foreach ($n in (Get-MissingDriverNames)) { $script:AnalyticsMissingAfterList.Add($n) | Out-Null }
             $missingDelta = if ($script:AnalyticsMissingBefore -ge 0 -and $script:AnalyticsMissingAfter -ge 0) {
                 $script:AnalyticsMissingBefore - $script:AnalyticsMissingAfter
             } else { 0 }
-            Log "Missing drivers AFTER  Windows Update: $($script:AnalyticsMissingAfter)"
+            Log "Missing drivers AFTER  fallbacks: $($script:AnalyticsMissingAfter)"
             Log "Total devices resolved this run: $missingDelta"
-            # If Windows Update fully resolved the machine, treat the run as a
+            # Re-dump the detail for whatever survived all tiers, so the log and
+            # HTML report identify the exact device(s) still needing attention
+            # (the earlier dump predates the WU/catalog passes).
+            if ($script:AnalyticsMissingAfter -gt 0) {
+                Log "-- Devices still unresolved after all fallbacks --"
+                Write-MissingDriverDetails
+                Log "  NOTE: drivers staged by Windows Update may bind only after a reboot -"
+                Log "        a device shown here can resolve itself on next restart."
+            }
+            # If the fallbacks fully resolved the machine, treat the run as a
             # success even when the vendor pack was missing or failed.
             if ($script:AnalyticsMissingAfter -eq 0) { $success = $true }
         }
