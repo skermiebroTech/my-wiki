@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.16.0
+# Version: 1.13.6
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -11,14 +11,13 @@
 #   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -Manufacturer Dell
 #   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -Manufacturer HP -Model "EliteBook x360 1030 G8 Notebook PC"
 #   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -Manufacturer Lenovo -MachineType 20XX -SkipInstall -SkipCleanup
-#   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -Manufacturer Dynabook
 #   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -TestMode -Diagnostic
 #   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -Silent -NoAnalytics
 #   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -MaxParallelDownloads 5
 #   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -PromptWindowsUpdate:$false
 #
 # Parameters:
-#   -Manufacturer  Override WMI manufacturer detection (Dell, HP, Lenovo, Microsoft, Dynabook)
+#   -Manufacturer  Override WMI manufacturer detection (Dell, HP, Lenovo, Microsoft)
 #   -Model         Override WMI model detection
 #   -Headless      Skip GUI, write to console only (auto-set when any param is passed)
 #   -Silent        Like -Headless but ALSO suppresses console output (log file only).
@@ -47,7 +46,7 @@
 #                  In headless mode, automatically opens Windows Update if drivers
 #                  remain unresolved. Pass -PromptWindowsUpdate:$false to disable.
 #
-# Supports: Dell, HP, Lenovo, Microsoft (Surface), Dynabook (formerly Toshiba)
+# Supports: Dell, HP, Lenovo, Microsoft (Surface)
 #
 # Output files written to %USERPROFILE%\Downloads\ (timestamped, one set per run):
 #   DriverInstaller_<ts>.log         - human-readable text log (always)
@@ -55,113 +54,90 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
-# v1.16.0 - Stranded child-device support + Dell support-page fix.
-#           (1) Parent-walk for devices with no PCI ID of their own. New helper
-#               Get-DeviceParentVenDev climbs the device tree (DEVPKEY_Device_
-#               Parent) to the nearest PCI ancestor; Start-DellIndividualDriver-
-#               Install now uses it when a missing device exposes no VEN/DEV.
-#               Motivating case: the Intel Integrated Sensor Hub child sensor on
-#               the Vostro 5320 enumerates as {GUID}\VID_8087&PID_0AC2 / ISH_
-#               MINIPORT - no PCI ID, so every matcher skipped it. Its driver
-#               (Intel Integrated Sensor Solution) is in CatalogPC keyed to the
-#               ISH host controller PCI 8086:51FC; matching via the parent pulls
-#               that package, whose INF set also binds the stranded child. Verified
-#               against the live CatalogPC: ISS is the sole DRVR for 8086:51FC and
-#               the Vostro's SKU 0B3D is absent from the catalog entirely, so
-#               hardware-ID matching is the only path that can work for it.
-#           (2) The Dell "no driver pack" branch no longer auto-opens the Dell
-#               support page mid-run. That fired during the vendor phase, BEFORE
-#               the universal Windows Update / Microsoft Update Catalog fallbacks
-#               (which then install most/all of the missing drivers), so launching
-#               a browser there was premature and surprising. The URL is now just
-#               logged as a manual last resort.
-#           NOTE: bump the version on EVERY change from here on - two different
-#           builds previously both reported 1.15.0, making field logs ambiguous.
-#
-# v1.15.0 - Universal "no driver pack" fallback via Windows Update. New function
-#           Install-DriversViaWindowsUpdate uses the Windows Update Agent (WUA)
-#           COM API to search/download/install DRIVER-class updates in-place,
-#           with no GUI and no vendor catalog. Wired into the end-of-run path in
-#           Start-Install: whenever devices remain unresolved after the vendor
-#           handler (or because there is no vendor pack at all), the script now
-#           actually pulls drivers from Windows Update instead of merely opening
-#           the Settings app. Motivating case: Dell Vostro 5320 (field log
-#           v1.13.6) - absent from DriverPackCatalog AND its SystemSKU not listed
-#           in CatalogPC, so all 17 missing Intel chipset/Wi-Fi/audio/serial-IO/
-#           DPTF/GNA devices were left unresolved. WUA covers most of these.
-#
-#           Second fallback tier: Install-DriversFromMsUpdateCatalog scrapes the
-#           public Microsoft Update Catalog (catalog.update.microsoft.com) by
-#           hardware ID, resolves the .cab via DownloadDialog.aspx, expands it and
-#           pnputil-installs. It runs only if the WUA pass still leaves devices
-#           missing, and it catches the OEM/platform drivers WUA's Type='Driver'
-#           search skips (Intel DPTF/Dynamic Tuning, serial-IO, GNA - the ACPI\
-#           INTC* leftovers on the Vostro). curl.exe drives both HTTP calls to
-#           dodge Invoke-WebRequest's IE-engine/TLS-1.2 issues on a fresh image;
-#           pnputil binds only INFs matching a present device so over-broad hits
-#           are harmless. Capped at $script:MsCatalogMaxDrivers (30) packages.
-#
-#           Both tiers are vendor-agnostic - they run for Dell/HP/Lenovo/Surface/
-#           Dynabook alike via the shared end-of-run path in Start-Install. The
-#           chain is gated by -PromptWindowsUpdate (default on), skipped in
-#           TestMode and on cancel, and runs automatically in headless. If the
-#           fallbacks resolve everything the run is reported as success even when
-#           the vendor pack was missing; the device count is re-scanned afterward
-#           so analytics/report/dialogs reflect the post-fallback state. The
-#           existing Open-WindowsUpdate (Settings launcher) remains as the residual
-#           prompt for anything still unsupplied (e.g. GPU/Bluetooth at that moment).
-#
-# v1.14.0 - Dynabook (formerly Toshiba) support. New vendor handler
-#           Start-DynabookDriverInstall + dispatch branch (Manufacturer matches
-#           "Dynabook" or "Toshiba"). Unlike Dell/HP/Lenovo, Dynabook publishes a
-#           WSUS/SCUP "SystemsManagementCatalog" (Dynabook_DriverPack_Catalog.cab
-#           on the Americas content server) - NOT a model->one-pack catalog but a
-#           flat list of ~627 individual self-contained silent .exe installers,
-#           each gated by WSUS applicability rules. The handler downloads + expands
-#           the catalog CAB, then EVALUATES each package's <IsInstallable> rule
-#           against the live machine:
-#             - WmiQuery on Win32_ComputerSystem Manufacturer/Model/SystemSKUNumber
-#               (which machine) and Win32_PnPEntity DeviceID/Name (which device is
-#               actually present - critical, since matching on model alone pulls
-#               1.8-4.4 GB incl. 1 GB GPU packs the unit may not have)
-#             - WindowsVersion (target OS build; EqualTo/GreaterThanOrEqualTo/etc.)
-#             - Processor Architecture (all amd64)
-#           Matching packages are de-duped to the newest version per driver, then
-#           each .exe is downloaded and run with its catalog-declared silent args
-#           (-s -scm | /sms /supresspopup | -s) and catalog-declared success codes.
-#           Closest existing analogue is the Lenovo consumer-catalog path. Catalog
-#           is Americas-only (the sole public machine-readable one); the driver
-#           payloads on content.us.dynabook.com are region-neutral. Older
-#           Toshiba-branded units are covered too (rules OR Dynabook/TOSHIBA).
-#           --- v1.14.0 follow-up fixes (same unreleased version) ---
-#           (A) Dynabook OS-build fallback. The applicability rules pin an exact
-#               Windows build (Comparison="EqualTo" BuildNumber="26100" for 24H2).
-#               When Windows ships a NEWER servicing build than the catalog was
-#               authored against (e.g. build 26200 on a Portege X40-M / SKU PNM1BA),
-#               every EqualTo rule fails and ZERO packages match - even though the
-#               26100 drivers apply. Fix: after parsing the catalog, snap the live
-#               build DOWN to the newest catalog build of the SAME Windows generation
-#               (Win11 = build >= 22000) that is <= the live build, and evaluate the
-#               rules against that "effective build". No-op when the live build is
-#               already present in the catalog. Confirmed: X40-M 26200 -> 26100 now
-#               matches 18 packages incl. the Intel LAN driver (missing I219-V) and
-#               the dynabook DNBK system driver (missing I2C HID device).
-#           (B) Dell consumer/gaming fallback. Dell publishes neither a DriverPack
-#               (DriverPackCatalog) nor a SKU-tagged CatalogPC entry for consumer /
-#               gaming models (G-series, consumer Inspiron, etc.), so the full-pack
-#               path dead-ended at "No driver pack found" + support page (e.g. Dell
-#               G15 5515, SKU 0A6E - absent from both catalogs). When no pack is
-#               found the handler now PROMPTS the operator (headless: auto-yes) to
-#               attempt a best-effort match against CatalogPC purely by hardware ID
-#               (VEN/DEV), ignoring the SKU model filter. Start-DellIndividualDriverInstall
-#               gains -BestEffort (skip, don't abort, on unmatchable devices) and
-#               -IgnoreSkuFilter (match by silicon, not model index) switches, and
-#               now picks the NEWEST driver per device (by catalog dateTime) instead
-#               of first-match. Silicon-keyed so it can't install onto wrong hardware;
-#               anything it can't cover (e.g. NVIDIA dGPU, Intel BT - not in Dell's
-#               catalogs) falls through to the existing Windows Update prompt. The
-#               normal commercial-model pack path and the 1-3 device individual path
-#               are unchanged except for the newest-per-device selection improvement.
+# v1.13.6 - Dell: INT-companion fallback table for drivers that aren't in any
+#           catalog. The INT3480 Visual Sensing Controller / 2D Imaging MCU
+#           (Latitude 7450 camera companion) ships ONLY as a standalone Dell EXE -
+#           it is absent from CatalogPC.cab AND from the full driver pack - so
+#           v1.13.5's collect-then-rank logic correctly resolved nothing and left
+#           the camera for Windows Update (confirmed in log 20260529_141035: the
+#           only VEN+DEV candidate was the Intel Management Engine installer,
+#           score 0, NOT installed). That was the right call given the data, but
+#           it still left the camera unresolved.
+#           Fix: added $intCompanionFallback, a hashtable keyed on the ACPI INT id
+#           (e.g. INT3480) holding known-good standalone Dell driver URLs. When an
+#           INT-companion device has no positive-scoring CatalogPC candidate, the
+#           individual-driver path now consults this table; a hit is queued for
+#           download via a new explicit absolute Url field on the $toDownload
+#           items (the download/extract/install path already handles a normal Dell
+#           EXE - 7-Zip extract then pnputil). INT3480 is pre-populated with the
+#           Intel 2D Imaging MCU VSC driver (WXX55, 73.22000.5.14, A06); SKUs is
+#           left empty so it applies to any model exposing INT3480.
+#           A failed fallback download does NOT trigger the full-pack fallback
+#           (the pack doesn't contain it either) - the device is just left for
+#           Windows Update, and the run still completes. The fallback URL is
+#           recorded by Add-DownloadRecord like any driver, so it appears in the
+#           HTML report's re-downloadable list and the analytics driver_urls.
+#           To cover more models/components, add entries to $intCompanionFallback.
+# v1.13.5 - Dell CatalogPC: collect-then-rank matching for shared VEN/DEV IDs;
+#           correctly handles the INT3480 Visual Sensing Controller / 2D Imaging
+#           MCU camera companion. v1.13.4's INT check looked for the literal
+#           "INT3480" string in the catalog component path/name - but Dell's
+#           CatalogPC entries don't carry the ACPI INT id there, so the search
+#           always failed and fell back to the GPU pack (which shares 8086/7D45),
+#           leaving the camera at ERR 39 and burning 1.5 GB on the wrong driver
+#           (confirmed in field log 20260528_190046: "VEN+DEV fallback" picked
+#           the Intel Graphics pack again).
+#           Fix: the matcher now COLLECTS every VEN+DEV candidate across the whole
+#           catalog and RANKS them. For a device with an INTxxxx ACPI suffix,
+#           candidates are scored by name/path keywords - imaging/sensing/camera/
+#           MCU/IPU/VSC strongly preferred, graphics/display/iris/arc penalised,
+#           and a direct INT-id reference (if present) weighted highest. If no
+#           candidate scores positive (i.e. the catalog has only the GPU entry for
+#           that VEN/DEV and no real companion driver, as on the 7450), the device
+#           is deliberately left UNRESOLVED rather than mis-installing the GPU pack
+#           and falsely reporting success; PromptWindowsUpdate then offers to
+#           resolve it. The standalone VSC driver
+#           (Intel-2D-Imaging-MCU-Visual-Sensing-Controller-Driver_WXX55, A06) is
+#           not published in CatalogPC for SKU 0CC2 at all - it ships only as a
+#           standalone Dell EXE - so neither the individual path nor the full pack
+#           can supply it; surfacing it for Windows Update is the correct outcome.
+#           Devices with no INT suffix keep first-match-wins (unchanged behaviour).
+# v1.13.4 - Dell CatalogPC: INT-component disambiguation for shared VEN/DEV IDs.
+#           Devices like the Intel 2D Imaging / MCU / Visual Sensing Controller
+#           (Latitude 7450, HardwareID VIDEO\VEN_8086&DEV_7D45&...&INT3480) share
+#           their PCI VEN+DEV with the Intel GPU. Previously the CatalogPC lookup
+#           matched the first SoftwareComponent with VEN=8086/DEV=7D45, which was
+#           always the Graphics driver; the VSC driver was never downloaded and the
+#           device remained unresolved (ERR 39) after install.
+#           Fix: the VEN/DEV parser now also captures any trailing &INTxxxx component
+#           ID and stores it on the lookup entry (IntComp field). During catalog
+#           matching, if the winning candidate does not reference that INT string in
+#           its path or component-name, the loop continues searching for a better
+#           match before falling back to the VEN+DEV-only hit. Devices without an
+#           INT suffix are unaffected (IntComp is $null -> old code path runs).
+# v1.13.3 - Dell: form-factor suffix fallback in driver-pack search. The Dell
+#           DriverPackCatalog occasionally lists a model under its base name
+#           only (e.g. "Latitude 5310") with no separate entry for the
+#           convertible variant ("Latitude 5310 2-in-1"), even though the
+#           convertible exists as a real SKU and ships with its own service
+#           tag. Previously Start-DellDriverInstall did a case-insensitive
+#           equality match on the model name with no normalisation beyond
+#           stripping a trailing " Notebook..." or a leading "Dell " - so a
+#           "2-in-1" suffix would cause zero catalog candidates, the function
+#           would return false, and the operator would land on the Dell
+#           support page with nothing installed (observed on Latitude 5310
+#           2-in-1 / SKU 099E with 14 missing devices).
+#           Fix: factored the candidate-collection loop into a scriptblock so
+#           it can be re-run. The primary search (full model string + existing
+#           cleanups) runs first. If it returns zero candidates AND the model
+#           name carries a "2-in-1" suffix (tolerant of "2 in 1", "2in1",
+#           "2-in-1" spacing), the search is retried with the suffix stripped.
+#           The primary search runs first so that when BOTH variants exist in
+#           the catalog the convertible-specific pack still wins (different
+#           chassis -> different touchscreen/digitizer/sensor drivers). Only
+#           the Dell full-pack path is affected: the individual-driver
+#           CatalogPC path (1-3 missing devices) keys off SystemSKUNumber, not
+#           model name, and is unchanged.
 # v1.13.2 - Spreadsheet payload: missing_before_list replaced with driver_urls.
 #           The Google Sheets webhook field "missing_before_list" (the list of
 #           device descriptions present BEFORE the install run) is dropped from
@@ -538,7 +514,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.16.0"
+$SCRIPT_VERSION = "1.13.6"
 
 # =============================================================
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
@@ -987,291 +963,6 @@ function Open-WindowsUpdate {
             Log "WARNING: Could not open system settings - $($_.Exception.Message)"
         }
     }
-}
-
-# =========================
-# WINDOWS UPDATE DRIVER FALLBACK (vendor-pack-free)
-# =========================
-# v1.15.0 - Universal last-resort driver source. Uses the Windows Update Agent
-# (WUA) COM API to search, download and install DRIVER-class updates directly,
-# in-place, with no GUI. This is how machines that have NO enterprise driver
-# pack in their vendor catalog still get fully driver-ed:
-#   * Dell Vostro / consumer Inspiron / G-series (absent from DriverPackCatalog
-#     and not listed under their SystemSKU in CatalogPC)
-#   * white-box / barebones builds with no vendor catalog at all
-#   * any leftover device the vendor pack didn't cover (Wi-Fi, audio, DPTF, GNA,
-#     serial-IO, SM Bus, etc. - all of which Intel publishes to Windows Update)
-#
-# Vendor-agnostic: the only requirement is working Internet. On a fresh image the
-# in-box NIC (or a USB-Ethernet dongle, as on the Vostro 5320 in the field logs)
-# is enough. Unlike Open-WindowsUpdate (which just launches the Settings app and
-# does nothing in headless), this actually installs the drivers programmatically.
-#
-# Returns: [int] number of driver updates successfully installed (0 on none/error).
-function Install-DriversViaWindowsUpdate {
-    if ($script:TestMode) {
-        Log "Windows Update driver search skipped (TestMode dry-run)."
-        return 0
-    }
-    if (Test-Cancelled) { return 0 }
-
-    Log "=== WINDOWS UPDATE: searching for drivers (vendor-pack-free fallback) ==="
-    SetDownload -Pct 0 -Label "Searching Windows Update..."
-
-    try {
-        $session = New-Object -ComObject Microsoft.Update.Session
-        $session.ClientApplicationID = "DriverInstaller"
-    } catch {
-        Log "  Could not create Windows Update session: $($_.Exception.Message)"
-        return 0
-    }
-
-    # Search the WU service for not-installed driver-class updates. ServerSelection
-    # 2 = ssWindowsUpdate forces the public Windows Update service (which carries
-    # OEM/IHV driver packages) even on a box that is otherwise WSUS-managed; if the
-    # assignment isn't honoured we fall back to the default service silently.
-    $searchResult = $null
-    try {
-        $searcher = $session.CreateUpdateSearcher()
-        try { $searcher.ServerSelection = 2 } catch {}
-        try { $searcher.Online = $true } catch {}
-        Log "  Querying Windows Update (IsInstalled=0 and Type='Driver')..."
-        $searchResult = $searcher.Search("IsInstalled=0 and Type='Driver'")
-    } catch {
-        Log "  Windows Update driver search failed: $($_.Exception.Message)"
-        Log "  (Machine may be offline or the Windows Update service is disabled.)"
-        return 0
-    }
-    if (Test-Cancelled) { return 0 }
-
-    $found = @($searchResult.Updates)
-    if ($found.Count -eq 0) {
-        Log "  Windows Update returned no applicable driver updates."
-        return 0
-    }
-    Log "  Windows Update offers $($found.Count) driver update(s):"
-
-    $toInstall = New-Object -ComObject Microsoft.Update.UpdateColl
-    foreach ($u in $found) {
-        Log "    - $($u.Title)"
-        try { if (-not $u.EulaAccepted) { $u.AcceptEula() } } catch {}
-        $null = $toInstall.Add($u)
-    }
-
-    # Download phase
-    SetDownload -Pct 10 -Label "Downloading WU drivers..."
-    SetProgress 75
-    try {
-        $downloader = $session.CreateUpdateDownloader()
-        $downloader.Updates = $toInstall
-        Log "  Downloading $($toInstall.Count) driver update(s)..."
-        $null = $downloader.Download()
-    } catch {
-        Log "  Windows Update download failed: $($_.Exception.Message)"
-        return 0
-    }
-    if (Test-Cancelled) { return 0 }
-
-    $downloaded = New-Object -ComObject Microsoft.Update.UpdateColl
-    foreach ($u in $toInstall) {
-        if ($u.IsDownloaded) { $null = $downloaded.Add($u) }
-        else { Log "    Not downloaded (skipped): $($u.Title)" }
-    }
-    if ($downloaded.Count -eq 0) {
-        Log "  No driver updates downloaded successfully."
-        return 0
-    }
-
-    # Install phase
-    SetExtract -Pct 50 -Label "Installing WU drivers..."
-    SetProgress 85
-    try {
-        $installer = $session.CreateUpdateInstaller()
-        $installer.Updates = $downloaded
-        Log "  Installing $($downloaded.Count) driver update(s)..."
-        $instResult = $installer.Install()
-    } catch {
-        Log "  Windows Update install failed: $($_.Exception.Message)"
-        return 0
-    }
-
-    # Per-update ResultCode: 2 = Succeeded, 3 = SucceededWithErrors
-    $installedCount = 0
-    for ($i = 0; $i -lt $downloaded.Count; $i++) {
-        $u = $downloaded.Item($i)
-        $rc = 0
-        try { $rc = $instResult.GetUpdateResult($i).ResultCode } catch {}
-        if ($rc -eq 2 -or $rc -eq 3) {
-            $installedCount++
-            Log "    Installed: $($u.Title)"
-            $null = $script:AnalyticsInstalledDrivers.Add("WU: $($u.Title)")
-        } else {
-            Log "    Failed (rc=$rc): $($u.Title)"
-        }
-    }
-
-    Log "  Windows Update installed $installedCount driver(s)."
-    if ($instResult.RebootRequired) {
-        Log "  NOTE: a reboot is required to finish applying some Windows Update drivers."
-    }
-    return $installedCount
-}
-
-# =========================
-# MICROSOFT UPDATE CATALOG DRIVER FALLBACK (scrape-by-hardware-ID)
-# =========================
-# v1.15.0 - Final, vendor-agnostic tier, tried only after BOTH the vendor handler
-# and the WUA fallback leave devices unresolved. The Microsoft Update Catalog
-# (catalog.update.microsoft.com) is a public web front-end over the same content
-# CDN, but it surfaces driver packages that the WUA "Type='Driver'" search does
-# NOT return - notably OEM/platform drivers like Intel DPTF / Dynamic Tuning,
-# serial-IO, GNA and similar (exactly the ACPI\INTC* devices left over on the
-# Dell Vostro 5320). We scrape it by hardware ID, resolve the .cab download URL,
-# expand it and pnputil-install. curl.exe is used for both HTTP calls so we avoid
-# the IE-engine HTML-parse and TLS-1.2 pitfalls of Invoke-WebRequest on a fresh
-# image; pnputil only binds INFs that actually match a present device, so a
-# slightly over-broad catalog hit is harmless.
-$script:MsCatalogMaxDrivers = 30   # safety cap on how many catalog cabs to pull
-
-function Get-MsCatalogDriverGuid {
-    # Search the catalog for one hardware-ID term; return the top result's update
-    # GUID, or $null if there are no matches.
-    param([string]$Term)
-    $enc = [uri]::EscapeDataString($Term)
-    $url = "https://www.catalog.update.microsoft.com/Search.aspx?q=$enc"
-    $html = ""
-    try {
-        $html = (& curl.exe --silent --location --max-time 40 --connect-timeout 15 `
-            --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" "$url" 2>$null) -join "`n"
-    } catch { return $null }
-    if (-not $html) { return $null }
-    # Each result row exposes <a id="<GUID>_link" ...>Title</a>; the first is the
-    # catalog's best match for this hardware ID.
-    $m = [regex]::Match($html, '(?is)<a[^>]*id="([0-9a-f\-]{36})_link"[^>]*>')
-    if ($m.Success) { return $m.Groups[1].Value }
-    return $null
-}
-
-function Resolve-MsCatalogDownloadUrls {
-    # POST the update GUID to DownloadDialog.aspx, which echoes the real CDN
-    # download URLs back inside a JS blob. Return the .cab URLs.
-    param([string]$Guid)
-    $body = 'updateIDs=[{"size":0,"languages":"","uidInfo":"' + $Guid + '","updateID":"' + $Guid + '"}]'
-    $bodyFile = Join-Path $env:TEMP "mscat_dl_$Guid.txt"
-    [System.IO.File]::WriteAllText($bodyFile, $body)
-    $resp = ""
-    try {
-        $resp = (& curl.exe --silent --max-time 40 --connect-timeout 15 -X POST `
-            --header "Content-Type: application/x-www-form-urlencoded" `
-            --data "@$bodyFile" `
-            --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" `
-            "https://www.catalog.update.microsoft.com/DownloadDialog.aspx" 2>$null) -join "`n"
-    } catch {}
-    Remove-Item $bodyFile -EA SilentlyContinue
-    $urls = @()
-    foreach ($mm in [regex]::Matches($resp, "(?i)url\s*=\s*'([^']+)'")) {
-        $u = $mm.Groups[1].Value
-        if ($u -match '^https?://' -and $u -match '\.cab(\?|$)') { $urls += $u }
-    }
-    return @($urls | Select-Object -Unique)
-}
-
-function Install-DriversFromMsUpdateCatalog {
-    # Returns [int] number of devices resolved (missing-count delta) by this pass.
-    param([string]$DriverRoot)
-    if ($script:TestMode) { Log "Microsoft Update Catalog skipped (TestMode dry-run)."; return 0 }
-    if (Test-Cancelled) { return 0 }
-
-    Log "=== MS UPDATE CATALOG: scraping drivers by hardware ID (final fallback) ==="
-    SetDownload -Pct 0 -Label "Searching Microsoft Update Catalog..."
-
-    # Enumerate still-missing devices with their hardware + compatible IDs.
-    $missing = @()
-    try {
-        $missing = @(Get-CimInstance Win32_PnPEntity |
-            Where-Object { $_.ConfigManagerErrorCode -ne 0 } |
-            Select-Object Name, DeviceID,
-                @{N='HardwareIDs';E={
-                    try {
-                        $p = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Enum\$($_.DeviceID)" -EA Stop
-                        @(@($p.HardwareID) + @($p.CompatibleIDs)) | Where-Object { $_ }
-                    } catch { @() }
-                }})
-    } catch {
-        Log "  Could not enumerate missing devices: $($_.Exception.Message)"
-        return 0
-    }
-    if ($missing.Count -eq 0) { Log "  No missing devices to resolve."; return 0 }
-
-    # For each device, search by its hardware IDs (most specific first) and take
-    # the top driver result. De-dup GUIDs across devices so we never fetch the
-    # same cab twice.
-    $guidToDevice = [ordered]@{}
-    foreach ($dev in $missing) {
-        if (Test-Cancelled) { return 0 }
-        if ($guidToDevice.Count -ge $script:MsCatalogMaxDrivers) { Log "  Catalog cap ($($script:MsCatalogMaxDrivers)) reached - stopping search."; break }
-
-        # Build an ordered, de-duped term list from this device's hardware AND
-        # compatible IDs (HardwareIDs here already concatenates both). For Intel
-        # ACPI devices the IDs look like ACPI\VEN_INTC&DEV_1055, ACPI\INTC1055
-        # and *INTC1055 - none of which the catalog free-text search reliably
-        # matches, so we ALSO add the bare "INTC1055" token, which is what the
-        # catalog actually indexes for Intel Dynamic Tuning / platform packages.
-        $terms = [System.Collections.Generic.List[string]]::new()
-        foreach ($id in @($dev.HardwareIDs) | Where-Object { $_ }) {
-            if (-not $terms.Contains($id)) { $terms.Add($id) }
-            if ($id -match '(INTC[0-9A-Fa-f]{4})') {
-                $bare = $Matches[1].ToUpper()
-                if (-not $terms.Contains($bare)) { $terms.Add($bare) }
-            }
-        }
-        $terms = @($terms | Select-Object -First 8)
-
-        Log "  Searching catalog for '$($dev.Name)' ($($terms.Count) term(s))..."
-        $hit = $null
-        foreach ($term in $terms) {
-            $g = Get-MsCatalogDriverGuid -Term $term
-            Log "    query: $term  ->  $(if ($g) { $g } else { 'no match' })"
-            Start-Sleep -Milliseconds 400   # be gentle on the catalog endpoint
-            if ($g) { $hit = $g; break }
-        }
-        if (-not $hit) { Log "  '$($dev.Name)' -> no catalog driver found." ; continue }
-        if (-not $guidToDevice.Contains($hit)) { $guidToDevice[$hit] = $dev.Name }
-    }
-
-    if ($guidToDevice.Count -eq 0) { Log "  No catalog drivers matched any missing device."; return 0 }
-    Log "  $($guidToDevice.Count) catalog driver package(s) to fetch."
-
-    $catRoot = Join-Path $DriverRoot "MSCatalog"
-    if (-not (Test-Path $catRoot)) { New-Item -Path $catRoot -ItemType Directory -Force | Out-Null }
-
-    $idx = 0
-    foreach ($guid in @($guidToDevice.Keys)) {
-        if (Test-Cancelled) { break }
-        $idx++
-        $devName = $guidToDevice[$guid]
-        Log "  [$idx/$($guidToDevice.Count)] Resolving download for '$devName'..."
-        $urls = Resolve-MsCatalogDownloadUrls -Guid $guid
-        if (-not $urls -or $urls.Count -eq 0) { Log "    No .cab download URL returned - skipping."; continue }
-        $outFile = Join-Path $catRoot ("mscat_{0}.cab" -f $idx)
-        SetProgress (80 + [int](($idx / $guidToDevice.Count) * 8))
-        if (-not (Invoke-CurlDownload -Url $urls[0] -OutFile $outFile)) { Log "    Download failed - skipping."; continue }
-        if (Test-Cancelled) { break }
-        $extractDir = Join-Path $catRoot ("MSCat_{0}" -f $idx)
-        Start-PackExtraction -PackFile $outFile -DestPath $extractDir -StallLimitSec 120
-    }
-
-    # Install everything extracted - pnputil binds only INFs matching a present
-    # device, so unrelated payloads are no-ops. Measure the missing-count delta
-    # so the return value reflects what actually got fixed.
-    $before = Get-MissingDriverCount
-    foreach ($extractDir in (Get-Item (Join-Path $catRoot "MSCat_*") -EA SilentlyContinue)) {
-        Install-DriversFromPath -BasePath $extractDir.FullName | Out-Null
-    }
-    $after = Get-MissingDriverCount
-    $resolved = [math]::Max(0, $before - $after)
-    Log "  Microsoft Update Catalog resolved $resolved device(s)."
-    return $resolved
 }
 
 
@@ -2823,61 +2514,43 @@ function Start-PackExtraction {
 #
 # Falls back to full pack install if any device has no catalog match.
 # =========================
-
-# v1.15.0 - Resolve a device's PARENT PCI VEN/DEV by walking up the device tree.
-# Some unbound devices expose no PCI ID of their own - e.g. an Intel Integrated
-# Sensor Hub child sensor enumerated on a custom bus as {GUID}\VID_8087&PID_xxxx
-# / ISH_MINIPORT. Such a child is covered by its parent controller's driver
-# package (the ISH PCI host is 8086:51FC, whose Intel Integrated Sensor Solution
-# package carries the child sensor INF). Walking to the nearest ancestor that has
-# a PCI VEN/DEV lets the catalog matcher find that package and bind the child.
-# Returns an array of @{VEN;DEV} (empty if no PCI ancestor found).
-function Get-DeviceParentVenDev {
-    param([string]$InstanceId, [int]$MaxDepth = 5)
-    $current = $InstanceId
-    for ($d = 0; $d -lt $MaxDepth -and $current; $d++) {
-        $parent = $null
-        try {
-            $parent = (Get-PnpDeviceProperty -InstanceId $current -KeyName 'DEVPKEY_Device_Parent' -EA Stop).Data
-        } catch {}
-        if (-not $parent) { break }
-        $hwIds = @()
-        try { $hwIds = @((Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Enum\$parent" -EA Stop).HardwareID) } catch {}
-        $found = @()
-        $seen  = @{}
-        foreach ($id in $hwIds | Where-Object { $_ }) {
-            if ($id -match 'VEN_([0-9A-Fa-f]+)') {
-                $ven = $Matches[1].ToUpper()
-                if ($id -match '(?:^|&)DEV_([0-9A-Fa-f]+)') {
-                    $key = "$ven|$($Matches[1].ToUpper())"
-                    if (-not $seen[$key]) {
-                        $seen[$key] = $true
-                        $found += [PSCustomObject]@{ VEN = $ven; DEV = $Matches[1].ToUpper() }
-                    }
-                }
-            }
-        }
-        if ($found.Count -gt 0) { return $found }   # nearest PCI ancestor wins
-        $current = $parent
-    }
-    return @()
-}
-
 function Start-DellIndividualDriverInstall {
-    param(
-        [string]$DriverRoot, [string]$ServiceTag, [bool]$IsWin11,
-        # v1.14.0 - best-effort mode for consumer/gaming models absent from the
-        # pack catalog: don't abort when a single device can't be matched, install
-        # whatever did match, and (with -IgnoreSkuFilter) match purely by hardware
-        # ID instead of the SystemSKU model index.
-        [switch]$BestEffort,
-        [switch]$IgnoreSkuFilter
-    )
+    param([string]$DriverRoot, [string]$ServiceTag, [bool]$IsWin11)
 
-    if ($BestEffort) {
-        Log "=== DELL: Best-effort individual driver mode (hardware-ID match) ==="
-    } else {
-        Log "=== DELL: Individual driver mode (<=3 missing devices) ==="
+    Log "=== DELL: Individual driver mode (<=3 missing devices) ==="
+
+    # v1.13.6 - INT-companion fallback table.
+    # Some Intel SoC ACPI companion devices (Visual Sensing Controller / 2D
+    # Imaging MCU, the INTxxxx camera companions) share their PCI VEN+DEV with
+    # the GPU and are NOT published in Dell's CatalogPC at all - they ship only
+    # as standalone Dell EXEs. CatalogPC matching (the collect-then-rank logic
+    # below) therefore can never resolve them and correctly leaves them
+    # unresolved. This table provides the known-good standalone driver URL so the
+    # individual-driver path can still install them automatically.
+    #
+    # Keyed on the ACPI INT id (uppercase). Each entry MUST be a direct download
+    # URL to a Dell driver EXE (extracts via 7-Zip like any catalog EXE). The
+    # optional SKUs array scopes an entry to specific SystemSKUNumbers; an empty
+    # SKUs array means "any model with this INT id". When multiple entries match
+    # an INT id, the first SKU-specific match wins, else the first any-SKU entry.
+    #
+    # Maintenance note: these URLs are version-pinned. When Dell supersedes a
+    # driver the old FOLDER path keeps working for a long time, but if a download
+    # 404s the run still completes (device just stays unresolved -> Windows
+    # Update). Update the URL here when you have a newer A-rev on hand.
+    $intCompanionFallback = @{
+        # Intel 2D Imaging / MCU / Visual Sensing Controller (INT3480).
+        # Covers Latitude 7450 (SKU 0CC2) and other Meteor Lake Latitude/Precision
+        # units that expose the camera companion as DISPLAY\INT3480. Leave SKUs
+        # empty so it applies to any model presenting INT3480 - the driver is the
+        # generic Intel VSC package, not model-specific.
+        'INT3480' = @(
+            @{
+                Name = 'Intel 2D Imaging / MCU / Visual Sensing Controller Driver,73.22000.5.14,A06'
+                Url  = 'https://dl.dell.com/FOLDER13137215M/3/Intel-2D-Imaging-MCU-Visual-Sensing-Controller-Driver_WXX55_WIN64_73.22000.5.14_A06_02.EXE'
+                SKUs = @()
+            }
+        )
     }
 
     # Get missing devices and their hardware IDs
@@ -2974,46 +2647,53 @@ function Start-DellIndividualDriverInstall {
                 $dev2 = $Matches[1].ToUpper()
             }
             if ($ven -and $dev2) {
+                # v1.13.4 - also capture trailing &INTxxxx sub-component ID
+                # (e.g. &INT3480 on the Visual Sensing Controller) so the
+                # catalog match loop can prefer the correct entry when multiple
+                # components share the same PCI VEN+DEV pair.
+                $intComp = $null
+                if ($hwId -match '&(INT[0-9A-Fa-f]+)(?:&|$)') { $intComp = $Matches[1].ToUpper() }
+
                 $key = "$ven|$dev2"
                 if (-not $seen[$key]) {
                     $seen[$key] = $true
-                    $devVenDev += [PSCustomObject]@{ VEN = $ven; DEV = $dev2 }
-                    Log "    Parsed VEN=$ven DEV=$dev2 from: $hwId"
+                    $devVenDev += [PSCustomObject]@{ VEN = $ven; DEV = $dev2; IntComp = $intComp }
+                    $intNote = if ($intComp) { " INT=$intComp" } else { "" }
+                    Log "    Parsed VEN=$ven DEV=$dev2$intNote from: $hwId"
                 }
             }
         }
         if ($devVenDev.Count -eq 0) {
-            # v1.15.0 - The device exposes no PCI VEN/DEV of its own (e.g. an Intel
-            # ISH child sensor: {GUID}\VID_8087&PID_xxxx). Walk up to the parent PCI
-            # controller (the ISH host, 8086:51FC) and match THAT - its package
-            # (Intel Integrated Sensor Solution) carries the child INF, so installing
-            # it binds the stranded child.
-            $parentVenDev = Get-DeviceParentVenDev -InstanceId $dev.DeviceID
-            foreach ($pvd in $parentVenDev) {
-                $key = "$($pvd.VEN)|$($pvd.DEV)"
-                if (-not $seen[$key]) {
-                    $seen[$key] = $true
-                    $devVenDev += [PSCustomObject]@{ VEN = $pvd.VEN; DEV = $pvd.DEV }
-                    Log "    '$($dev.Name)' has no PCI ID; matching via parent VEN=$($pvd.VEN) DEV=$($pvd.DEV)"
-                }
-            }
-        }
-        if ($devVenDev.Count -eq 0) {
-            if ($BestEffort) {
-                Log "  No PCI VEN/DEV for '$($dev.Name)' (and no PCI parent) - skipping (best-effort)."
-                $allMatched = $false
-                continue
-            }
             Log "  No PCI VEN/DEV found for '$($dev.Name)' - falling back to full pack."
             $allMatched = $false
             break
         }
 
-        # Collect every catalog driver whose PCIInfo matches this device's VEN/DEV,
-        # then pick the NEWEST by catalog dateTime (v1.14.0). With -IgnoreSkuFilter
-        # the SystemSKU model index is skipped so consumer/gaming models - which Dell
-        # does not list under their SKU - still match by silicon.
-        $deviceMatches = [System.Collections.Generic.List[object]]::new()
+        # v1.13.5 - COLLECT-THEN-RANK matching.
+        # Previously this loop took the FIRST SoftwareComponent whose PCIInfo
+        # matched VEN+DEV and stopped. That breaks when several distinct
+        # components share one VEN+DEV pair - the classic case being Intel SoC
+        # silicon where the GPU and the Visual Sensing Controller / 2D Imaging
+        # MCU (the ACPI INT3480 camera companion) BOTH advertise 8086/7D45.
+        # The GPU entry sorts first, so the camera always lost and stayed ERR 39
+        # (observed on Latitude 7450 / SKU 0CC2: correct driver is the
+        # "Intel 2D Imaging MCU Visual Sensing Controller" pack, FOLDER13137215M,
+        # but the loop kept grabbing the 1.5 GB Graphics pack instead).
+        #
+        # Fix: gather ALL VEN+DEV candidates across the whole catalog, then pick
+        # the best one by a name-based score. When the device carries an INTxxxx
+        # ACPI suffix ($vd.IntComp), components whose name/path indicate an
+        # imaging / sensing / camera / MCU companion are strongly preferred and
+        # graphics/display entries are penalised. Devices with no INT suffix keep
+        # first-match-wins semantics (score is flat, so the first candidate is
+        # taken - identical to the old behaviour).
+
+        # Keyword sets for INT-companion disambiguation
+        $intPreferKw  = @('imaging','visual sensing','sensing controller','vsc','camera','webcam','mcu','ipu','avstream')
+        $intPenalKw   = @('graphics','display','iris','arc','uhd','video')
+
+        $candidates = [System.Collections.Generic.List[object]]::new()
+
         foreach ($component in $cat.SelectNodes("//*[local-name()='SoftwareComponent']")) {
 
             # Must be a driver (DRVR), not firmware
@@ -3029,7 +2709,7 @@ function Start-DellIndividualDriverInstall {
             if (-not $osMatch) { continue }
 
             # Check model compatibility via systemID (matches SystemSKUNumber)
-            if ($systemSKU -and -not $IgnoreSkuFilter) {
+            if ($systemSKU) {
                 $modelMatch = $false
                 foreach ($modelNode in $component.SelectNodes(".//*[local-name()='Model']")) {
                     if ($modelNode.GetAttribute("systemID").ToUpper() -eq $systemSKU) { $modelMatch = $true; break }
@@ -3038,60 +2718,117 @@ function Start-DellIndividualDriverInstall {
             }
 
             # Match hardware ID via PCIInfo deviceID + vendorID attributes
-            $hwMatch = $false
+            $hit = $false
             foreach ($pciNode in $component.SelectNodes(".//*[local-name()='PCIInfo']")) {
                 $catVen = $pciNode.GetAttribute("vendorID").ToUpper()
                 $catDev = $pciNode.GetAttribute("deviceID").ToUpper()
                 foreach ($vd in $devVenDev) {
-                    if ($vd.VEN -eq $catVen -and $vd.DEV -eq $catDev) { $hwMatch = $true; break }
+                    if ($vd.VEN -eq $catVen -and $vd.DEV -eq $catDev) { $hit = $true; break }
                 }
-                if ($hwMatch) { break }
+                if ($hit) { break }
             }
-            if (-not $hwMatch) { continue }
+            if (-not $hit) { continue }
 
             $driverPath = $component.GetAttribute("path")
-            if (-not $driverPath) { continue }
             $driverName = ""
             try { $driverName = $component.SelectSingleNode("*[local-name()='Name']/*[local-name()='Display']").InnerText } catch {}
-            $driverDate = [datetime]::MinValue
-            try { $driverDate = [datetime]::Parse($component.GetAttribute("dateTime")) } catch {}
-            $deviceMatches.Add([PSCustomObject]@{ Path = $driverPath; Name = $driverName; Date = $driverDate }) | Out-Null
+
+            $candidates.Add([PSCustomObject]@{
+                DriverName = $driverName
+                Path       = $driverPath
+            })
         }
 
-        if ($deviceMatches.Count -eq 0) {
-            if ($BestEffort) {
-                Log "  No CatalogPC match for '$($dev.Name)' - skipping (best-effort; try Windows Update)."
-                $allMatched = $false
-                continue
-            }
+        if ($candidates.Count -eq 0) {
             Log "  No CatalogPC match for '$($dev.Name)' - will fall back to full pack."
             $allMatched = $false
             break
         }
 
-        $best = $deviceMatches | Sort-Object Date -Descending | Select-Object -First 1
-        Log "  Matched '$($dev.Name)'"
-        Log "    Driver : $($best.Name)"
-        Log "    Path   : $($best.Path)"
-        if (-not ($toDownload | Where-Object { $_.Path -eq $best.Path })) {
-            $toDownload.Add([PSCustomObject]@{
-                DeviceName = $dev.Name
-                DriverName = $best.Name
-                Path       = $best.Path
-            })
+        # Does this device carry an INTxxxx ACPI companion suffix?
+        $devInt = ($devVenDev | Where-Object { $_.IntComp } | Select-Object -First 1).IntComp
+
+        $chosen = $null
+        if ($devInt) {
+            # Score every candidate; higher = more likely the INT companion driver.
+            $best = $null; $bestScore = [int]::MinValue
+            foreach ($c in $candidates) {
+                $hay = ("{0} {1}" -f $c.DriverName, $c.Path).ToLower()
+                $score = 0
+                # Direct INT-id reference in name/path is the strongest signal
+                if ($hay -match [regex]::Escape($devInt.ToLower())) { $score += 100 }
+                foreach ($kw in $intPreferKw) { if ($hay.Contains($kw)) { $score += 10 } }
+                foreach ($kw in $intPenalKw)  { if ($hay.Contains($kw)) { $score -= 10 } }
+                if ($score -gt $bestScore) { $bestScore = $score; $best = $c }
+            }
+            $chosen = $best
+            if ($bestScore -le 0) {
+                # No candidate looks like an imaging/sensing companion. The
+                # correct INT driver is NOT in CatalogPC for this SKU - do not
+                # silently install the GPU pack and report success. Surface it
+                # so the operator (or Windows Update) can resolve it instead.
+                Log "  '$($dev.Name)' [$devInt]: VEN+DEV candidates exist but none are an imaging/sensing companion driver."
+                Log "    Best candidate was '$($best.DriverName)' (score $bestScore) - NOT installing it for this device."
+                Log "    This INT companion driver is not in CatalogPC for SKU $systemSKU; leaving for Windows Update / manual install."
+                $chosen = $null
+            }
+        } else {
+            # No INT suffix - original first-match-wins behaviour.
+            $chosen = $candidates[0]
+        }
+
+        if ($chosen) {
+            Log "  Matched '$($dev.Name)'"
+            Log "    Driver : $($chosen.DriverName)"
+            Log "    Path   : $($chosen.Path)"
+            if ($chosen.Path -and -not ($toDownload | Where-Object { $_.Path -eq $chosen.Path })) {
+                $toDownload.Add([PSCustomObject]@{
+                    DeviceName = $dev.Name
+                    DriverName = $chosen.DriverName
+                    Path       = $chosen.Path
+                    Url        = $null
+                })
+            }
+        } else {
+            # v1.13.6 - INT companion not resolvable from CatalogPC. Before giving
+            # up, consult the INT-companion fallback table for a known standalone
+            # driver URL (these devices ship only as standalone Dell EXEs and are
+            # never in CatalogPC or the full pack). If we have an entry, queue it
+            # for download with an explicit absolute Url. Otherwise leave the
+            # device unresolved so PromptWindowsUpdate can pick it up - we still do
+            # NOT fall back to the multi-GB full pack, which doesn't contain it.
+            $fb = $null
+            if ($devInt -and $intCompanionFallback.ContainsKey($devInt)) {
+                $entries = @($intCompanionFallback[$devInt])
+                # Prefer a SKU-specific entry, else the first any-SKU entry.
+                $fb = $entries | Where-Object { $_.SKUs -and ($_.SKUs -contains $systemSKU) } | Select-Object -First 1
+                if (-not $fb) {
+                    $fb = $entries | Where-Object { -not $_.SKUs -or $_.SKUs.Count -eq 0 } | Select-Object -First 1
+                }
+            }
+
+            if ($fb) {
+                Log "  Matched '$($dev.Name)' [INT-companion fallback table: $devInt]"
+                Log "    Driver : $($fb.Name)"
+                Log "    URL    : $($fb.Url)"
+                if (-not ($toDownload | Where-Object { $_.Url -eq $fb.Url })) {
+                    $toDownload.Add([PSCustomObject]@{
+                        DeviceName = $dev.Name
+                        DriverName = $fb.Name
+                        Path       = $null
+                        Url        = $fb.Url
+                    })
+                }
+            } else {
+                Log "  '$($dev.Name)' [$devInt]: no CatalogPC candidate and no fallback-table entry - leaving for Windows Update / manual install."
+                $script:DellIntUnresolved = $true
+            }
         }
     }
 
-    # In best-effort mode a device that couldn't be matched is skipped, not fatal -
-    # we install whatever DID match. Only the strict (model-filtered) path bails so
-    # it can fall back to the full driver pack.
-    if (-not $allMatched -and -not $BestEffort) { return $null }
+    if (-not $allMatched) { return $null }
 
     if ($toDownload.Count -eq 0) {
-        if ($BestEffort) {
-            Log "  Best-effort: no individual drivers matched by hardware ID."
-            return $null
-        }
         Log "  No drivers to download - all devices may already be covered."
         return $true
     }
@@ -3102,10 +2839,18 @@ function Start-DellIndividualDriverInstall {
     # v1.11.0 - PARALLEL DOWNLOAD PHASE for Dell CatalogPC individual drivers.
     # Same shape as HP: build manifest, batch-download, then iterate survivors
     # serially for extraction (extraction needs disk I/O exclusivity per file).
+    # v1.13.6 - items may carry an explicit absolute Url (INT-companion fallback
+    # table) instead of a catalog-relative Path. Honor Url when present; otherwise
+    # build the URL from the catalog Path as before.
     $dlItems = New-Object 'System.Collections.Generic.List[hashtable]'
     foreach ($drv in $toDownload) {
-        $driverUrl  = "https://downloads.dell.com/$($drv.Path)"
-        $driverFile = Join-Path $DriverRoot ([System.IO.Path]::GetFileName($drv.Path))
+        if ($drv.Url) {
+            $driverUrl  = $drv.Url
+            $driverFile = Join-Path $DriverRoot ([System.IO.Path]::GetFileName(([uri]$drv.Url).AbsolutePath))
+        } else {
+            $driverUrl  = "https://downloads.dell.com/$($drv.Path)"
+            $driverFile = Join-Path $DriverRoot ([System.IO.Path]::GetFileName($drv.Path))
+        }
         $dlItems.Add(@{
             Url     = $driverUrl
             OutFile = $driverFile
@@ -3116,29 +2861,56 @@ function Start-DellIndividualDriverInstall {
     $dlResults = Invoke-CurlDownloadParallel -Items $dlItems
     if (Test-Cancelled) { return $false }
 
+    # v1.13.6 - a failed download of a FALLBACK-TABLE item (absolute Url) must NOT
+    # trigger the full-pack fallback: the full pack doesn't contain it, so that
+    # would mean a needless multi-GB download to still not get the driver. Treat a
+    # fallback-item failure as "leave unresolved" (PromptWindowsUpdate handles it)
+    # and drop it from the download set. A failed CATALOG item keeps the original
+    # behaviour (return $null -> full pack), since the pack genuinely may cover it.
     $allDownloaded = $true
+    $failedUrls = @{}
     foreach ($r in $dlResults) {
         if (-not $r.Success) {
-            if ($BestEffort) {
-                Log "  Download failed for '$($r.Item.Label)': $($r.ErrorMsg) - skipping (best-effort)."
+            $isFallback = [bool](@($toDownload | Where-Object { $_.Url -and $_.Url -eq $r.Item.Url }).Count)
+            if ($isFallback) {
+                Log "  Fallback-table download failed for '$($r.Item.Label)': $($r.ErrorMsg) - leaving device for Windows Update."
+                $failedUrls[$r.Item.Url] = $true
+                $script:DellIntUnresolved = $true
             } else {
                 Log "  Download failed for '$($r.Item.Label)': $($r.ErrorMsg) - falling back to full pack."
+                $allDownloaded = $false
             }
-            $allDownloaded = $false
         }
     }
-    # Strict path treats any failed download as fatal (fall back to full pack);
-    # best-effort installs whatever downloaded OK.
-    if (-not $allDownloaded -and -not $BestEffort) { return $null }
+    if (-not $allDownloaded) { return $null }
+
+    # Drop any fallback items that failed to download so the extract/install
+    # phase below doesn't try to process a missing file.
+    if ($failedUrls.Count -gt 0) {
+        $surv = [System.Collections.Generic.List[object]]::new()
+        foreach ($drv in $toDownload) {
+            if ($drv.Url -and $failedUrls.ContainsKey($drv.Url)) { continue }
+            $surv.Add($drv)
+        }
+        $toDownload = $surv
+        if ($toDownload.Count -eq 0) {
+            Log "  All queued individual drivers were fallback items that failed - nothing to install."
+            return $true
+        }
+    }
 
     # SERIAL EXTRACT PHASE (one extract dir per file - reuses indexing convention)
     $i = 0
     foreach ($drv in $toDownload) {
         $i++
         if (Test-Cancelled) { return $false }
-        $driverFile  = Join-Path $DriverRoot ([System.IO.Path]::GetFileName($drv.Path))
-        # A failed best-effort download leaves no file - skip it.
-        if (-not (Test-Path $driverFile)) { continue }
+        # v1.13.6 - derive filename from explicit Url when present, else catalog Path.
+        $fileName = if ($drv.Url) {
+            [System.IO.Path]::GetFileName(([uri]$drv.Url).AbsolutePath)
+        } else {
+            [System.IO.Path]::GetFileName($drv.Path)
+        }
+        $driverFile  = Join-Path $DriverRoot $fileName
         $extractPath = Join-Path $DriverRoot "Dell_Individual_$i"
         Log "  Extracting [$i/$($toDownload.Count)]: $($drv.DriverName)..."
         SetProgress (40 + [int](($i / $toDownload.Count) * 20))
@@ -3258,82 +3030,77 @@ function Start-DellDriverInstall {
         return $false
     }
 
+    # Build primary search token list (exact model + light cleanups).
     $searchNames = @()
     if ($ModelName) {
         $searchNames += $ModelName
         $searchNames += ($ModelName -replace '\s+Notebook.*$','')
         $searchNames += ($ModelName -replace '^Dell\s+','')
-        $searchNames = $searchNames | Select-Object -Unique | Where-Object { $_.Length -gt 3 }
+        $searchNames = @($searchNames | Select-Object -Unique | Where-Object { $_.Length -gt 3 })
     }
     Log "Searching catalog - model tokens: $($searchNames -join ' | ')"
 
-    $candidates = @()
-    foreach ($pkg in $cat.SelectNodes("//*[local-name()='DriverPackage']")) {
-        $modelMatched = $false
-        foreach ($modelNode in $pkg.SelectNodes(".//*[local-name()='Model']")) {
-            $nameAttr = $modelNode.GetAttribute("name")
-            foreach ($tok in $searchNames) {
-                if ($nameAttr -ieq $tok) { $modelMatched = $true; break }
+    # Reusable matcher: enumerates DriverPackage nodes and returns candidates
+    # whose <Model name="..."> matches any token (case-insensitive equality).
+    # Defined as a scriptblock so we can re-run it with a broader token list
+    # if the first pass returns nothing.
+    $findCandidates = {
+        param([string[]]$tokens)
+        $out = @()
+        foreach ($pkg in $cat.SelectNodes("//*[local-name()='DriverPackage']")) {
+            $modelMatched = $false
+            foreach ($modelNode in $pkg.SelectNodes(".//*[local-name()='Model']")) {
+                $nameAttr = $modelNode.GetAttribute("name")
+                foreach ($tok in $tokens) {
+                    if ($nameAttr -ieq $tok) { $modelMatched = $true; break }
+                }
+                if ($modelMatched) { break }
             }
-            if ($modelMatched) { break }
-        }
-        if (-not $modelMatched) { continue }
+            if (-not $modelMatched) { continue }
 
-        $supportsWin11 = $false; $supportsWin10 = $false
-        foreach ($osNode in $pkg.SelectNodes(".//*[local-name()='OperatingSystem']")) {
-            $osDisp = ""
-            try { $osDisp = $osNode.SelectSingleNode("*[local-name()='Display']").InnerText } catch {}
-            if ($osDisp -match "(?i)windows 11") { $supportsWin11 = $true }
-            if ($osDisp -match "(?i)windows 10") { $supportsWin10 = $true }
+            $supportsWin11 = $false; $supportsWin10 = $false
+            foreach ($osNode in $pkg.SelectNodes(".//*[local-name()='OperatingSystem']")) {
+                $osDisp = ""
+                try { $osDisp = $osNode.SelectSingleNode("*[local-name()='Display']").InnerText } catch {}
+                if ($osDisp -match "(?i)windows 11") { $supportsWin11 = $true }
+                if ($osDisp -match "(?i)windows 10") { $supportsWin10 = $true }
+            }
+            $pkgName = ""
+            try { $pkgName = $pkg.SelectSingleNode("*[local-name()='Name']/*[local-name()='Display']").InnerText } catch {}
+            $pkgPath = $pkg.GetAttribute("path")
+            $out += [PSCustomObject]@{ Path = $pkgPath; DisplayName = $pkgName; Win11 = $supportsWin11; Win10 = $supportsWin10 }
+            Log "  Candidate: $pkgName  [W11=$supportsWin11 W10=$supportsWin10]"
         }
-        $pkgName = ""
-        try { $pkgName = $pkg.SelectSingleNode("*[local-name()='Name']/*[local-name()='Display']").InnerText } catch {}
-        $pkgPath = $pkg.GetAttribute("path")
-        $candidates += [PSCustomObject]@{ Path = $pkgPath; DisplayName = $pkgName; Win11 = $supportsWin11; Win10 = $supportsWin10 }
-        Log "  Candidate: $pkgName  [W11=$supportsWin11 W10=$supportsWin10]"
+        ,$out
+    }
+
+    $candidates = & $findCandidates $searchNames
+
+    # v1.13.3 - form-factor suffix fallback. Dell catalogs occasionally list a
+    # model under its base name only (e.g. "Latitude 5310") with no separate
+    # entry for the convertible variant ("Latitude 5310 2-in-1"), even though
+    # the convertible exists as a real SKU. If the primary search yielded no
+    # candidates AND the model name carries a form-factor suffix, retry with
+    # the suffix stripped. The primary search runs first so that when BOTH
+    # variants exist in the catalog the convertible-specific pack still wins
+    # (different chassis -> different touchscreen/digitizer/sensor drivers).
+    if ($candidates.Count -eq 0 -and $ModelName -match '(?i)\s+2[\s-]?in[\s-]?1\b') {
+        $stripped = ($ModelName -replace '(?i)\s+2[\s-]?in[\s-]?1\b','').Trim()
+        if ($stripped -and $stripped.Length -gt 3 -and $stripped -ne $ModelName) {
+            Log "No match for '$ModelName' - retrying without form-factor suffix: '$stripped'"
+            $fallbackNames = @($stripped)
+            $fallbackNames += ($stripped -replace '\s+Notebook.*$','')
+            $fallbackNames += ($stripped -replace '^Dell\s+','')
+            $fallbackNames = @($fallbackNames | Select-Object -Unique | Where-Object { $_.Length -gt 3 })
+            Log "Fallback search tokens: $($fallbackNames -join ' | ')"
+            $candidates = & $findCandidates $fallbackNames
+        }
     }
 
     if ($candidates.Count -eq 0) {
         Log "No driver pack found in DriverPackCatalog for '$ModelName'."
-        Log "  Consumer / gaming Dell models (G-series, consumer Inspiron, etc.) are not"
-        Log "  published in the enterprise DriverPackCatalog, nor under their SystemSKU in"
-        Log "  CatalogPC. A best-effort match by hardware ID can still cover chipset / audio /"
-        Log "  LAN; remaining devices (e.g. GPU, Bluetooth) are left to Windows Update."
-
-        # v1.14.0 - prompt the operator to attempt a best-effort hardware-ID match
-        # before giving up. Headless has no user, so auto-yes (the match is silicon-
-        # keyed and cannot install onto wrong hardware).
-        $tryIndividual = $false
-        if ($script:Headless) {
-            Log "  Headless: attempting best-effort hardware-ID match automatically."
-            $tryIndividual = $true
-        } else {
-            $ans = [System.Windows.Forms.MessageBox]::Show(
-                "No Dell driver pack exists for '$ModelName' (this is a consumer/gaming model).`n`n" +
-                "Attempt a best-effort driver match by hardware ID instead?`n`n" +
-                "Yes = match & install Dell chipset/audio/LAN drivers for this machine's`n" +
-                "        hardware (anything left over can be found via Windows Update)`n" +
-                "No  = just open the Dell support page for this service tag",
-                "No Driver Pack Found", "YesNo", "Question")
-            if ($ans -eq [System.Windows.Forms.DialogResult]::Yes) { $tryIndividual = $true }
-        }
-
-        if ($tryIndividual) {
-            $indiv = Start-DellIndividualDriverInstall -DriverRoot $DriverRoot -ServiceTag $serviceTag -IsWin11 $isWin11 -BestEffort -IgnoreSkuFilter
-            if ($indiv -eq $true) { return $true }
-            Log "  Best-effort individual match did not install any drivers."
-        }
-
-        # v1.15.0 - Do NOT auto-open the Dell support page here. This branch runs
-        # during the vendor phase, BEFORE the universal Windows Update + Microsoft
-        # Update Catalog fallbacks in Start-Install - which on this machine go on
-        # to install most/all of the missing drivers. Launching a browser mid-run
-        # (and before the fallbacks even try) is premature and surprising. We just
-        # record the URL as a manual last resort; the end-of-run flow still offers
-        # Windows Update if anything is genuinely left unresolved.
-        Log "  No Dell pack and no hardware-ID match. Leaving remaining devices to"
-        Log "  the Windows Update / Microsoft Update Catalog fallbacks."
-        Log "  Manual last resort (Dell support): https://www.dell.com/support/home/en-us/product-support/servicetag/$serviceTag/drivers"
+        Log "Opening Dell support page..."
+        Start-Process "https://www.dell.com/support/home/en-us/product-support/servicetag/$serviceTag/drivers"
         return $false
     }
 
@@ -5761,445 +5528,6 @@ function Start-MicrosoftSurfaceDriverInstall {
 }
 
 # =========================
-# DYNABOOK  (formerly Toshiba)
-#
-# Dynabook does NOT publish a Dell/HP/Lenovo-style "model -> one driver pack"
-# catalog. It publishes a WSUS/SCUP "SystemsManagementCatalog" CAB on the
-# Americas content server:
-#   https://content.us.dynabook.com/content/support/downloads/Dynabook_DriverPack_Catalog.cab
-# Inside is a flat list of ~627 <SoftwareDistributionPackage> entries. Each is a
-# self-contained, self-extracting SILENT .exe driver installer hosted on the same
-# content server, gated by a WSUS <IsInstallable> applicability rule built from:
-#   - <bar:WmiQuery> on Win32_ComputerSystem Manufacturer / Model / SystemSKUNumber
-#       => which MACHINE the package targets (LIKE '%token%' = case-insensitive substring)
-#   - <bar:WmiQuery> on Win32_PnPEntity DeviceID / Name
-#       => which DEVICE must be present. Honouring this is essential: matching on
-#          model alone pulls 1.8-4.4 GB per model (incl. ~1 GB GPU packs the unit
-#          may not even have). Filtering by present hardware collapses that.
-#   - <bar:WindowsVersion>  => target OS build (EqualTo / GreaterThanOrEqualTo / LessThan ...)
-#   - <bar:Processor Architecture="9">  => amd64
-# combined with <lar:And> / <lar:Or>. We evaluate that boolean tree against the
-# live machine, de-dupe matches to the newest version per driver, then download
-# each .exe and run it with its catalog-declared <cmd:CommandLineInstallerData>
-# Program + Arguments and ReturnCode success set. Closest existing analogue is the
-# Lenovo consumer-catalog path. Catalog is Americas-only (the only public
-# machine-readable one); the .exe payloads are region-neutral. Older Toshiba-
-# branded units are covered too - those packages OR Dynabook/TOSHIBA in their rule.
-# =========================
-
-$script:DynabookCatalogUrl = "https://content.us.dynabook.com/content/support/downloads/Dynabook_DriverPack_Catalog.cab"
-
-# Evaluate a single <bar:WmiQuery> WqlQuery string against the live machine.
-# A WQL "where A like x or B like y" is a flat OR, so we OR all LIKE clauses.
-function Test-DynabookWqlMatch {
-    param([string]$Query, [pscustomobject]$Ctx)
-    if ([string]::IsNullOrWhiteSpace($Query)) { return $true }
-    $q     = $Query.ToLower()
-    $table = if ($q -match 'from\s+(\w+)') { $Matches[1] } else { '' }
-    $isPnp = $table -like '*pnpentity*'
-    $clauses = [regex]::Matches($q, "(\w+)\s+like\s+'%(.*?)%'")
-    if ($clauses.Count -eq 0) { return $true }
-    foreach ($c in $clauses) {
-        $field = $c.Groups[1].Value
-        # WQL escapes a literal backslash as '\\' - collapse it back so the
-        # pattern (e.g. usb\vid_2c7c&pid_012f) matches a live DeviceID.
-        $pat = $c.Groups[2].Value -replace '\\\\', '\'
-        if ([string]::IsNullOrEmpty($pat)) { continue }
-        if ($isPnp) {
-            foreach ($d in $Ctx.PnpIds)   { if ($d.Contains($pat)) { return $true } }
-            foreach ($n in $Ctx.PnpNames) { if ($n.Contains($pat)) { return $true } }
-        } elseif ($field -eq 'manufacturer')    { if ($Ctx.Manufacturer.Contains($pat)) { return $true } }
-        elseif   ($field -eq 'systemskunumber') { if ($Ctx.Sku.Contains($pat))          { return $true } }
-        elseif   ($field -eq 'model')           { if ($Ctx.Model.Contains($pat))         { return $true } }
-        else { if ($Ctx.Model.Contains($pat) -or $Ctx.Sku.Contains($pat)) { return $true } }
-    }
-    return $false
-}
-
-# Evaluate a <bar:WindowsVersion> applicability node against the live OS.
-function Test-DynabookWinVer {
-    param([System.Xml.XmlElement]$Node, [pscustomobject]$Ctx)
-    $comp = $Node.GetAttribute('Comparison'); if (-not $comp) { $comp = 'EqualTo' }
-    $bn = $Node.GetAttribute('BuildNumber')
-    if ($bn) {
-        $b = [int]$bn
-        $ok = switch ($comp) {
-            'EqualTo'              { $Ctx.Build -eq $b }
-            'GreaterThanOrEqualTo' { $Ctx.Build -ge $b }
-            'GreaterThan'          { $Ctx.Build -gt $b }
-            'LessThan'             { $Ctx.Build -lt $b }
-            'LessThanOrEqualTo'    { $Ctx.Build -le $b }
-            default                { $Ctx.Build -eq $b }
-        }
-        if (-not $ok) { return $false }
-    }
-    $mj = $Node.GetAttribute('MajorVersion')
-    if ($mj -ne '' -and [int]$mj -ne $Ctx.OsMajor) { return $false }
-    $mn = $Node.GetAttribute('MinorVersion')
-    if ($mn -ne '' -and [int]$mn -ne $Ctx.OsMinor) { return $false }
-    $pt = $Node.GetAttribute('ProductType')
-    if ($pt -ne '' -and [int]$pt -ne $Ctx.ProductType) { return $false }
-    return $true
-}
-
-# Recursively evaluate an applicability sub-tree (<lar:And>/<lar:Or>/<lar:Not>
-# wrapping WmiQuery / WindowsVersion / Processor leaves).
-function Test-DynabookRuleNode {
-    param([System.Xml.XmlElement]$Node, [pscustomobject]$Ctx)
-    switch ($Node.LocalName) {
-        'And' {
-            foreach ($c in $Node.ChildNodes) {
-                if ($c -is [System.Xml.XmlElement]) {
-                    if (-not (Test-DynabookRuleNode -Node $c -Ctx $Ctx)) { return $false }
-                }
-            }
-            return $true
-        }
-        'Or' {
-            foreach ($c in $Node.ChildNodes) {
-                if ($c -is [System.Xml.XmlElement]) {
-                    if (Test-DynabookRuleNode -Node $c -Ctx $Ctx) { return $true }
-                }
-            }
-            return $false
-        }
-        'Not' {
-            foreach ($c in $Node.ChildNodes) {
-                if ($c -is [System.Xml.XmlElement]) {
-                    return (-not (Test-DynabookRuleNode -Node $c -Ctx $Ctx))
-                }
-            }
-            return $true
-        }
-        'WmiQuery'       { return (Test-DynabookWqlMatch -Query $Node.GetAttribute('WqlQuery') -Ctx $Ctx) }
-        'WindowsVersion' { return (Test-DynabookWinVer -Node $Node -Ctx $Ctx) }
-        'Processor' {
-            $a = $Node.GetAttribute('Architecture')
-            if     ($a -eq '9')  { return $Ctx.Is64 }       # amd64
-            elseif ($a -eq '12') { return $Ctx.IsArm64 }    # arm64
-            else                 { return $true }           # x86 / unspecified -> don't block
-        }
-        # FileExists (2 packages) and any unknown leaf: be permissive so we never
-        # wrongly suppress a driver the machine genuinely needs.
-        default { return $true }
-    }
-}
-
-# Run a single Dynabook SCUP installer .exe silently, pumping the UI/spinners
-# and honouring cancellation. Mirrors Invoke-LenovoPackageCommand.
-function Invoke-DynabookInstaller {
-    param([string]$ExePath, [string]$Arguments, [string]$WorkingDir, [int]$TimeoutSec = 1800)
-    try {
-        $psi                  = New-Object System.Diagnostics.ProcessStartInfo
-        $psi.FileName         = $ExePath
-        $psi.Arguments        = $Arguments
-        $psi.WorkingDirectory = $WorkingDir
-        $psi.UseShellExecute  = $false
-        $psi.CreateNoWindow   = $true
-        $proc                 = New-Object System.Diagnostics.Process
-        $proc.StartInfo       = $psi
-        $proc.Start() | Out-Null
-
-        $deadline = (Get-Date).AddSeconds($TimeoutSec)
-        while (-not $proc.HasExited) {
-            Start-Sleep -Milliseconds 500
-            Step-AllSpinners
-            [System.Windows.Forms.Application]::DoEvents()
-            if ((Get-Date) -gt $deadline) {
-                Log "  WARNING: installer exceeded $TimeoutSec s - killing."
-                try { $proc.Kill() } catch {}
-                return -9999
-            }
-            if ($script:CancelRequested) {
-                try { $proc.Kill() } catch {}
-                return -9998
-            }
-        }
-        return $proc.ExitCode
-    } catch {
-        Log "  Installer exec error: $($_.Exception.Message)"
-        return -9997
-    }
-}
-
-function Start-DynabookDriverInstall {
-    param([string]$DriverRoot, [string]$ModelName)
-
-    Log "=== DYNABOOK: Starting automated driver install ==="
-    SetDownload -Pct 0 -Label "Waiting..."
-    SetExtract  -Pct 0 -Label "Waiting..."
-
-    # --- live machine context (everything the applicability rules can query) ---
-    $cs = $null; try { $cs = Get-CimInstance Win32_ComputerSystem } catch {}
-    $sku = ""; if ($cs -and $cs.SystemSKUNumber) { $sku = $cs.SystemSKUNumber.Trim() }
-    $modelLive = if ($ModelName) { $ModelName } elseif ($cs) { $cs.Model.Trim() } else { "" }
-    $manLive   = if ($cs -and $cs.Manufacturer) { $cs.Manufacturer.Trim() } else { "Dynabook" }
-    try { $script:AnalyticsSerial = (Get-CimInstance Win32_BIOS).SerialNumber.Trim() } catch {}
-    Log "Model      : $modelLive"
-    Log "SystemSKU  : $(if ($sku) { $sku } else { '(empty)' })"
-
-    $os = $null; try { $os = Get-CimInstance Win32_OperatingSystem } catch {}
-    $build = 0; if ($os) { try { $build = [int]$os.BuildNumber } catch {} }
-    $osMajor = 10; $osMinor = 0; $prodType = 1
-    if ($os) {
-        try { $v = [version]$os.Version; $osMajor = $v.Major; $osMinor = $v.Minor } catch {}
-        try { $prodType = [int]$os.ProductType } catch {}
-    }
-    Log "OS         : build $build ($(if ($build -ge 22000) { 'Windows 11' } else { 'Windows 10' }))"
-
-    # Snapshot every PnP device once (DeviceID + Name, lowercased) so the
-    # device-present rules can be evaluated without re-querying WMI per package.
-    $pnpIds   = New-Object System.Collections.Generic.List[string]
-    $pnpNames = New-Object System.Collections.Generic.List[string]
-    try {
-        foreach ($p in Get-CimInstance Win32_PnPEntity) {
-            if ($p.DeviceID) { $pnpIds.Add($p.DeviceID.ToLower()) | Out-Null }
-            if ($p.Name)     { $pnpNames.Add($p.Name.ToLower())   | Out-Null }
-        }
-    } catch { Log "  WARNING: could not enumerate PnP devices - $($_.Exception.Message)" }
-    Log "PnP devices: $($pnpIds.Count)"
-
-    $ctx = [PSCustomObject]@{
-        Manufacturer = $manLive.ToLower()
-        Model        = $modelLive.ToLower()
-        Sku          = $sku.ToLower()
-        Build        = $build
-        OsMajor      = $osMajor
-        OsMinor      = $osMinor
-        ProductType  = $prodType
-        Is64         = [Environment]::Is64BitOperatingSystem
-        IsArm64      = ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64')
-        PnpIds       = $pnpIds
-        PnpNames     = $pnpNames
-    }
-
-    if (-not (Test-Path $DriverRoot)) { New-Item -ItemType Directory -Path $DriverRoot -Force | Out-Null }
-
-    # --- download + expand the catalog CAB ---
-    Log "Downloading Dynabook driver pack catalog..."
-    SetExtract -Pct 5 -Label "Downloading catalog..."
-    SetProgress 8
-    $catCab = Join-Path $env:TEMP "Dynabook_DriverPack_Catalog.cab"
-    Remove-Item $catCab -EA SilentlyContinue
-    if (-not (Invoke-CurlDownload -Url $script:DynabookCatalogUrl -OutFile $catCab)) {
-        Log "Failed to download Dynabook catalog from $script:DynabookCatalogUrl"
-        return $false
-    }
-    if (Test-Cancelled) { return $false }
-
-    # Sanity: real CAB starts with the "MSCF" magic. CDN edges sometimes return a
-    # small HTML error body with a 200 status.
-    $magic = $null
-    try {
-        $fs = [System.IO.File]::OpenRead($catCab)
-        $buf = New-Object byte[] 4; [void]$fs.Read($buf, 0, 4); $fs.Close()
-        $magic = -join ($buf | ForEach-Object { [char]$_ })
-    } catch {}
-    if ($magic -ne 'MSCF') {
-        Log "Dynabook catalog download isn't a CAB (magic='$magic', expected 'MSCF')."
-        return $false
-    }
-
-    $catDir = Join-Path $env:TEMP "Dynabook_Catalog"
-    if (Test-Path $catDir) { Remove-Item $catDir -Recurse -Force -EA SilentlyContinue }
-    New-Item -ItemType Directory -Path $catDir -Force | Out-Null
-    $xmlName = "Dynabook_DriverPack_Catalog.xml"
-    $catXml  = Join-Path $catDir $xmlName
-
-    Log "Extracting catalog XML..."
-    SetExtract -Pct 12 -Label "Extracting catalog..."
-
-    # expand.exe is fussy about arg passing; use Start-Process with a split arg
-    # array (same approach as the HP catalog path). The CAB also holds 600+ .cer
-    # files we don't want, so filter to just the XML.
-    function _DynaExpand {
-        param([string[]]$ExpArgs)
-        $logf = Join-Path $env:TEMP "dynabook_expand.log"
-        Remove-Item $logf -EA SilentlyContinue
-        try {
-            $p = Start-Process -FilePath "expand.exe" -ArgumentList $ExpArgs `
-                    -NoNewWindow -Wait -PassThru -RedirectStandardOutput $logf -EA Stop
-            if (Test-Path $logf) {
-                foreach ($l in (Get-Content $logf)) { Log "    expand: $l" }
-                Remove-Item $logf -EA SilentlyContinue
-            }
-            return $p.ExitCode
-        } catch { Log "    expand error: $($_.Exception.Message)"; return -1 }
-    }
-
-    $null = _DynaExpand @($catCab, "-F:$xmlName", $catDir)
-    if (-not (Test-Path $catXml) -or (Get-Item $catXml).Length -eq 0) {
-        Log "  Filtered extract didn't produce the XML - retrying with -F:*"
-        $null = _DynaExpand @("-F:*", $catCab, $catDir)
-        $found = Get-ChildItem $catDir -Filter "*.xml" -Recurse -EA SilentlyContinue | Select-Object -First 1
-        if ($found) { $catXml = $found.FullName }
-    }
-    if (-not (Test-Path $catXml) -or (Get-Item $catXml).Length -eq 0) {
-        Log "Dynabook catalog CAB extraction failed."
-        return $false
-    }
-
-    # --- parse + evaluate applicability ---
-    [xml]$cat = $null
-    try {
-        $raw = [System.IO.File]::ReadAllText($catXml).TrimStart([char]0xFEFF)
-        $cat = [xml]$raw
-    } catch { Log "Failed to parse Dynabook catalog XML: $($_.Exception.Message)"; return $false }
-
-    # --- OS build fallback (v1.14.0) -----------------------------------------
-    # Dynabook's applicability rules pin an exact Windows build (Comparison=EqualTo
-    # BuildNumber=...). When Windows ships a newer servicing build than the catalog
-    # was authored against (e.g. live 26200 vs the catalog's 26100 for 24H2), every
-    # EqualTo rule fails and nothing matches - even though the 26100 drivers apply.
-    # Snap the live build DOWN to the newest catalog build of the SAME Windows
-    # generation (Win11 = build >= 22000) that is <= the live build, then evaluate
-    # rules against that. No-op when the live build is already in the catalog.
-    $catBuilds = @()
-    foreach ($wv in $cat.SelectNodes("//*[local-name()='WindowsVersion']")) {
-        $bn = $wv.GetAttribute("BuildNumber")
-        if ($bn) { try { $catBuilds += [int]$bn } catch {} }
-    }
-    $catBuilds = @($catBuilds | Select-Object -Unique)
-    if ($catBuilds.Count -gt 0 -and $build -gt 0) {
-        $win11Floor = 22000
-        $sameGen = if ($build -ge $win11Floor) {
-            $catBuilds | Where-Object { $_ -ge $win11Floor -and $_ -le $build }
-        } else {
-            $catBuilds | Where-Object { $_ -lt $win11Floor -and $_ -le $build }
-        }
-        if ($sameGen) {
-            $effBuild = ($sameGen | Measure-Object -Maximum).Maximum
-            if ($effBuild -ne $build) {
-                Log "Live OS build $build is newer than any catalog build; evaluating rules as nearest catalog build $effBuild (same Windows generation)."
-                $ctx.Build = $effBuild
-            }
-        }
-    }
-
-    $pkgNodes = $cat.SelectNodes("//*[local-name()='SoftwareDistributionPackage']")
-    Log "Catalog lists $($pkgNodes.Count) package(s). Evaluating applicability for this machine..."
-    SetExtract -Pct 20 -Label "Matching drivers..."
-    SetProgress 15
-
-    $applicable = New-Object System.Collections.Generic.List[object]
-    foreach ($pk in $pkgNodes) {
-        $ii = $pk.SelectSingleNode("*[local-name()='InstallableItem']")
-        if (-not $ii) { continue }
-        $rule = $ii.SelectSingleNode("*[local-name()='ApplicabilityRules']/*[local-name()='IsInstallable']")
-        if (-not $rule) { continue }
-        $rootLogic = $null
-        foreach ($c in $rule.ChildNodes) { if ($c -is [System.Xml.XmlElement]) { $rootLogic = $c; break } }
-        if (-not $rootLogic) { continue }
-        if (-not (Test-DynabookRuleNode -Node $rootLogic -Ctx $ctx)) { continue }
-
-        $cli = $ii.SelectSingleNode("*[local-name()='CommandLineInstallerData']")
-        $of  = $ii.SelectSingleNode("*[local-name()='OriginFile']")
-        if (-not $cli -or -not $of) { continue }
-        $uri = $of.GetAttribute("OriginUri")
-        $fn  = $of.GetAttribute("FileName")
-        if (-not $uri -or -not $fn) { continue }
-        $sz  = 0; try { $sz = [long]$of.GetAttribute("Size") } catch {}
-        $instArgs = $cli.GetAttribute("Arguments")
-        $title = $fn
-        try { $title = $pk.SelectSingleNode("*[local-name()='LocalizedProperties']/*[local-name()='Title']").InnerText.Trim() } catch {}
-        $succ = New-Object System.Collections.Generic.List[int]
-        foreach ($r in $cli.SelectNodes("*[local-name()='ReturnCode']")) {
-            if ($r.GetAttribute("Result") -eq "Succeeded") { try { $succ.Add([int]$r.GetAttribute("Code")) | Out-Null } catch {} }
-        }
-        if ($succ.Count -eq 0) { $succ.Add(0) | Out-Null; $succ.Add(3010) | Out-Null }
-
-        $applicable.Add([PSCustomObject]@{
-            Title = $title; Url = $uri; FileName = $fn; Size = $sz; Args = $instArgs; Success = $succ
-        }) | Out-Null
-    }
-
-    # Collapse multiple builds/versions of the SAME driver down to the newest
-    # version (catalog often lists one entry per feature update). Device key =
-    # the title with the trailing version + release code stripped.
-    $byKey = @{}
-    foreach ($m in $applicable) {
-        $key = ($m.Title -replace '(?i)\s*v?\.?\s*\d+(\.\d+){1,}.*$', '').Trim().ToLower()
-        if ([string]::IsNullOrWhiteSpace($key)) { $key = $m.FileName.ToLower() }
-        $ver = [version]"0.0"
-        $vm = [regex]::Match($m.Title, '(\d+(?:\.\d+){1,})')
-        if ($vm.Success) { try { $ver = [version]$vm.Groups[1].Value } catch {} }
-        if ($byKey.ContainsKey($key)) {
-            if ($ver -gt $byKey[$key].Ver) { $byKey[$key] = @{ Pkg = $m; Ver = $ver } }
-        } else {
-            $byKey[$key] = @{ Pkg = $m; Ver = $ver }
-        }
-    }
-    $chosen = @($byKey.Values | ForEach-Object { $_.Pkg })
-
-    if ($chosen.Count -eq 0) {
-        Log "No applicable Dynabook driver packages matched this machine."
-        Log "  (Model='$modelLive', SystemSKU='$sku', build=$build)"
-        Log "  The catalog covers Dynabook Americas commercial models (Tecra / Portege / Satellite Pro)."
-        if (-not $script:Headless) {
-            Log "Opening Dynabook driver download page for manual selection..."
-            try { Start-Process "https://support.dynabook.com/drivers" } catch {}
-        } else {
-            Log "  Manual URL: https://support.dynabook.com/drivers"
-        }
-        return $false
-    }
-
-    $totalBytes = ($chosen | Measure-Object Size -Sum).Sum
-    $totalMB = [math]::Round($totalBytes / 1MB, 0)
-    Log "Matched $($chosen.Count) applicable driver package(s)  (~${totalMB} MB to download):"
-    foreach ($m in $chosen) { Log "  - $($m.Title)  [$([math]::Round($m.Size / 1MB, 0)) MB]" }
-
-    # --- download + install ---
-    $pkgRoot = Join-Path $DriverRoot "Dynabook"
-    if (-not (Test-Path $pkgRoot)) { New-Item -ItemType Directory -Path $pkgRoot -Force | Out-Null }
-
-    $total = $chosen.Count; $idx = 0; $okCount = 0; $failCount = 0; $rebootNeeded = $false
-    foreach ($m in $chosen) {
-        $idx++
-        if (Test-Cancelled) { Log "Cancelled at $idx/$total."; break }
-        $overall = 20 + [int](($idx / $total) * 75)
-        SetProgress $overall
-        Log ""
-        Log "----- [$idx/$total] $($m.Title) -----"
-
-        $dest = Join-Path $pkgRoot $m.FileName
-        SetDownload -Pct 0 -Label "Downloading $($m.FileName)..."
-        if (-not (Invoke-CurlDownload -Url $m.Url -OutFile $dest)) {
-            Log "  Download failed - skipping."
-            $failCount++; continue
-        }
-        if (Test-Cancelled) { break }
-
-        if ($SkipInstall) {
-            Log "  -SkipInstall set: downloaded only, not running installer."
-            $okCount++; continue
-        }
-
-        SetExtract -Pct 50 -Label "Installing $($m.Title)..."
-        Log "  Running: $($m.FileName) $($m.Args)"
-        $rc = Invoke-DynabookInstaller -ExePath $dest -Arguments $m.Args -WorkingDir $pkgRoot
-        if ($m.Success -contains $rc) {
-            Log "  OK (exit $rc)"
-            $okCount++
-            $script:AnalyticsInstalledDrivers.Add($m.Title) | Out-Null
-            if ($rc -eq 3010 -or $rc -eq 2 -or $rc -eq 3) { $rebootNeeded = $true }
-        } elseif ($rc -eq -9998) {
-            Log "  Cancelled during install."
-            break
-        } else {
-            Log "  WARNING: installer returned exit $rc (treating as failure)."
-            $failCount++
-        }
-    }
-
-    Log ""
-    Log "Dynabook summary: $okCount ok, $failCount failed, of $total matched package(s)."
-    if ($rebootNeeded) { Log "  One or more installers requested a reboot." }
-    SetExtract -Pct 100 -Label "Dynabook drivers processed"
-    return ($okCount -gt 0)
-}
-
-# =========================
 # DEVICE INFO DUMP
 # =========================
 function Write-DeviceInfo {
@@ -6604,9 +5932,6 @@ function Start-Install {
     } elseif ($manufacturer -match "Microsoft") {
         if (-not (Assert-Curl)) { Send-AnalyticsEvent -Result "failure"; Set-ButtonIdle; return }
         $success = Start-MicrosoftSurfaceDriverInstall -DriverRoot $driverRoot -ModelName $model
-    } elseif ($manufacturer -match "Dynabook|Toshiba") {
-        if (-not (Assert-Curl)) { Send-AnalyticsEvent -Result "failure"; Set-ButtonIdle; return }
-        $success = Start-DynabookDriverInstall -DriverRoot $driverRoot -ModelName $model
     } else {
         # Unknown manufacturer (e.g. "OEMBY", blank, generic OEM string).
         # In headless mode: if -Model was explicitly passed and looks like a Surface, run it.
@@ -6666,49 +5991,6 @@ function Start-Install {
     Log "Missing drivers AFTER  install: $($script:AnalyticsMissingAfter)"
     Log "Devices resolved by this install: $missingDelta"
     Write-MissingDriverDetails
-
-    # v1.15.0 - Universal vendor-pack-free fallbacks. If devices are STILL missing
-    # drivers after the vendor path (or because there was no vendor pack at all -
-    # e.g. the Dell Vostro 5320), try two vendor-agnostic sources in order:
-    #   1. Windows Update Agent  (driver-class updates, installed in-place)
-    #   2. Microsoft Update Catalog (scrape-by-hardware-ID; catches OEM/platform
-    #      drivers - Intel DPTF, serial-IO, etc. - that the WUA search skips)
-    # Headless gets both automatically; this is the difference between "17 devices
-    # left unresolved" and a (near-)clean machine.
-    if ($PromptWindowsUpdate -and -not $script:CancelRequested -and -not $script:TestMode `
-        -and $script:AnalyticsMissingAfter -gt 0) {
-        $fallbackFixed = 0
-        $fallbackFixed += [int](Install-DriversViaWindowsUpdate)
-
-        # Only escalate to the catalog scrape if WU didn't already clear everything.
-        if (-not $script:CancelRequested -and (Get-MissingDriverCount) -gt 0) {
-            $fallbackFixed += [int](Install-DriversFromMsUpdateCatalog -DriverRoot $driverRoot)
-        }
-
-        if ($fallbackFixed -gt 0) {
-            Log "Re-scanning devices after fallback driver installs..."
-            $script:AnalyticsMissingAfter = Get-MissingDriverCount
-            $script:AnalyticsMissingAfterList.Clear()
-            foreach ($n in (Get-MissingDriverNames)) { $script:AnalyticsMissingAfterList.Add($n) | Out-Null }
-            $missingDelta = if ($script:AnalyticsMissingBefore -ge 0 -and $script:AnalyticsMissingAfter -ge 0) {
-                $script:AnalyticsMissingBefore - $script:AnalyticsMissingAfter
-            } else { 0 }
-            Log "Missing drivers AFTER  fallbacks: $($script:AnalyticsMissingAfter)"
-            Log "Total devices resolved this run: $missingDelta"
-            # Re-dump the detail for whatever survived all tiers, so the log and
-            # HTML report identify the exact device(s) still needing attention
-            # (the earlier dump predates the WU/catalog passes).
-            if ($script:AnalyticsMissingAfter -gt 0) {
-                Log "-- Devices still unresolved after all fallbacks --"
-                Write-MissingDriverDetails
-                Log "  NOTE: drivers staged by Windows Update may bind only after a reboot -"
-                Log "        a device shown here can resolve itself on next restart."
-            }
-            # If the fallbacks fully resolved the machine, treat the run as a
-            # success even when the vendor pack was missing or failed.
-            if ($script:AnalyticsMissingAfter -eq 0) { $success = $true }
-        }
-    }
 
     if ($script:CancelRequested) { Send-AnalyticsEvent -Result "cancelled" }
 
