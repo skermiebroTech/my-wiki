@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.15.0
+# Version: 1.16.0
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -54,6 +54,29 @@
 #   DriverInstaller_<ts>.events.json - NDJSON structured event log (always)
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
+#
+# v1.16.0 - Stranded child-device support + Dell support-page fix.
+#           (1) Parent-walk for devices with no PCI ID of their own. New helper
+#               Get-DeviceParentVenDev climbs the device tree (DEVPKEY_Device_
+#               Parent) to the nearest PCI ancestor; Start-DellIndividualDriver-
+#               Install now uses it when a missing device exposes no VEN/DEV.
+#               Motivating case: the Intel Integrated Sensor Hub child sensor on
+#               the Vostro 5320 enumerates as {GUID}\VID_8087&PID_0AC2 / ISH_
+#               MINIPORT - no PCI ID, so every matcher skipped it. Its driver
+#               (Intel Integrated Sensor Solution) is in CatalogPC keyed to the
+#               ISH host controller PCI 8086:51FC; matching via the parent pulls
+#               that package, whose INF set also binds the stranded child. Verified
+#               against the live CatalogPC: ISS is the sole DRVR for 8086:51FC and
+#               the Vostro's SKU 0B3D is absent from the catalog entirely, so
+#               hardware-ID matching is the only path that can work for it.
+#           (2) The Dell "no driver pack" branch no longer auto-opens the Dell
+#               support page mid-run. That fired during the vendor phase, BEFORE
+#               the universal Windows Update / Microsoft Update Catalog fallbacks
+#               (which then install most/all of the missing drivers), so launching
+#               a browser there was premature and surprising. The URL is now just
+#               logged as a manual last resort.
+#           NOTE: bump the version on EVERY change from here on - two different
+#           builds previously both reported 1.15.0, making field logs ambiguous.
 #
 # v1.15.0 - Universal "no driver pack" fallback via Windows Update. New function
 #           Install-DriversViaWindowsUpdate uses the Windows Update Agent (WUA)
@@ -515,7 +538,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.15.0"
+$SCRIPT_VERSION = "1.16.0"
 
 # =============================================================
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
@@ -2800,6 +2823,46 @@ function Start-PackExtraction {
 #
 # Falls back to full pack install if any device has no catalog match.
 # =========================
+
+# v1.15.0 - Resolve a device's PARENT PCI VEN/DEV by walking up the device tree.
+# Some unbound devices expose no PCI ID of their own - e.g. an Intel Integrated
+# Sensor Hub child sensor enumerated on a custom bus as {GUID}\VID_8087&PID_xxxx
+# / ISH_MINIPORT. Such a child is covered by its parent controller's driver
+# package (the ISH PCI host is 8086:51FC, whose Intel Integrated Sensor Solution
+# package carries the child sensor INF). Walking to the nearest ancestor that has
+# a PCI VEN/DEV lets the catalog matcher find that package and bind the child.
+# Returns an array of @{VEN;DEV} (empty if no PCI ancestor found).
+function Get-DeviceParentVenDev {
+    param([string]$InstanceId, [int]$MaxDepth = 5)
+    $current = $InstanceId
+    for ($d = 0; $d -lt $MaxDepth -and $current; $d++) {
+        $parent = $null
+        try {
+            $parent = (Get-PnpDeviceProperty -InstanceId $current -KeyName 'DEVPKEY_Device_Parent' -EA Stop).Data
+        } catch {}
+        if (-not $parent) { break }
+        $hwIds = @()
+        try { $hwIds = @((Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Enum\$parent" -EA Stop).HardwareID) } catch {}
+        $found = @()
+        $seen  = @{}
+        foreach ($id in $hwIds | Where-Object { $_ }) {
+            if ($id -match 'VEN_([0-9A-Fa-f]+)') {
+                $ven = $Matches[1].ToUpper()
+                if ($id -match '(?:^|&)DEV_([0-9A-Fa-f]+)') {
+                    $key = "$ven|$($Matches[1].ToUpper())"
+                    if (-not $seen[$key]) {
+                        $seen[$key] = $true
+                        $found += [PSCustomObject]@{ VEN = $ven; DEV = $Matches[1].ToUpper() }
+                    }
+                }
+            }
+        }
+        if ($found.Count -gt 0) { return $found }   # nearest PCI ancestor wins
+        $current = $parent
+    }
+    return @()
+}
+
 function Start-DellIndividualDriverInstall {
     param(
         [string]$DriverRoot, [string]$ServiceTag, [bool]$IsWin11,
@@ -2920,8 +2983,24 @@ function Start-DellIndividualDriverInstall {
             }
         }
         if ($devVenDev.Count -eq 0) {
+            # v1.15.0 - The device exposes no PCI VEN/DEV of its own (e.g. an Intel
+            # ISH child sensor: {GUID}\VID_8087&PID_xxxx). Walk up to the parent PCI
+            # controller (the ISH host, 8086:51FC) and match THAT - its package
+            # (Intel Integrated Sensor Solution) carries the child INF, so installing
+            # it binds the stranded child.
+            $parentVenDev = Get-DeviceParentVenDev -InstanceId $dev.DeviceID
+            foreach ($pvd in $parentVenDev) {
+                $key = "$($pvd.VEN)|$($pvd.DEV)"
+                if (-not $seen[$key]) {
+                    $seen[$key] = $true
+                    $devVenDev += [PSCustomObject]@{ VEN = $pvd.VEN; DEV = $pvd.DEV }
+                    Log "    '$($dev.Name)' has no PCI ID; matching via parent VEN=$($pvd.VEN) DEV=$($pvd.DEV)"
+                }
+            }
+        }
+        if ($devVenDev.Count -eq 0) {
             if ($BestEffort) {
-                Log "  No PCI VEN/DEV for '$($dev.Name)' - skipping (best-effort)."
+                Log "  No PCI VEN/DEV for '$($dev.Name)' (and no PCI parent) - skipping (best-effort)."
                 $allMatched = $false
                 continue
             }
@@ -3245,12 +3324,16 @@ function Start-DellDriverInstall {
             Log "  Best-effort individual match did not install any drivers."
         }
 
-        Log "Opening Dell support page..."
-        if (-not $script:Headless) {
-            Start-Process "https://www.dell.com/support/home/en-us/product-support/servicetag/$serviceTag/drivers"
-        } else {
-            Log "  Manual URL: https://www.dell.com/support/home/en-us/product-support/servicetag/$serviceTag/drivers"
-        }
+        # v1.15.0 - Do NOT auto-open the Dell support page here. This branch runs
+        # during the vendor phase, BEFORE the universal Windows Update + Microsoft
+        # Update Catalog fallbacks in Start-Install - which on this machine go on
+        # to install most/all of the missing drivers. Launching a browser mid-run
+        # (and before the fallbacks even try) is premature and surprising. We just
+        # record the URL as a manual last resort; the end-of-run flow still offers
+        # Windows Update if anything is genuinely left unresolved.
+        Log "  No Dell pack and no hardware-ID match. Leaving remaining devices to"
+        Log "  the Windows Update / Microsoft Update Catalog fallbacks."
+        Log "  Manual last resort (Dell support): https://www.dell.com/support/home/en-us/product-support/servicetag/$serviceTag/drivers"
         return $false
     }
 
