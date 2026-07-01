@@ -59,6 +59,25 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.18.1 - Fix hidden worker dialogs + cancel UX (field report: clicking
+#           Cancel right after a run started left the Install button greyed -
+#           the "Installation Failed" MessageBox had opened BEHIND the main
+#           window, and the worker sat blocked on it, so Set-ButtonIdle never
+#           ran).
+#           (1) New Show-TopMostMessageBox helper: worker-thread MessageBoxes
+#               have no owner window, so Windows may open them behind the
+#               form. The helper creates an invisible TopMost owner form on
+#               the calling thread, forcing the box to the foreground. ALL
+#               worker-path MessageBox.Show calls now route through it
+#               (missing-drivers prompt, test-mode, success/reboot, failure,
+#               Dell best-effort prompt, crash wrapper).
+#           (2) User-initiated cancel no longer shows the "Installation
+#               Failed" dialog at all - the operator cancelled, they don't
+#               need to dismiss anything; the UI just re-arms (log line +
+#               Set-ButtonIdle). Genuine failures still get the dialog.
+#           (3) Surface model picker is now TopMost for the same reason (it
+#               lost its owner in the v1.18.0 thread split).
+#
 # v1.18.0 - GUI work moved OFF the UI thread + expanded console colours (dev).
 #           ARCHITECTURE: in GUI mode the whole install now runs in a
 #           background STA runspace (Start-WorkerInstall snapshots every
@@ -614,7 +633,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.18.0"
+$SCRIPT_VERSION = "1.18.1"
 
 # =============================================================
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
@@ -1644,6 +1663,40 @@ function Set-UiTitle {
     param([string]$Subtitle)
     if ($script:Headless) { return }
     Send-Ui @{ Op = 'title'; Subtitle = $Subtitle }
+}
+
+function Show-TopMostMessageBox {
+    # v1.18.1 - worker-thread MessageBoxes have no owner window, so Windows may
+    # open them BEHIND the main form (the form lives on a different thread and
+    # can't be passed as owner cross-thread). Field symptom: a cancelled run
+    # looked hung with the Install button greyed out - the worker was blocked
+    # on an invisible dialog. Fix: an invisible TopMost owner form created on
+    # THIS thread forces the box to the foreground. Same positional signature
+    # as MessageBox.Show(text, caption, buttons, icon); returns DialogResult.
+    param(
+        [string]$Text,
+        [string]$Caption,
+        [string]$Buttons = "OK",
+        [string]$Icon    = "Information"
+    )
+    $owner = $null
+    try {
+        $owner = New-Object System.Windows.Forms.Form
+        $owner.TopMost       = $true
+        $owner.ShowInTaskbar = $false
+        $owner.Opacity       = 0
+        $owner.Size          = New-Object System.Drawing.Size(1, 1)
+        $owner.StartPosition = "CenterScreen"
+        $owner.Show()
+        $owner.Activate()
+        return [System.Windows.Forms.MessageBox]::Show($owner, $Text, $Caption, $Buttons, $Icon)
+    } catch {
+        # Fall back to an unowned box - worst case it opens behind, but the
+        # dialog still works and the run still completes.
+        return [System.Windows.Forms.MessageBox]::Show($Text, $Caption, $Buttons, $Icon)
+    } finally {
+        if ($owner) { try { $owner.Close(); $owner.Dispose() } catch {} }
+    }
 }
 
 function Test-Cancelled {
@@ -3568,13 +3621,13 @@ function Start-DellDriverInstall {
             Log "  Headless: attempting best-effort hardware-ID match automatically."
             $tryIndividual = $true
         } else {
-            $ans = [System.Windows.Forms.MessageBox]::Show(
+            $ans = Show-TopMostMessageBox (
                 "No Dell driver pack exists for '$ModelName' (this is a consumer/gaming model).`n`n" +
                 "Attempt a best-effort driver match by hardware ID instead?`n`n" +
                 "Yes = match & install Dell chipset/audio/LAN drivers for this machine's`n" +
                 "        hardware (anything left over can be found via Windows Update)`n" +
-                "No  = just open the Dell support page for this service tag",
-                "No Driver Pack Found", "YesNo", "Question")
+                "No  = just open the Dell support page for this service tag") `
+                "No Driver Pack Found" "YesNo" "Question"
             if ($ans -eq [System.Windows.Forms.DialogResult]::Yes) { $tryIndividual = $true }
         }
 
@@ -5744,6 +5797,7 @@ function Show-SurfaceModelPicker {
     $pickerForm.FormBorderStyle  = "FixedDialog"
     $pickerForm.MaximizeBox      = $false
     $pickerForm.MinimizeBox      = $false
+    $pickerForm.TopMost          = $true   # v1.18.1 - unowned since the thread split; keep it in front
     $pickerForm.BackColor        = [System.Drawing.Color]::FromArgb(245, 245, 245)
 
     $lbl           = New-Object System.Windows.Forms.Label
@@ -6795,10 +6849,9 @@ function Start-Install {
         if ($script:Headless) {
             Log "No missing drivers detected - continuing anyway (headless mode)."
         } else {
-            $skipResult = [System.Windows.Forms.MessageBox]::Show(
-                "No missing drivers were detected on this device.`n`nRun driver installation anyway?",
-                "No Missing Drivers", "YesNo", "Question"
-            )
+            $skipResult = Show-TopMostMessageBox `
+                "No missing drivers were detected on this device.`n`nRun driver installation anyway?" `
+                "No Missing Drivers" "YesNo" "Question"
             if ($skipResult -eq [System.Windows.Forms.DialogResult]::No) {
                 Log "User chose to skip - no missing drivers detected."
                 SetProgress 100
@@ -6848,10 +6901,9 @@ function Start-Install {
             Write-Host "TEST MODE: dry-run complete. See log: $LogFile"
             Write-Host "Report:    $ReportFile"
         } else {
-            [System.Windows.Forms.MessageBox]::Show(
-                "Test mode complete.`n`nNo downloads or installs were performed.`n`nReport: $ReportFile",
-                "Test Mode Complete", "OK", "Information"
-            ) | Out-Null
+            Show-TopMostMessageBox `
+                "Test mode complete.`n`nNo downloads or installs were performed.`n`nReport: $ReportFile" `
+                "Test Mode Complete" "OK" "Information" | Out-Null
             Set-ButtonIdle
         }
         return
@@ -7042,10 +7094,7 @@ function Start-Install {
                             "  - Yes:     reboot now to finish installing drivers`n" +
                             "  - No:      open Windows Update to search for the rest`n" +
                             "  - Cancel:  do nothing"
-                $result = [System.Windows.Forms.MessageBox]::Show(
-                    $msgText,
-                    "Installation Complete", "YesNoCancel", "Information"
-                )
+                $result = Show-TopMostMessageBox $msgText "Installation Complete" "YesNoCancel" "Information"
                 if ($result -eq [System.Windows.Forms.DialogResult]::Yes) {
                     Restart-Computer -Force
                 } elseif ($result -eq [System.Windows.Forms.DialogResult]::No) {
@@ -7057,10 +7106,7 @@ function Start-Install {
             } else {
                 # Standard completion dialog if no missing drivers or PromptWindowsUpdate not enabled
                 $msgText += "`n`nReboot now to complete installation?"
-                $result = [System.Windows.Forms.MessageBox]::Show(
-                    $msgText,
-                    "Installation Complete", "YesNo", "Information"
-                )
+                $result = Show-TopMostMessageBox $msgText "Installation Complete" "YesNo" "Information"
                 if ($result -eq [System.Windows.Forms.DialogResult]::Yes) { Restart-Computer -Force }
                 else { Set-ButtonIdle }
             }
@@ -7094,15 +7140,18 @@ function Start-Install {
                 Start-Sleep -Milliseconds 500
                 Open-WindowsUpdate
             }
+        } elseif ($script:CancelRequested) {
+            # v1.18.1 - user-initiated cancel: don't make the operator dismiss
+            # an "Installation Failed" dialog for something they asked for.
+            # Just re-arm the UI so they can run again.
+            Log "Run cancelled - ready to run again."
+            Set-ButtonIdle
         } else {
             $msgText = "Driver installation failed or no pack was found.`nCheck the log:`n`n$LogFile`n`nReport: $ReportFile"
             # v1.12.0 - Add Windows Update prompt if drivers still missing
             if ($PromptWindowsUpdate -and $stillMissing -gt 0) {
                 $msgText += "`n`n$stillMissing drivers still missing.`nWould you like to open Windows Update to search for additional drivers?"
-                $result = [System.Windows.Forms.MessageBox]::Show(
-                    $msgText,
-                    "Installation Failed", "YesNo", "Warning"
-                )
+                $result = Show-TopMostMessageBox $msgText "Installation Failed" "YesNo" "Warning"
                 if ($result -eq [System.Windows.Forms.DialogResult]::Yes) {
                     Open-WindowsUpdate
                     Set-ButtonIdle
@@ -7110,10 +7159,7 @@ function Start-Install {
                     Set-ButtonIdle
                 }
             } else {
-                [System.Windows.Forms.MessageBox]::Show(
-                    $msgText,
-                    "Installation Failed", "OK", "Error"
-                )
+                Show-TopMostMessageBox $msgText "Installation Failed" "OK" "Error" | Out-Null
                 Set-ButtonIdle
             }
         }
@@ -7160,10 +7206,9 @@ function Invoke-StartInstallSafe {
             }
         } else {
             try { Set-ButtonIdle } catch {}
-            [System.Windows.Forms.MessageBox]::Show(
-                "The installer hit an unexpected error and stopped:`n`n$($ex.Exception.Message)`n`nLog: $LogFile`nReport: $ReportFile",
-                "Installer Crashed", "OK", "Error"
-            ) | Out-Null
+            Show-TopMostMessageBox `
+                "The installer hit an unexpected error and stopped:`n`n$($ex.Exception.Message)`n`nLog: $LogFile`nReport: $ReportFile" `
+                "Installer Crashed" "OK" "Error" | Out-Null
         }
     }
 }
