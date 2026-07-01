@@ -21,6 +21,10 @@
 #   -Manufacturer  Override WMI manufacturer detection (Dell, HP, Lenovo, Microsoft, Dynabook)
 #   -Model         Override WMI model detection
 #   -Headless      Skip GUI, write to console only (auto-set when any param is passed)
+#   -Gui           v1.17.0 - force GUI mode even when other params are passed
+#                  (overrides the auto-headless heuristic). Lets a GUI run use
+#                  -MaxParallelDownloads, -PromptWindowsUpdate:$false, etc.
+#                  Ignored when -Silent is set.
 #   -Silent        Like -Headless but ALSO suppresses console output (log file only).
 #                  Forces -Headless on. Useful when launched from another script that
 #                  shouldn't have its stdout polluted, or for unattended scheduled tasks.
@@ -54,6 +58,114 @@
 #   DriverInstaller_<ts>.events.json - NDJSON structured event log (always)
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
+#
+# v1.18.2 - Cancellable Windows Update phase (field report: Cancel during the
+#           WU fallback left the Install button greyed out for minutes).
+#           Root cause: the WUA COM calls (IUpdateSearcher.Search,
+#           IUpdateDownloader.Download, IUpdateInstaller.Install) are
+#           synchronous and can each block for many minutes; the cancel
+#           checks only ran BETWEEN them, so the worker sat inside COM
+#           unable to notice the flag.
+#           (1) Install-DriversViaWindowsUpdate rewritten to run the WUA work
+#               in a child powershell.exe (same poll-and-kill pattern as the
+#               curl/expand/7z phases). The child streams prefixed lines
+#               (LOG:/ERR:/PHASE:/INSTALLED:/RESULT:) to a redirected stdout
+#               file; the parent relays them through the normal Log sink,
+#               drives the progress labels, feeds analytics, and KILLS the
+#               child within one 700ms poll when Cancel is clicked. A 20-min
+#               no-output watchdog guards against a hung WU service.
+#           (2) End-of-run: a cancelled run no longer enters the success
+#               branch even when the vendor phase had succeeded (Cancel during
+#               the WU fallback used to fire BOTH "cancelled" AND "success"
+#               analytics events and pop the completion dialog). Cancelled
+#               runs now always take the cancelled path: report written with
+#               result=cancelled, no dialog, UI re-armed.
+#
+# v1.18.1 - Fix hidden worker dialogs + cancel UX (field report: clicking
+#           Cancel right after a run started left the Install button greyed -
+#           the "Installation Failed" MessageBox had opened BEHIND the main
+#           window, and the worker sat blocked on it, so Set-ButtonIdle never
+#           ran).
+#           (1) New Show-TopMostMessageBox helper: worker-thread MessageBoxes
+#               have no owner window, so Windows may open them behind the
+#               form. The helper creates an invisible TopMost owner form on
+#               the calling thread, forcing the box to the foreground. ALL
+#               worker-path MessageBox.Show calls now route through it
+#               (missing-drivers prompt, test-mode, success/reboot, failure,
+#               Dell best-effort prompt, crash wrapper).
+#           (2) User-initiated cancel no longer shows the "Installation
+#               Failed" dialog at all - the operator cancelled, they don't
+#               need to dismiss anything; the UI just re-arms (log line +
+#               Set-ButtonIdle). Genuine failures still get the dialog.
+#           (3) Surface model picker is now TopMost for the same reason (it
+#               lost its owner in the v1.18.0 thread split).
+#
+# v1.18.0 - GUI work moved OFF the UI thread + expanded console colours (dev).
+#           ARCHITECTURE: in GUI mode the whole install now runs in a
+#           background STA runspace (Start-WorkerInstall snapshots every
+#           function + variable into an InitialSessionState and BeginInvokes
+#           Invoke-StartInstallSafe). The window is permanently responsive -
+#           no more frozen form during WMI queries / catalog parsing / pnputil.
+#           The pieces:
+#           - UI updates: worker helpers (Log GUI sink, SetProgress,
+#             SetDownload, SetExtract, spinners, button state, titles,
+#             missing-device link) no longer touch controls; they enqueue
+#             messages onto a ConcurrentQueue ($UiQueue). A WinForms Timer on
+#             the UI thread (80ms) drains the queue via Invoke-UiOp, which now
+#             owns all control mutation. Every DoEvents in those helpers is
+#             gone (remaining DoEvents in worker loops are harmless no-ops on
+#             the worker thread).
+#           - UI -> worker state: a synchronized hashtable ($UiSync) carries
+#             CancelRequested and SoundEnabled. New Test-CancelFlag mirrors
+#             $UiSync.CancelRequested into $script:CancelRequested; all the
+#             polling loops + Test-Cancelled now check it, so Cancel reacts
+#             within one poll interval even mid-download.
+#           - Modal dialogs: the worker runspace is STA, so every existing
+#             MessageBox / the Surface picker runs unmodified on the worker
+#             thread with its own pump, blocking only the worker (the main
+#             window stays live). Picker no longer passes $form as owner
+#             (cross-thread). Clipboard.SetText also fine (STA).
+#           - Completion: the drain timer detects BeginInvoke completion,
+#             flushes the queue, surfaces any escaped worker-stream errors
+#             into the console + .log, disposes the runspace, re-idles the
+#             buttons. Closing the window mid-run signals cancel first.
+#           - Headless mode is untouched: same thread, same flow as before.
+#           CONSOLE COLOURS: new "tone" layer (separate from the NDJSON level
+#           taxonomy, which is unchanged): success=emerald, action lines
+#           (Downloading/Installing/Extracting/...)=sky blue, separators and
+#           URL/size sub-lines=muted grey, plus the existing error=red,
+#           warn/cancel=amber, debug=grey. Headless console output is now
+#           coloured too via Write-Host -ForegroundColor with the same tones.
+#
+# v1.17.0 - Usability round (dev). Six changes, no vendor logic touched:
+#           (1) Colour-coded GUI console: Log's inferred/explicit level now
+#               drives the RichTextBox line colour (error=red, warn/cancel=
+#               amber, debug=grey). The .log / .events.json sinks are unchanged.
+#           (2) Missing-device link in the footer: after each device scan the
+#               GUI shows "N device(s) missing drivers - view list"; clicking
+#               opens a NON-modal window listing the device names (non-modal so
+#               it can't block the DoEvents-pumped install loop). Refreshed
+#               after the before-scan, the post-vendor rescan and the
+#               post-fallback rescan.
+#           (3) Crash-safe artefacts: all entry points now call Start-Install
+#               through Invoke-StartInstallSafe, which catches any unhandled
+#               exception, logs message + stack trace, and emits the analytics
+#               event and HTML report with result="crashed" (both ValidateSets
+#               extended). Guard flags ($script:AnalyticsEventSent /
+#               $script:HtmlReportWritten) prevent double-reporting when the
+#               crash happens after the normal report/event already fired.
+#           (4) New -Gui switch: overrides the "any param implies -Headless"
+#               heuristic, so a GUI run can use -MaxParallelDownloads,
+#               -PromptWindowsUpdate:$false, etc. -Silent still wins.
+#           (5) Elevation relaunch now re-runs the CURRENT file via
+#               $PSCommandPath when the script was started from disk; only the
+#               true irm|iex case re-fetches from GitHub main. Stops a locally
+#               edited dev copy silently swapping to the published version on
+#               elevation.
+#           (6) Disk-space preflight in Invoke-CurlDownload: when the expected
+#               size is known from the HEAD probe, require free space >= 3x the
+#               pack size on the target drive (download + extract headroom) and
+#               fail fast with a clear log line instead of dying mid-extract.
 #
 # v1.16.0 - Stranded child-device support + Dell support-page fix.
 #           (1) Parent-walk for devices with no PCI ID of their own. New helper
@@ -516,6 +628,7 @@ param(
     [string]$MachineType  = "",   # Lenovo only: override 4-char machine type prefix (e.g. 20XX)
     [string]$DriverRoot   = "C:\DRIVERS",  # Override default driver root (useful for parallel testing)
     [switch]$Headless,
+    [switch]$Gui,           # v1.17.0 - force GUI even when other params are passed (overrides auto-headless; -Silent still wins).
     [switch]$Silent,        # v1.10.0 - log-only mode (no GUI, no console). Implies -Headless.
     [switch]$TestMode,      # v1.10.0 - dry-run: detect + report but do not mutate system.
     [switch]$Diagnostic,    # v1.10.0 - verbose logging (per-step timings, env extras).
@@ -532,18 +645,33 @@ if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" `
     -or $SkipInstall -or $SkipCleanup -or $Silent -or $TestMode -or $Diagnostic -or $NoAnalytics -or $PromptWindowsUpdate -eq $false) {
     $Headless = $true
 }
+# v1.17.0 - explicit -Gui overrides the heuristic above, so a GUI run can carry
+# custom params (e.g. -Gui -MaxParallelDownloads 5). -Silent still wins below:
+# a silent GUI is a contradiction.
+if ($Gui) { $Headless = $false }
 if ($Silent) { $Headless = $true }
 
 # =============================================================
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.16.1"
+$SCRIPT_VERSION = "1.18.2"
 
 # =============================================================
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
 $SpinnerIndex    = 0
 $CancelRequested = $false
+
+# v1.18.0 - UI-thread / worker-runspace plumbing.
+#   $UiQueue: worker -> UI. Every UI mutation is a hashtable message drained
+#             by a WinForms Timer on the UI thread (see Invoke-UiOp).
+#   $UiSync:  UI -> worker. Synchronized hashtable for the cancel flag and the
+#             sound toggle; the worker polls it via Test-CancelFlag/Play-Sound.
+#   $ScriptFilePath: captured here because $PSCommandPath is empty inside the
+#             worker runspace; the elevation relaunch needs the real file path.
+$script:ScriptFilePath = $PSCommandPath
+$script:UiQueue = New-Object 'System.Collections.Concurrent.ConcurrentQueue[hashtable]'
+$script:UiSync  = [hashtable]::Synchronized(@{ CancelRequested = $false; SoundEnabled = $true })
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -631,6 +759,34 @@ $ColorMutedBg     = [System.Drawing.Color]::FromArgb(107, 114, 128)   # gray-500
 $ColorDisabledFg  = [System.Drawing.Color]::FromArgb(243, 244, 246)   # gray-100 (near-white text on disabled btn)
 $ColorConsoleBg   = [System.Drawing.Color]::FromArgb(17,  24,  39)    # console bg (gray-900)
 $ColorConsoleFg   = [System.Drawing.Color]::FromArgb(209, 250, 229)   # console fg (green-100 - bright mint, ~16:1 contrast on bg)
+# v1.17.0 - per-level console line colours (all chosen for contrast on ConsoleBg gray-900)
+$ColorLogError    = [System.Drawing.Color]::FromArgb(248, 113, 113)   # red-400   - error lines
+$ColorLogWarn     = [System.Drawing.Color]::FromArgb(252, 211, 77)    # amber-300 - warn/cancel lines
+$ColorLogDebug    = [System.Drawing.Color]::FromArgb(156, 163, 175)   # gray-400  - diagnostic lines
+# v1.18.0 - additional tones
+$ColorLogSuccess  = [System.Drawing.Color]::FromArgb(52,  211, 153)   # emerald-400 - success/complete lines
+$ColorLogAction   = [System.Drawing.Color]::FromArgb(56,  189, 248)   # sky-400     - phase-start lines (Downloading/Installing/...)
+$ColorLogMuted    = [System.Drawing.Color]::FromArgb(107, 114, 128)   # gray-500    - separators, URL/size sub-lines
+
+# v1.18.0 - tone -> colour maps. GUI map used by the UI drain (Invoke-UiOp);
+# console map used by headless Write-Host. 'info' is intentionally absent from
+# both: GUI falls back to $ColorConsoleFg, console to the default colour.
+$ToneColors = @{
+    error   = $ColorLogError
+    warn    = $ColorLogWarn
+    debug   = $ColorLogDebug
+    success = $ColorLogSuccess
+    action  = $ColorLogAction
+    muted   = $ColorLogMuted
+}
+$ToneConsoleColors = @{
+    error   = 'Red'
+    warn    = 'Yellow'
+    debug   = 'DarkGray'
+    success = 'Green'
+    action  = 'Cyan'
+    muted   = 'DarkGray'
+}
 
 # =========================
 # FORM
@@ -873,6 +1029,22 @@ $logLabel.Text      = "Log: $LogFile"
 $logLabel.UseCompatibleTextRendering = $false
 $form.Controls.Add($logLabel)
 
+# v1.17.0 - Missing-device summary link. Refreshed by Update-MissingDeviceLink
+# after each device scan; click opens a NON-modal list window (Show, not
+# ShowDialog - a modal dialog would freeze the DoEvents-pumped install loop).
+$missingLink              = New-Object System.Windows.Forms.LinkLabel
+$missingLink.AutoSize     = $true
+$missingLink.Font         = $FontUISmall
+$missingLink.LinkColor    = $ColorPrimary
+$missingLink.DisabledLinkColor = $ColorTextLo
+$missingLink.LinkBehavior = "HoverUnderline"
+$missingLink.Location     = New-Object System.Drawing.Point(28, 510)
+$missingLink.Text         = "Missing drivers: not scanned yet"
+$missingLink.Enabled      = $false
+$missingLink.UseCompatibleTextRendering = $false
+$missingLink.Add_LinkClicked({ Show-MissingDevicesWindow })
+$form.Controls.Add($missingLink)
+
 # =========================
 # SOUND TOGGLE CHECKBOX + ACTION BUTTONS
 # =========================
@@ -944,7 +1116,11 @@ function Play-Sound {
         [ValidateSet("Start","DownloadComplete","ExtractComplete","DriverAdded","Success","Failure","Cancel")]
         [string]$Event
     )
-    if (-not $soundCheckbox.Checked) { return }
+    # v1.18.0 - read the sync mirror, not the checkbox: this runs on the worker
+    # runspace, which must not touch controls. The checkbox's CheckedChanged
+    # handler keeps $UiSync.SoundEnabled current. SoundPlayer itself is fine
+    # from any thread.
+    if (-not $script:UiSync['SoundEnabled']) { return }
     $mediaDir = "$env:SystemRoot\Media"
     $wavCandidates = switch ($Event) {
         "Start"            { @("Windows Notify.wav", "Windows Notify System Generic.wav", "chimes.wav") }
@@ -1009,6 +1185,21 @@ function Open-WindowsUpdate {
 #
 # Returns: [int] number of driver updates successfully installed (0 on none/error).
 function Install-DriversViaWindowsUpdate {
+    # v1.18.2 - REWRITTEN as a killable child process. The WUA COM calls
+    # (Search/Download/Install) are synchronous and can each block for many
+    # minutes; previously a Cancel during this phase left the worker (and the
+    # greyed-out UI) stuck until the COM call returned, because the
+    # Test-Cancelled checks only ran BETWEEN the calls. The WUA work now runs
+    # in a child powershell.exe (same poll-and-kill pattern as the curl and
+    # extraction phases); Cancel kills the child within one 700ms poll.
+    #
+    # Child stdout protocol (one item per line, streamed to a redirected file):
+    #   LOG:<msg>          relayed to the normal Log sink
+    #   ERR:<msg>          relayed at warn level
+    #   PHASE:download     switches progress labels to the download phase
+    #   PHASE:install      switches progress labels to the install phase
+    #   INSTALLED:<title>  logged + appended to AnalyticsInstalledDrivers
+    #   RESULT:<n>         final installed count (function return value)
     if ($script:TestMode) {
         Log "Windows Update driver search skipped (TestMode dry-run)."
         return 0
@@ -1018,102 +1209,190 @@ function Install-DriversViaWindowsUpdate {
     Log "=== WINDOWS UPDATE: searching for drivers (vendor-pack-free fallback) ==="
     SetDownload -Pct 0 -Label "Searching Windows Update..."
 
+    # Single-quoted here-string: nothing here is expanded by the parent; the
+    # child evaluates it all. Logic is identical to the pre-v1.18.2 in-process
+    # version (incl. ServerSelection 2 = public WU service on WSUS-managed
+    # boxes, EULA auto-accept, ResultCode 2/3 = success).
+    $childScript = @'
+try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
+$ErrorActionPreference = "Continue"
+function Out-Line([string]$s) { [Console]::Out.WriteLine($s) }
+try {
+    $session = New-Object -ComObject Microsoft.Update.Session
+    $session.ClientApplicationID = "DriverInstaller"
+} catch {
+    Out-Line "ERR:Could not create Windows Update session: $($_.Exception.Message)"
+    Out-Line "RESULT:0"; exit 0
+}
+$searchResult = $null
+try {
+    $searcher = $session.CreateUpdateSearcher()
+    try { $searcher.ServerSelection = 2 } catch {}
+    try { $searcher.Online = $true } catch {}
+    Out-Line "LOG:  Querying Windows Update (IsInstalled=0 and Type='Driver')..."
+    $searchResult = $searcher.Search("IsInstalled=0 and Type='Driver'")
+} catch {
+    Out-Line "ERR:Windows Update driver search failed: $($_.Exception.Message)"
+    Out-Line "ERR:(Machine may be offline or the Windows Update service is disabled.)"
+    Out-Line "RESULT:0"; exit 0
+}
+$found = @($searchResult.Updates)
+if ($found.Count -eq 0) {
+    Out-Line "LOG:  Windows Update returned no applicable driver updates."
+    Out-Line "RESULT:0"; exit 0
+}
+Out-Line "LOG:  Windows Update offers $($found.Count) driver update(s):"
+$toInstall = New-Object -ComObject Microsoft.Update.UpdateColl
+foreach ($u in $found) {
+    Out-Line "LOG:    - $($u.Title)"
+    try { if (-not $u.EulaAccepted) { $u.AcceptEula() } } catch {}
+    $null = $toInstall.Add($u)
+}
+Out-Line "PHASE:download"
+try {
+    $downloader = $session.CreateUpdateDownloader()
+    $downloader.Updates = $toInstall
+    Out-Line "LOG:  Downloading $($toInstall.Count) driver update(s)..."
+    $null = $downloader.Download()
+} catch {
+    Out-Line "ERR:Windows Update download failed: $($_.Exception.Message)"
+    Out-Line "RESULT:0"; exit 0
+}
+$downloaded = New-Object -ComObject Microsoft.Update.UpdateColl
+foreach ($u in $toInstall) {
+    if ($u.IsDownloaded) { $null = $downloaded.Add($u) }
+    else { Out-Line "LOG:    Not downloaded (skipped): $($u.Title)" }
+}
+if ($downloaded.Count -eq 0) {
+    Out-Line "LOG:  No driver updates downloaded successfully."
+    Out-Line "RESULT:0"; exit 0
+}
+Out-Line "PHASE:install"
+try {
+    $installer = $session.CreateUpdateInstaller()
+    $installer.Updates = $downloaded
+    Out-Line "LOG:  Installing $($downloaded.Count) driver update(s)..."
+    $instResult = $installer.Install()
+} catch {
+    Out-Line "ERR:Windows Update install failed: $($_.Exception.Message)"
+    Out-Line "RESULT:0"; exit 0
+}
+$installedCount = 0
+for ($i = 0; $i -lt $downloaded.Count; $i++) {
+    $u = $downloaded.Item($i)
+    $rc = 0
+    try { $rc = $instResult.GetUpdateResult($i).ResultCode } catch {}
+    if ($rc -eq 2 -or $rc -eq 3) {
+        $installedCount++
+        Out-Line ("INSTALLED:" + $u.Title)
+    } else {
+        Out-Line "LOG:    Failed (rc=$rc): $($u.Title)"
+    }
+}
+if ($instResult.RebootRequired) {
+    Out-Line "LOG:  NOTE: a reboot is required to finish applying some Windows Update drivers."
+}
+Out-Line "RESULT:$installedCount"
+'@
+
+    $childPath = Join-Path $env:TEMP "wua-driver-phase.ps1"
+    $childOut  = Join-Path $env:TEMP ("wua-driver-phase-" + $PID + ".out")
     try {
-        $session = New-Object -ComObject Microsoft.Update.Session
-        $session.ClientApplicationID = "DriverInstaller"
+        Set-Content -Path $childPath -Value $childScript -Encoding UTF8 -Force
+        if (Test-Path $childOut) { Remove-Item $childOut -Force -EA SilentlyContinue }
     } catch {
-        Log "  Could not create Windows Update session: $($_.Exception.Message)"
+        Log "  Could not stage WU child script: $($_.Exception.Message)" -Level "warn"
         return 0
     }
 
-    # Search the WU service for not-installed driver-class updates. ServerSelection
-    # 2 = ssWindowsUpdate forces the public Windows Update service (which carries
-    # OEM/IHV driver packages) even on a box that is otherwise WSUS-managed; if the
-    # assignment isn't honoured we fall back to the default service silently.
-    $searchResult = $null
+    $proc = $null
     try {
-        $searcher = $session.CreateUpdateSearcher()
-        try { $searcher.ServerSelection = 2 } catch {}
-        try { $searcher.Online = $true } catch {}
-        Log "  Querying Windows Update (IsInstalled=0 and Type='Driver')..."
-        $searchResult = $searcher.Search("IsInstalled=0 and Type='Driver'")
+        $proc = Start-Process -FilePath "powershell.exe" `
+            -ArgumentList "-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File","`"$childPath`"" `
+            -RedirectStandardOutput $childOut -WindowStyle Hidden -PassThru
     } catch {
-        Log "  Windows Update driver search failed: $($_.Exception.Message)"
-        Log "  (Machine may be offline or the Windows Update service is disabled.)"
-        return 0
-    }
-    if (Test-Cancelled) { return 0 }
-
-    $found = @($searchResult.Updates)
-    if ($found.Count -eq 0) {
-        Log "  Windows Update returned no applicable driver updates."
-        return 0
-    }
-    Log "  Windows Update offers $($found.Count) driver update(s):"
-
-    $toInstall = New-Object -ComObject Microsoft.Update.UpdateColl
-    foreach ($u in $found) {
-        Log "    - $($u.Title)"
-        try { if (-not $u.EulaAccepted) { $u.AcceptEula() } } catch {}
-        $null = $toInstall.Add($u)
-    }
-
-    # Download phase
-    SetDownload -Pct 10 -Label "Downloading WU drivers..."
-    SetProgress 75
-    try {
-        $downloader = $session.CreateUpdateDownloader()
-        $downloader.Updates = $toInstall
-        Log "  Downloading $($toInstall.Count) driver update(s)..."
-        $null = $downloader.Download()
-    } catch {
-        Log "  Windows Update download failed: $($_.Exception.Message)"
-        return 0
-    }
-    if (Test-Cancelled) { return 0 }
-
-    $downloaded = New-Object -ComObject Microsoft.Update.UpdateColl
-    foreach ($u in $toInstall) {
-        if ($u.IsDownloaded) { $null = $downloaded.Add($u) }
-        else { Log "    Not downloaded (skipped): $($u.Title)" }
-    }
-    if ($downloaded.Count -eq 0) {
-        Log "  No driver updates downloaded successfully."
+        Log "  Could not start WU child process: $($_.Exception.Message)" -Level "warn"
         return 0
     }
 
-    # Install phase
-    SetExtract -Pct 50 -Label "Installing WU drivers..."
-    SetProgress 85
-    try {
-        $installer = $session.CreateUpdateInstaller()
-        $installer.Updates = $downloaded
-        Log "  Installing $($downloaded.Count) driver update(s)..."
-        $instResult = $installer.Install()
-    } catch {
-        Log "  Windows Update install failed: $($_.Exception.Message)"
-        return 0
-    }
-
-    # Per-update ResultCode: 2 = Succeeded, 3 = SucceededWithErrors
     $installedCount = 0
-    for ($i = 0; $i -lt $downloaded.Count; $i++) {
-        $u = $downloaded.Item($i)
-        $rc = 0
-        try { $rc = $instResult.GetUpdateResult($i).ResultCode } catch {}
-        if ($rc -eq 2 -or $rc -eq 3) {
-            $installedCount++
-            Log "    Installed: $($u.Title)"
-            $null = $script:AnalyticsInstalledDrivers.Add("WU: $($u.Title)")
-        } else {
-            Log "    Failed (rc=$rc): $($u.Title)"
+    $offset         = 0L
+    $quietMs        = 0
+    $QuietLimitMs   = 20 * 60 * 1000   # 20 min with zero output = hung WU service; kill
+
+    while ($true) {
+        # Read HasExited BEFORE draining so the post-exit drain below always
+        # captures the child's final lines (incl. RESULT:).
+        $exited  = $proc.HasExited
+        $newData = $null
+        try {
+            if (Test-Path $childOut) {
+                $fs = [System.IO.File]::Open($childOut, [System.IO.FileMode]::Open,
+                        [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+                try {
+                    if ($fs.Length -gt $offset) {
+                        $null = $fs.Seek($offset, [System.IO.SeekOrigin]::Begin)
+                        $buf  = New-Object byte[] ($fs.Length - $offset)
+                        $null = $fs.Read($buf, 0, $buf.Length)
+                        $newData = [System.Text.Encoding]::UTF8.GetString($buf)
+                    }
+                } finally { $fs.Close() }
+            }
+        } catch {}
+        if ($newData) {
+            # Consume only complete lines; a partially-flushed last line stays
+            # in the file for the next poll (offset doesn't advance past it).
+            $lastNl = $newData.LastIndexOf("`n")
+            if ($lastNl -ge 0) {
+                $chunk   = $newData.Substring(0, $lastNl + 1)
+                $offset += [System.Text.Encoding]::UTF8.GetByteCount($chunk)
+                $quietMs = 0
+                foreach ($rawLine in ($chunk -split "`r?`n")) {
+                    if ([string]::IsNullOrWhiteSpace($rawLine)) { continue }
+                    if     ($rawLine.StartsWith("LOG:")) { Log $rawLine.Substring(4) }
+                    elseif ($rawLine.StartsWith("ERR:")) { Log "  $($rawLine.Substring(4))" -Level "warn" }
+                    elseif ($rawLine.StartsWith("INSTALLED:")) {
+                        $t = $rawLine.Substring(10)
+                        Log "    Installed: $t"
+                        $null = $script:AnalyticsInstalledDrivers.Add("WU: $t")
+                    }
+                    elseif ($rawLine.StartsWith("PHASE:download")) {
+                        SetDownload -Pct 10 -Label "Downloading WU drivers..."
+                        SetProgress 75
+                    }
+                    elseif ($rawLine.StartsWith("PHASE:install")) {
+                        SetExtract -Pct 50 -Label "Installing WU drivers..."
+                        SetProgress 85
+                    }
+                    elseif ($rawLine.StartsWith("RESULT:")) {
+                        $installedCount = [int]$rawLine.Substring(7)
+                    }
+                    else { Log "  $rawLine" }
+                }
+            }
+        }
+        if ($exited) { break }
+
+        if (Test-CancelFlag) {
+            Log "  Cancel detected - stopping Windows Update phase." -Level "cancel"
+            try { $proc.Kill() } catch {}
+            try { $proc.WaitForExit(3000) | Out-Null } catch {}
+            break
+        }
+
+        Start-Sleep -Milliseconds 700
+        $quietMs += 700
+        Step-AllSpinners
+        if ($quietMs -ge $QuietLimitMs) {
+            Log "  WARNING: Windows Update phase produced no output for 20 min - killing." -Level "warn"
+            try { $proc.Kill() } catch {}
+            break
         }
     }
+    try { Remove-Item $childOut  -Force -EA SilentlyContinue } catch {}
+    try { Remove-Item $childPath -Force -EA SilentlyContinue } catch {}
 
     Log "  Windows Update installed $installedCount driver(s)."
-    if ($instResult.RebootRequired) {
-        Log "  NOTE: a reboot is required to finish applying some Windows Update drivers."
-    }
     return $installedCount
 }
 
@@ -1275,30 +1554,16 @@ function Install-DriversFromMsUpdateCatalog {
 }
 
 
+# v1.18.0 - these run on the worker runspace: enqueue only. The control
+# mutation lives in Invoke-UiOp ('btnrun' / 'btnidle') on the UI thread.
 function Set-ButtonRunning {
     if ($script:Headless) { return }
-    $button.Enabled         = $false
-    $button.BackColor       = $ColorMutedBg
-    $button.ForeColor       = $ColorDisabledFg     # v1.11.0 - white on gray-500 (4.5:1, readable)
-    $cancelButton.Enabled   = $true
-    $cancelButton.BackColor = $ColorDanger
-    $cancelButton.ForeColor = [System.Drawing.Color]::White
-    # Reset section dots back to muted-then-they-light-up-as-spinners-fire
-    $dlStatusDot.ForeColor      = $ColorMuted
-    $exStatusDot.ForeColor      = $ColorMuted
-    $overallStatusDot.ForeColor = $ColorMuted
-    [System.Windows.Forms.Application]::DoEvents()
+    Send-Ui @{ Op = 'btnrun' }
 }
 
 function Set-ButtonIdle {
     if ($script:Headless) { return }
-    $button.Enabled         = $true
-    $button.BackColor       = $ColorPrimary
-    $button.ForeColor       = [System.Drawing.Color]::White
-    $cancelButton.Enabled   = $false
-    $cancelButton.BackColor = $ColorMutedBg
-    $cancelButton.ForeColor = $ColorDisabledFg     # v1.11.0 - white on gray-500
-    [System.Windows.Forms.Application]::DoEvents()
+    Send-Ui @{ Op = 'btnidle' }
 }
 
 function Set-AutoScroll {
@@ -1350,29 +1615,50 @@ function Log {
     $ts   = $now.ToString('HH:mm:ss')
     $line = "[$ts] $msg"
 
-    # Human sinks
-    if (-not $script:Silent) {
-        if ($script:Headless) {
-            Write-Host $line
-        } else {
-            $statusBox.AppendText("$line`r`n")
-            # v1.11.0 - only snap to bottom when auto-scroll is on. When the user
-            # has scrolled back to read history, $script:AutoScroll = $false stops
-            # the textbox yanking them down on every new log line.
-            if ($script:AutoScroll) { $statusBox.ScrollToCaret() }
-            [System.Windows.Forms.Application]::DoEvents()
-        }
-    }
-    Add-Content -Path $LogFile -Value $line -Encoding UTF8
-
-    # Structured NDJSON sink. Heuristic level inference keeps existing
-    # one-arg Log calls working; explicit -Level wins when supplied.
+    # Heuristic level inference keeps existing one-arg Log calls working;
+    # explicit -Level wins when supplied. v1.17.0 - moved AHEAD of the human
+    # sinks so the GUI console can colour the line by level.
     if (-not $Level) {
         if ($msg -match '(?i)\bERROR\b|FATAL|FAILED|cannot') { $Level = 'error' }
         elseif ($msg -match '(?i)\bWARNING\b|WARN\b')        { $Level = 'warn'  }
         elseif ($msg -match '(?i)\bcancel(led)?\b')          { $Level = 'cancel' }
         else                                                  { $Level = 'info' }
     }
+
+    # v1.18.0 - display "tone" drives the line colour in BOTH the GUI console
+    # and the headless console. Derived from level first, then message shape.
+    # Kept separate from $Level so the .events.json level taxonomy is unchanged.
+    $tone = switch ($Level) {
+        'error'  { 'error' }
+        'warn'   { 'warn' }
+        'cancel' { 'warn' }
+        'debug'  { 'debug' }
+        default  {
+            if     ($msg -match '^\s*[-=]{8,}\s*$') { 'muted' }
+            elseif ($msg -match '(?i)\bsuccess(ful|fully)?\b|\bcomplete[!.]?(\s|$)|\bOK\b|\bresolved\b|\bfinished\b') { 'success' }
+            elseif ($msg -match '(?i)^\s*(Downloading|Installing|Extracting|Expanding|Checking|Scanning|Searching|Fetching|Running|Launching|Evaluating|Parsing|Querying|Building|Resolving)\b') { 'action' }
+            elseif ($msg -match '(?i)^\s{2,}(URL|Expected size|Log|Report)\s*:') { 'muted' }
+            else   { 'info' }
+        }
+    }
+
+    # Human sinks
+    if (-not $script:Silent) {
+        if ($script:Headless) {
+            $fg = $ToneConsoleColors[$tone]
+            if ($fg) { Write-Host $line -ForegroundColor $fg } else { Write-Host $line }
+        } else {
+            # v1.18.0 - the console box is owned by the UI thread; this runs on
+            # the worker runspace, so enqueue and let the drain timer render it.
+            Send-Ui @{ Op = 'log'; Line = $line; Tone = $tone }
+        }
+    }
+    # v1.18.0 - try/catch: the UI thread also logs the odd line (cancel click,
+    # startup) while the worker is writing; a rare open-collision on the file
+    # must never kill the run. Worst case one line is missing from the .log.
+    try { Add-Content -Path $LogFile -Value $line -Encoding UTF8 } catch {}
+
+    # Structured NDJSON sink.
     try {
         $evt = [ordered]@{
             ts             = $now.ToString('o')
@@ -1399,111 +1685,147 @@ function Log-Diag {
     Log -msg "[diag] $msg" -Level "debug" -Event "diagnostic" -Context $Context
 }
 
+# v1.18.0 - SetProgress/SetDownload/SetExtract run on the worker runspace:
+# enqueue only. The bar-style state machines they used to contain moved
+# verbatim into Invoke-UiOp ('progress' / 'dl' / 'ex') on the UI thread.
 function SetProgress($val) {
     if ($script:Headless) { return }
-    $progress.Value = [math]::Min([math]::Max([int]$val, 0), 100)
-    [System.Windows.Forms.Application]::DoEvents()
+    Send-Ui @{ Op = 'progress'; Value = [int]$val }
 }
 
 function SetDownload {
     param([int]$Pct, [string]$Label)
     if ($script:Headless) { return }
-    if ($Pct -ge 100) {
-        $dlBar.Style = "Continuous"
-        $dlBar.Value = 100
-    } elseif ($dlBar.Style -ne "Marquee") {
-        $dlBar.Style                 = "Marquee"
-        $dlBar.MarqueeAnimationSpeed = 25
-    }
-    $dlLabel.Text = $Label
-    [System.Windows.Forms.Application]::DoEvents()
+    Send-Ui @{ Op = 'dl'; Pct = $Pct; Label = $Label }
 }
 
 function SetExtract {
     param([int]$Pct, [string]$Label)
     if ($script:Headless) { return }
-    if ($Pct -ge 100) {
-        $exBar.Style = "Continuous"
-        $exBar.Value = 100
-    } elseif ($Pct -lt 0) {
-        if ($exBar.Style -ne "Marquee") {
-            $exBar.Style                 = "Marquee"
-            $exBar.MarqueeAnimationSpeed = 30
-        }
-    } else {
-        if ($exBar.Style -ne "Continuous") { $exBar.Style = "Continuous" }
-        $exBar.Value = [math]::Min($Pct, 99)
-    }
-    $exLabel.Text = $Label
-    [System.Windows.Forms.Application]::DoEvents()
+    Send-Ui @{ Op = 'ex'; Pct = $Pct; Label = $Label }
 }
 
+# v1.18.0 - spinner helpers run on the worker runspace: the frame index stays
+# worker-side, the rendered text ships to the UI thread as 'spin'/'spinstop'
+# messages. Dots=true lights the section status dots (Step semantics); the
+# Set-SpinnerLabels reset helper sends Dots=false (raw text only).
 function Step-DlSpinner {
     if ($script:Headless) { return }
     $script:SpinnerIndex = ($script:SpinnerIndex + 1) % $SpinnerFrames.Count
-    $dlSpinnerLabel.Text = " " + $SpinnerFrames[$script:SpinnerIndex]
-    # v1.11.0 - dot tracks state: working = primary blue
-    $dlStatusDot.ForeColor = $ColorPrimary
-    [System.Windows.Forms.Application]::DoEvents()
+    Send-Ui @{ Op = 'spin'; Dl = $true; Dots = $true; Text = (" " + $SpinnerFrames[$script:SpinnerIndex]) }
 }
 function Stop-DlSpinner {
     param([bool]$Success = $true)
     if ($script:Headless) { return }
-    $dlSpinnerLabel.Text      = if ($Success) { " OK" } else { " XX" }
-    $dlSpinnerLabel.ForeColor = if ($Success) { $ColorPrimary } else { $ColorDanger }
-    # v1.11.0 - dot tracks state: done = success green, failed = danger red
-    $dlStatusDot.ForeColor    = if ($Success) { $ColorSuccess } else { $ColorDanger }
-    [System.Windows.Forms.Application]::DoEvents()
+    Send-Ui @{ Op = 'spinstop'; Which = 'dl'; Success = $Success }
 }
 
 function Step-ExSpinner {
     if ($script:Headless) { return }
-    $script:SpinnerIndex  = ($script:SpinnerIndex + 1) % $SpinnerFrames.Count
-    $exSpinnerLabel.Text  = " " + $SpinnerFrames[$script:SpinnerIndex]
-    $exStatusDot.ForeColor = $ColorPrimary
-    [System.Windows.Forms.Application]::DoEvents()
+    $script:SpinnerIndex = ($script:SpinnerIndex + 1) % $SpinnerFrames.Count
+    Send-Ui @{ Op = 'spin'; Ex = $true; Dots = $true; Text = (" " + $SpinnerFrames[$script:SpinnerIndex]) }
 }
 function Stop-ExSpinner {
     param([bool]$Success = $true)
     if ($script:Headless) { return }
-    $exSpinnerLabel.Text      = if ($Success) { " OK" } else { " XX" }
-    $exSpinnerLabel.ForeColor = if ($Success) { $ColorSuccess } else { $ColorDanger }
-    $exStatusDot.ForeColor    = if ($Success) { $ColorSuccess } else { $ColorDanger }
-    [System.Windows.Forms.Application]::DoEvents()
+    Send-Ui @{ Op = 'spinstop'; Which = 'ex'; Success = $Success }
 }
 
 function Step-OverallSpinner {
     if ($script:Headless) { return }
-    $script:SpinnerIndex      = ($script:SpinnerIndex + 1) % $SpinnerFrames.Count
-    $overallSpinnerLabel.Text = " " + $SpinnerFrames[$script:SpinnerIndex]
-    $overallStatusDot.ForeColor = $ColorAccent
-    [System.Windows.Forms.Application]::DoEvents()
+    $script:SpinnerIndex = ($script:SpinnerIndex + 1) % $SpinnerFrames.Count
+    Send-Ui @{ Op = 'spin'; Overall = $true; Dots = $true; Text = (" " + $SpinnerFrames[$script:SpinnerIndex]) }
 }
 function Stop-OverallSpinner {
     param([bool]$Success = $true)
     if ($script:Headless) { return }
-    $overallSpinnerLabel.Text      = if ($Success) { " OK" } else { " XX" }
-    $overallSpinnerLabel.ForeColor = if ($Success) { $ColorSuccess } else { $ColorDanger }
-    $overallStatusDot.ForeColor    = if ($Success) { $ColorSuccess } else { $ColorDanger }
-    [System.Windows.Forms.Application]::DoEvents()
+    Send-Ui @{ Op = 'spinstop'; Which = 'overall'; Success = $Success }
 }
 
 function Step-AllSpinners {
     if ($script:Headless) { return }
-    $script:SpinnerIndex      = ($script:SpinnerIndex + 1) % $SpinnerFrames.Count
-    $f                        = $SpinnerFrames[$script:SpinnerIndex]
-    $dlSpinnerLabel.Text      = " " + $f
-    $exSpinnerLabel.Text      = " " + $f
-    $overallSpinnerLabel.Text = " " + $f
-    # While anything is spinning, every dot reflects "working" colour
-    $dlStatusDot.ForeColor      = $ColorPrimary
-    $exStatusDot.ForeColor      = $ColorPrimary
-    $overallStatusDot.ForeColor = $ColorAccent
-    [System.Windows.Forms.Application]::DoEvents()
+    $script:SpinnerIndex = ($script:SpinnerIndex + 1) % $SpinnerFrames.Count
+    Send-Ui @{ Op = 'spin'; Dl = $true; Ex = $true; Overall = $true; Dots = $true; Text = (" " + $SpinnerFrames[$script:SpinnerIndex]) }
+}
+
+# =========================
+# v1.18.0 - WORKER-SIDE UI MESSAGING HELPERS
+# =========================
+function Send-Ui {
+    # Enqueue a UI mutation for the drain timer. Safe from any thread; no-op
+    # when the queue doesn't exist (defensive - it's created unconditionally).
+    param([hashtable]$Msg)
+    if ($script:UiQueue) { $script:UiQueue.Enqueue($Msg) }
+}
+
+function Test-CancelFlag {
+    # Cancel originates on the UI thread (main runspace) and is delivered to
+    # the worker via the synchronized $UiSync table. Mirror it into
+    # $script:CancelRequested so all downstream logic that reads the
+    # script-scope flag after a poll keeps working unchanged.
+    if (-not $script:CancelRequested -and $script:UiSync -and $script:UiSync['CancelRequested']) {
+        $script:CancelRequested = $true
+    }
+    return [bool]$script:CancelRequested
+}
+
+function Set-ExHeader {
+    # Replaces direct $exHeaderLabel.Text writes in the worker-path code.
+    param([string]$Text)
+    if ($script:Headless) { return }
+    Send-Ui @{ Op = 'exheader'; Text = $Text }
+}
+
+function Set-SpinnerLabels {
+    # Replaces direct spinner-label text writes (frame-0 resets, blanking).
+    param([switch]$Dl, [switch]$Ex, [switch]$Overall, [string]$Text = "")
+    if ($script:Headless) { return }
+    Send-Ui @{ Op = 'spin'; Dl = [bool]$Dl; Ex = [bool]$Ex; Overall = [bool]$Overall; Dots = $false; Text = $Text }
+}
+
+function Set-UiTitle {
+    # Replaces direct $subtitle.Text / $form.Text writes after model detection.
+    param([string]$Subtitle)
+    if ($script:Headless) { return }
+    Send-Ui @{ Op = 'title'; Subtitle = $Subtitle }
+}
+
+function Show-TopMostMessageBox {
+    # v1.18.1 - worker-thread MessageBoxes have no owner window, so Windows may
+    # open them BEHIND the main form (the form lives on a different thread and
+    # can't be passed as owner cross-thread). Field symptom: a cancelled run
+    # looked hung with the Install button greyed out - the worker was blocked
+    # on an invisible dialog. Fix: an invisible TopMost owner form created on
+    # THIS thread forces the box to the foreground. Same positional signature
+    # as MessageBox.Show(text, caption, buttons, icon); returns DialogResult.
+    param(
+        [string]$Text,
+        [string]$Caption,
+        [string]$Buttons = "OK",
+        [string]$Icon    = "Information"
+    )
+    $owner = $null
+    try {
+        $owner = New-Object System.Windows.Forms.Form
+        $owner.TopMost       = $true
+        $owner.ShowInTaskbar = $false
+        $owner.Opacity       = 0
+        $owner.Size          = New-Object System.Drawing.Size(1, 1)
+        $owner.StartPosition = "CenterScreen"
+        $owner.Show()
+        $owner.Activate()
+        return [System.Windows.Forms.MessageBox]::Show($owner, $Text, $Caption, $Buttons, $Icon)
+    } catch {
+        # Fall back to an unowned box - worst case it opens behind, but the
+        # dialog still works and the run still completes.
+        return [System.Windows.Forms.MessageBox]::Show($Text, $Caption, $Buttons, $Icon)
+    } finally {
+        if ($owner) { try { $owner.Close(); $owner.Dispose() } catch {} }
+    }
 }
 
 function Test-Cancelled {
-    if ($script:CancelRequested) {
+    if (Test-CancelFlag) {
         Log "Operation cancelled."
         SetDownload -Pct 0 -Label "Cancelled"
         SetExtract  -Pct 0 -Label "Cancelled"
@@ -1563,6 +1885,68 @@ function Get-MissingDriverNames {
         Log "  WARNING: Could not enumerate missing device names: $($_.Exception.Message)"
         return ,@()
     }
+}
+
+# =========================
+# v1.17.0 - GUI MISSING-DEVICE SUMMARY
+# Update-MissingDeviceLink refreshes the footer link after each scan (before
+# install, after the vendor phase, after the WU/catalog fallbacks) so the
+# operator can see what the tool sees without digging through the console.
+# Show-MissingDevicesWindow opens a non-modal window listing the captured
+# names - non-modal so it can't block the install loop, which pumps via
+# DoEvents on the same thread.
+# =========================
+$script:GuiMissingDevices = @()
+$script:GuiMissingPhase   = ""
+
+function Update-MissingDeviceLink {
+    # v1.18.0 - runs on the worker runspace: enqueue only. The 'missing' op in
+    # Invoke-UiOp stores the names UI-side (where the link's click handler
+    # reads them) and updates the link text/enabled state.
+    param([string[]]$Names, [string]$Phase = "detected")
+    if ($script:Headless) { return }
+    Send-Ui @{ Op = 'missing'; Names = @($Names); Phase = $Phase }
+}
+
+function Show-MissingDevicesWindow {
+    if ($script:Headless) { return }
+    $names = @($script:GuiMissingDevices)
+
+    $win               = New-Object System.Windows.Forms.Form
+    $win.Text          = "Devices missing drivers"
+    $win.Size          = New-Object System.Drawing.Size(480, 380)
+    $win.StartPosition = "CenterParent"
+    $win.BackColor     = $ColorBg
+    $win.Font          = $FontUI
+    $win.MaximizeBox   = $false
+    $win.MinimizeBox   = $false
+
+    $hdr           = New-Object System.Windows.Forms.Label
+    $hdr.AutoSize  = $true
+    $hdr.Font      = $FontUIBold
+    $hdr.ForeColor = $ColorTextHi
+    $hdr.Location  = New-Object System.Drawing.Point(12, 12)
+    $hdr.Text      = if ($names.Count -gt 0) {
+        "$($names.Count) device(s) with missing/broken drivers ($($script:GuiMissingPhase)):"
+    } else {
+        "No devices with missing/broken drivers ($($script:GuiMissingPhase))."
+    }
+    $hdr.UseCompatibleTextRendering = $false
+    $win.Controls.Add($hdr)
+
+    $list            = New-Object System.Windows.Forms.TextBox
+    $list.Multiline  = $true
+    $list.ReadOnly   = $true
+    $list.ScrollBars = "Vertical"
+    $list.WordWrap   = $false
+    $list.Font       = $FontMonoSm
+    $list.Size       = New-Object System.Drawing.Size(440, 290)
+    $list.Location   = New-Object System.Drawing.Point(12, 38)
+    $list.Text       = (@($names | ForEach-Object { "  - $_" }) -join "`r`n")
+    $win.Controls.Add($list)
+
+    # Non-modal: Show() returns immediately, keeping the main run pumping.
+    $win.Show($form)
 }
 
 function Write-MissingDriverDetails {
@@ -1651,7 +2035,7 @@ function Write-VerboseDiagnostics {
 # =========================
 function Write-HtmlReport {
     param(
-        [Parameter(Mandatory=$true)][ValidateSet("success","failure","cancelled","testmode")]
+        [Parameter(Mandatory=$true)][ValidateSet("success","failure","cancelled","testmode","crashed")]
         [string]$Result
     )
     try {
@@ -1672,6 +2056,7 @@ function Write-HtmlReport {
             "failure"   { "#c92a2a" }
             "cancelled" { "#a37b00" }
             "testmode"  { "#1864ab" }
+            "crashed"   { "#7c3aed" }   # v1.17.0 - violet: distinct from ordinary failure red
         }
         $statusLabel = $Result.ToUpper()
 
@@ -1867,6 +2252,7 @@ function Write-HtmlReport {
 "@
         $utf8NoBom = New-Object System.Text.UTF8Encoding $false
         [System.IO.File]::WriteAllText($ReportFile, $html, $utf8NoBom)
+        $script:HtmlReportWritten = $true   # v1.17.0 - crash handler only writes a "crashed" report if none exists yet
         Log "HTML report saved to: $ReportFile" -Level "info" -Event "report_written"
     } catch {
         Log "  WARNING: HTML report generation failed - $($_.Exception.Message)" -Level "warn"
@@ -2016,9 +2402,12 @@ function Add-DownloadRecord {
 
 function Send-AnalyticsEvent {
     param(
-        [ValidateSet("success","failure","cancelled","testmode")]
+        [ValidateSet("success","failure","cancelled","testmode","crashed")]
         [string]$Result
     )
+    # v1.17.0 - mark that an analytics event was recorded for this run, so the
+    # crash handler doesn't emit a duplicate "crashed" row after a normal one.
+    $script:AnalyticsEventSent = $true
     $durationSec = 0
     if ($script:AnalyticsStartTime) {
         $durationSec = [int]((Get-Date) - $script:AnalyticsStartTime).TotalSeconds
@@ -2180,6 +2569,33 @@ function Send-AnalyticsEvent {
 }
 
 # =========================
+# v1.17.0 - DISK-SPACE PREFLIGHT
+# Packs run 1-4 GB and extract to 2-3x that; dying mid-extract on a small SSD
+# is the worst failure mode (half-written driver store, no clear error).
+# Requires free >= $RequiredBytes on the drive holding $Path. Fail-open: any
+# error in the check itself (UNC path, odd image) returns $true so a broken
+# check can never block a legitimate install.
+# =========================
+function Test-DiskSpace {
+    param([string]$Path, [long]$RequiredBytes)
+    try {
+        $full = [System.IO.Path]::GetFullPath($Path)
+        $root = [System.IO.Path]::GetPathRoot($full)
+        if (-not $root) { return $true }
+        $di   = New-Object System.IO.DriveInfo($root)
+        $free = $di.AvailableFreeSpace
+        if ($free -lt $RequiredBytes) {
+            Log ("  ERROR: not enough disk space on {0} - {1:N1} GB free, ~{2:N1} GB needed (download + extract headroom)." -f `
+                $root, ($free / 1GB), ($RequiredBytes / 1GB)) -Level "error" -Event "disk_space" -Context @{
+                    drive = $root; free_bytes = $free; required_bytes = $RequiredBytes
+                }
+            return $false
+        }
+        return $true
+    } catch { return $true }
+}
+
+# =========================
 # CURL DOWNLOAD
 # =========================
 function Invoke-CurlDownload {
@@ -2205,6 +2621,15 @@ function Invoke-CurlDownload {
     $totalMB = if ($totalBytes -gt 0) { [math]::Round($totalBytes / 1MB, 1) } else { 0 }
     if ($totalMB -gt 0) { Log "  Expected size: $totalMB MB" }
 
+    # v1.17.0 - preflight: need the pack itself plus extraction headroom (~3x).
+    # Only possible when the HEAD probe returned a size; unknown-size downloads
+    # proceed as before.
+    if ($totalBytes -gt 0 -and -not (Test-DiskSpace -Path $OutFile -RequiredBytes ($totalBytes * 3))) {
+        SetDownload -Pct 0 -Label "Failed - not enough disk space"
+        Stop-DlSpinner -Success $false
+        return $false
+    }
+
     $psi                 = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName        = "curl.exe"
     $psi.Arguments       = "--location --fail --connect-timeout 30 " +
@@ -2225,7 +2650,7 @@ function Invoke-CurlDownload {
         # don't keep streaming after the user clicked Cancel. Without this,
         # curl runs to completion (potentially hundreds of MB) while the
         # caller's Test-Cancelled check just sits waiting for HasExited.
-        if ($script:CancelRequested) {
+        if (Test-CancelFlag) {
             Log "  Cancel detected - killing curl."
             try { $proc.Kill() } catch {}
             try { $proc.WaitForExit(2000) | Out-Null } catch {}
@@ -2377,7 +2802,7 @@ function Invoke-CurlDownloadParallel {
         Start-Sleep -Milliseconds 700
 
         # Cancel check - bail entire batch
-        if ($script:CancelRequested) {
+        if (Test-CancelFlag) {
             Log "  Parallel cancel detected - killing all active curls." -Level "cancel"
             foreach ($i in $activeIdxs) {
                 $r = $results[$i]
@@ -2472,9 +2897,8 @@ function Watch-Extraction {
     )
     $stall     = 0
     $lastCount = 0
-    $script:SpinnerIndex      = 0
-    $exSpinnerLabel.Text      = " " + $SpinnerFrames[0]
-    $overallSpinnerLabel.Text = " " + $SpinnerFrames[0]
+    $script:SpinnerIndex = 0
+    Set-SpinnerLabels -Ex -Overall -Text (" " + $SpinnerFrames[0])
     SetExtract -Pct -1 -Label "Extracting..."
 
     while (-not $ExtractProc.HasExited) {
@@ -2491,7 +2915,7 @@ function Watch-Extraction {
         }
         Step-ExSpinner
         [System.Windows.Forms.Application]::DoEvents()
-        if ($script:CancelRequested) {
+        if (Test-CancelFlag) {
             Log "  Extraction cancelled by user."
             try { $ExtractProc.Kill() } catch {}
             break
@@ -2535,11 +2959,10 @@ function Install-DriversFromPath {
         return $true
     }
     Log "Installing via pnputil..."
-    $exHeaderLabel.Text  = "Install INFs"
-    $exSpinnerLabel.Text = " " + $SpinnerFrames[0]
+    Set-ExHeader "Install INFs"
+    Set-SpinnerLabels -Ex -Text (" " + $SpinnerFrames[0])
     $script:SpinnerIndex = 0
-    $exBar.Style         = "Continuous"
-    $exBar.Value         = 0
+    SetExtract -Pct 0 -Label ""   # v1.18.0 - continuous @ 0; was direct $exBar Style/Value writes
 
     foreach ($inf in $infs) {
         $i++
@@ -2566,7 +2989,7 @@ function Install-DriversFromPath {
         Step-ExSpinner
         Step-OverallSpinner
         [System.Windows.Forms.Application]::DoEvents()
-        if ($script:CancelRequested) {
+        if (Test-CancelFlag) {
             Log "INF installation cancelled at $i / $total"
             $script:AnalyticsInfCount = $i
             break
@@ -2577,7 +3000,7 @@ function Install-DriversFromPath {
     SetExtract -Pct 100 -Label "All $total INFs installed."
     Stop-ExSpinner      -Success $true
     Stop-OverallSpinner -Success $true
-    $exHeaderLabel.Text = "Extract & install"
+    Set-ExHeader "Extract & install"
     Log "All INFs processed."
     return $true
 }
@@ -2609,9 +3032,8 @@ function Start-PackExtraction {
             } -ArgumentList $PackFile, $DestPath
 
             $stall = 0; $lastCount = 0
-            $script:SpinnerIndex      = 0
-            $exSpinnerLabel.Text      = " " + $SpinnerFrames[0]
-            $overallSpinnerLabel.Text = " " + $SpinnerFrames[0]
+            $script:SpinnerIndex = 0
+            Set-SpinnerLabels -Ex -Overall -Text (" " + $SpinnerFrames[0])
             while ($zipJob.State -eq "Running") {
                 Start-Sleep -Milliseconds 700
                 $count = if (Test-Path $DestPath) {
@@ -2670,9 +3092,8 @@ function Start-PackExtraction {
             if (($Vendor -eq "Dell" -or $Vendor -eq "HP") -and (Test-Path $script:7zExe)) {
                 Log "  Extracting with 7-Zip (pass 1)..."
                 SetExtract -Pct -1 -Label "Extracting with 7-Zip..."
-                $script:SpinnerIndex      = 0
-                $exSpinnerLabel.Text      = " " + $SpinnerFrames[0]
-                $overallSpinnerLabel.Text = " " + $SpinnerFrames[0]
+                $script:SpinnerIndex = 0
+                Set-SpinnerLabels -Ex -Overall -Text (" " + $SpinnerFrames[0])
 
                 $psi                 = New-Object System.Diagnostics.ProcessStartInfo
                 $psi.FileName        = $script:7zExe
@@ -2690,7 +3111,7 @@ function Start-PackExtraction {
                     Step-ExSpinner
                     Step-OverallSpinner
                     [System.Windows.Forms.Application]::DoEvents()
-                    if ($script:CancelRequested) { try { $sevenProc.Kill() } catch {}; break }
+                    if (Test-CancelFlag) { try { $sevenProc.Kill() } catch {}; break }
                 }
                 Start-Sleep -Seconds 1
                 $n7z = & $CountFiles
@@ -2726,7 +3147,7 @@ function Start-PackExtraction {
                     Step-ExSpinner
                     Step-OverallSpinner
                     [System.Windows.Forms.Application]::DoEvents()
-                    if ($script:CancelRequested) { try { $proc.Kill() } catch {}; break }
+                    if (Test-CancelFlag) { try { $proc.Kill() } catch {}; break }
                 }
                 Start-Sleep -Seconds 2
                 return (& $CountFiles)
@@ -3325,13 +3746,13 @@ function Start-DellDriverInstall {
             Log "  Headless: attempting best-effort hardware-ID match automatically."
             $tryIndividual = $true
         } else {
-            $ans = [System.Windows.Forms.MessageBox]::Show(
+            $ans = Show-TopMostMessageBox (
                 "No Dell driver pack exists for '$ModelName' (this is a consumer/gaming model).`n`n" +
                 "Attempt a best-effort driver match by hardware ID instead?`n`n" +
                 "Yes = match & install Dell chipset/audio/LAN drivers for this machine's`n" +
                 "        hardware (anything left over can be found via Windows Update)`n" +
-                "No  = just open the Dell support page for this service tag",
-                "No Driver Pack Found", "YesNo", "Question")
+                "No  = just open the Dell support page for this service tag") `
+                "No Driver Pack Found" "YesNo" "Question"
             if ($ans -eq [System.Windows.Forms.DialogResult]::Yes) { $tryIndividual = $true }
         }
 
@@ -4672,7 +5093,7 @@ function Invoke-LenovoPackageCommand {
                 try { $proc.Kill() } catch {}
                 return -9999
             }
-            if ($script:CancelRequested) {
+            if (Test-CancelFlag) {
                 try { $proc.Kill() } catch {}
                 return -9998
             }
@@ -5427,12 +5848,10 @@ function Install-SurfaceMsi {
 
     Log "Extracting Surface MSI: $FileName"
     Log "  msiexec /a `"$MsiFile`" /qn TARGETDIR=`"$extractPath`""
-    $exHeaderLabel.Text          = "Extract MSI"
-    $exSpinnerLabel.Text         = " " + $SpinnerFrames[0]
-    $script:SpinnerIndex         = 0
-    $exBar.Style                 = "Marquee"
-    $exBar.MarqueeAnimationSpeed = 30
-    SetExtract -Pct -1 -Label "Extracting MSI contents..."
+    Set-ExHeader "Extract MSI"
+    Set-SpinnerLabels -Ex -Text (" " + $SpinnerFrames[0])
+    $script:SpinnerIndex = 0
+    SetExtract -Pct -1 -Label "Extracting MSI contents..."   # Pct -1 = marquee; was direct $exBar writes
 
     $psi                 = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName        = "msiexec.exe"
@@ -5456,7 +5875,7 @@ function Install-SurfaceMsi {
         Step-ExSpinner
         Step-OverallSpinner
         [System.Windows.Forms.Application]::DoEvents()
-        if ($script:CancelRequested) {
+        if (Test-CancelFlag) {
             Log "  MSI extraction cancelled by user."
             try { $msiProc.Kill() } catch {}
             return $false
@@ -5485,7 +5904,7 @@ function Install-SurfaceMsi {
     SetExtract -Pct 60 -Label "Extracted $finalCount files - installing INFs..."
     Play-Sound -Event "ExtractComplete"
 
-    $exHeaderLabel.Text = "Install INFs"
+    Set-ExHeader "Install INFs"
     SetProgress 60
     return (Install-DriversFromPath -BasePath $extractPath)
 }
@@ -5503,6 +5922,7 @@ function Show-SurfaceModelPicker {
     $pickerForm.FormBorderStyle  = "FixedDialog"
     $pickerForm.MaximizeBox      = $false
     $pickerForm.MinimizeBox      = $false
+    $pickerForm.TopMost          = $true   # v1.18.1 - unowned since the thread split; keep it in front
     $pickerForm.BackColor        = [System.Drawing.Color]::FromArgb(245, 245, 245)
 
     $lbl           = New-Object System.Windows.Forms.Label
@@ -5552,7 +5972,11 @@ function Show-SurfaceModelPicker {
     $pickerForm.AcceptButton = $okBtn
     $pickerForm.CancelButton = $cancelBtn
 
-    $result = $pickerForm.ShowDialog($form)
+    # v1.18.0 - no owner: this dialog now runs on the worker (STA) thread and
+    # passing the UI thread's $form as owner would be a cross-thread call.
+    # ShowDialog pumps its own modal loop on this thread; the main window
+    # stays live on its own thread.
+    $result = $pickerForm.ShowDialog()
     if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
         return $combo.SelectedItem
     }
@@ -5927,7 +6351,7 @@ function Invoke-DynabookInstaller {
                 try { $proc.Kill() } catch {}
                 return -9999
             }
-            if ($script:CancelRequested) {
+            if (Test-CancelFlag) {
                 try { $proc.Kill() } catch {}
                 return -9998
             }
@@ -6429,6 +6853,8 @@ function Start-Install {
     $script:AnalyticsDownloadUrls    = New-Object System.Collections.Generic.List[hashtable]   # v1.13.1
     $script:AnalyticsStartTime       = Get-Date
     $script:7zInstalled              = $false
+    $script:HtmlReportWritten        = $false   # v1.17.0 - crash-handler guards
+    $script:AnalyticsEventSent       = $false
     $script:Headless                 = [bool]$Headless
     # v1.10.0 - re-anchor mode flags on each Start-Install invocation. The
     # script-scope assignments at top-of-file cover the irm|iex path; this
@@ -6448,10 +6874,24 @@ function Start-Install {
             exit 1
         }
         Log "Not running as admin - re-launching elevated..."
-        Start-Process powershell `
-            "-WindowStyle Hidden -ExecutionPolicy Bypass -Command `"irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto.ps1 | iex`"" `
-            -Verb RunAs
-        $form.Close()
+        # v1.17.0 - when the script was started from a file on disk, relaunch
+        # THAT file, not the published GitHub copy. Pre-v1.17.0 a locally edited
+        # dev copy silently swapped to raw.githubusercontent main on elevation.
+        # $PSCommandPath is empty only in the true irm|iex case, which keeps
+        # the original URL relaunch as its fallback.
+        # v1.18.0 - $PSCommandPath is empty inside the worker runspace; use the
+        # value captured at top-of-script instead. Form close goes through the
+        # UI queue (this code runs on the worker thread).
+        if ($script:ScriptFilePath) {
+            Start-Process powershell `
+                "-ExecutionPolicy Bypass -File `"$($script:ScriptFilePath)`"" `
+                -Verb RunAs
+        } else {
+            Start-Process powershell `
+                "-WindowStyle Hidden -ExecutionPolicy Bypass -Command `"irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto.ps1 | iex`"" `
+                -Verb RunAs
+        }
+        Send-Ui @{ Op = 'quit' }
         exit
     }
 
@@ -6499,12 +6939,11 @@ function Start-Install {
     } catch {}
 
     if (-not $script:Headless) {
+        # Clipboard is safe here: the worker runspace is STA (v1.18.0).
         try { [System.Windows.Forms.Clipboard]::SetText($model) } catch {}
         # v1.11.0 - title stays static; the detected model lives in the subtitle row
-        # for a cleaner header hierarchy. The window title bar now matches the subtitle
-        # format for consistency.
-        $subtitle.Text  = "$manufacturer  ·  $model"
-        $form.Text      = "Driver Installer  -  $manufacturer  ·  $model"
+        # for a cleaner header hierarchy. The window title bar matches the subtitle.
+        Set-UiTitle "$manufacturer  ·  $model"
     }
 
     $overrideNote = if ($Manufacturer -or $Model) { "  [OVERRIDDEN via param]" } else { "  (from WMI)" }
@@ -6528,16 +6967,16 @@ function Start-Install {
         Log "Missing devices (before):"
         foreach ($n in $beforeNames) { Log "  - $n" }
     }
+    Update-MissingDeviceLink -Names $beforeNames -Phase "before install"   # v1.17.0
 
     # Offer to skip if no missing drivers detected
     if ($script:AnalyticsMissingBefore -eq 0) {
         if ($script:Headless) {
             Log "No missing drivers detected - continuing anyway (headless mode)."
         } else {
-            $skipResult = [System.Windows.Forms.MessageBox]::Show(
-                "No missing drivers were detected on this device.`n`nRun driver installation anyway?",
-                "No Missing Drivers", "YesNo", "Question"
-            )
+            $skipResult = Show-TopMostMessageBox `
+                "No missing drivers were detected on this device.`n`nRun driver installation anyway?" `
+                "No Missing Drivers" "YesNo" "Question"
             if ($skipResult -eq [System.Windows.Forms.DialogResult]::No) {
                 Log "User chose to skip - no missing drivers detected."
                 SetProgress 100
@@ -6558,11 +6997,9 @@ function Start-Install {
     SetProgress 0
     SetDownload -Pct 0 -Label "Waiting..."
     SetExtract  -Pct 0 -Label "Waiting..."
-    $exHeaderLabel.Text       = "Extract"
-    $dlSpinnerLabel.Text      = ""
-    $exSpinnerLabel.Text      = ""
-    $overallSpinnerLabel.Text = ""
-    $script:SpinnerIndex      = 0
+    Set-ExHeader "Extract"
+    Set-SpinnerLabels -Dl -Ex -Overall -Text ""
+    $script:SpinnerIndex = 0
 
     # v1.10.0 - TEST MODE SHORT-CIRCUIT
     # Bail before any system-mutating work happens. We've already done all the
@@ -6589,10 +7026,9 @@ function Start-Install {
             Write-Host "TEST MODE: dry-run complete. See log: $LogFile"
             Write-Host "Report:    $ReportFile"
         } else {
-            [System.Windows.Forms.MessageBox]::Show(
-                "Test mode complete.`n`nNo downloads or installs were performed.`n`nReport: $ReportFile",
-                "Test Mode Complete", "OK", "Information"
-            ) | Out-Null
+            Show-TopMostMessageBox `
+                "Test mode complete.`n`nNo downloads or installs were performed.`n`nReport: $ReportFile" `
+                "Test Mode Complete" "OK" "Information" | Out-Null
             Set-ButtonIdle
         }
         return
@@ -6659,8 +7095,7 @@ function Start-Install {
             # Update analytics model to the picked Surface model
             $script:AnalyticsManufacturer = "Microsoft"
             $script:AnalyticsModel        = $pickedModel
-            $subtitle.Text = "Microsoft  ·  $pickedModel"
-            $form.Text     = "Driver Installer  -  Microsoft  ·  $pickedModel"
+            Set-UiTitle "Microsoft  ·  $pickedModel"
             Set-ButtonRunning
             if (-not (Assert-Curl)) { Send-AnalyticsEvent -Result "failure"; Set-ButtonIdle; return }
             $success = Start-MicrosoftSurfaceDriverInstall -DriverRoot $driverRoot -ModelName $pickedModel
@@ -6682,6 +7117,7 @@ function Start-Install {
     } else { 0 }
     Log "Missing drivers AFTER  install: $($script:AnalyticsMissingAfter)"
     Log "Devices resolved by this install: $missingDelta"
+    Update-MissingDeviceLink -Names $afterNames -Phase "after install"   # v1.17.0
     Write-MissingDriverDetails
 
     # v1.15.0 - Universal vendor-pack-free fallbacks. If devices are STILL missing
@@ -6692,13 +7128,13 @@ function Start-Install {
     #      drivers - Intel DPTF, serial-IO, etc. - that the WUA search skips)
     # Headless gets both automatically; this is the difference between "17 devices
     # left unresolved" and a (near-)clean machine.
-    if ($PromptWindowsUpdate -and -not $script:CancelRequested -and -not $script:TestMode `
+    if ($PromptWindowsUpdate -and -not (Test-CancelFlag) -and -not $script:TestMode `
         -and $script:AnalyticsMissingAfter -gt 0) {
         $fallbackFixed = 0
         $fallbackFixed += [int](Install-DriversViaWindowsUpdate)
 
         # Only escalate to the catalog scrape if WU didn't already clear everything.
-        if (-not $script:CancelRequested -and (Get-MissingDriverCount) -gt 0) {
+        if (-not (Test-CancelFlag) -and (Get-MissingDriverCount) -gt 0) {
             $fallbackFixed += [int](Install-DriversFromMsUpdateCatalog -DriverRoot $driverRoot)
         }
 
@@ -6706,7 +7142,9 @@ function Start-Install {
             Log "Re-scanning devices after fallback driver installs..."
             $script:AnalyticsMissingAfter = Get-MissingDriverCount
             $script:AnalyticsMissingAfterList.Clear()
-            foreach ($n in (Get-MissingDriverNames)) { $script:AnalyticsMissingAfterList.Add($n) | Out-Null }
+            $afterNames = Get-MissingDriverNames
+            foreach ($n in $afterNames) { $script:AnalyticsMissingAfterList.Add($n) | Out-Null }
+            Update-MissingDeviceLink -Names $afterNames -Phase "after fallbacks"   # v1.17.0
             $missingDelta = if ($script:AnalyticsMissingBefore -ge 0 -and $script:AnalyticsMissingAfter -ge 0) {
                 $script:AnalyticsMissingBefore - $script:AnalyticsMissingAfter
             } else { 0 }
@@ -6727,10 +7165,14 @@ function Start-Install {
         }
     }
 
-    if ($script:CancelRequested) { Send-AnalyticsEvent -Result "cancelled" }
+    if (Test-CancelFlag) { Send-AnalyticsEvent -Result "cancelled" }
 
     Log "--------------------------------------------"
-    if ($success) {
+    # v1.18.2 - a cancelled run must never take the success path, even when the
+    # vendor phase itself succeeded (e.g. Cancel clicked during the WU fallback).
+    # Pre-v1.18.2 that combination fired BOTH "cancelled" and "success" analytics
+    # events and popped the completion dialog on a run the operator just aborted.
+    if ($success -and -not $script:CancelRequested) {
         SetProgress 100
         SetDownload -Pct 100 -Label "Complete"
         SetExtract  -Pct 100 -Label "Complete"
@@ -6781,10 +7223,7 @@ function Start-Install {
                             "  - Yes:     reboot now to finish installing drivers`n" +
                             "  - No:      open Windows Update to search for the rest`n" +
                             "  - Cancel:  do nothing"
-                $result = [System.Windows.Forms.MessageBox]::Show(
-                    $msgText,
-                    "Installation Complete", "YesNoCancel", "Information"
-                )
+                $result = Show-TopMostMessageBox $msgText "Installation Complete" "YesNoCancel" "Information"
                 if ($result -eq [System.Windows.Forms.DialogResult]::Yes) {
                     Restart-Computer -Force
                 } elseif ($result -eq [System.Windows.Forms.DialogResult]::No) {
@@ -6796,10 +7235,7 @@ function Start-Install {
             } else {
                 # Standard completion dialog if no missing drivers or PromptWindowsUpdate not enabled
                 $msgText += "`n`nReboot now to complete installation?"
-                $result = [System.Windows.Forms.MessageBox]::Show(
-                    $msgText,
-                    "Installation Complete", "YesNo", "Information"
-                )
+                $result = Show-TopMostMessageBox $msgText "Installation Complete" "YesNo" "Information"
                 if ($result -eq [System.Windows.Forms.DialogResult]::Yes) { Restart-Computer -Force }
                 else { Set-ButtonIdle }
             }
@@ -6809,7 +7245,7 @@ function Start-Install {
         # On non-cancel failure, fire it here. Either way, write the HTML report next
         # so the operator has a permanent record even on broken/cancelled runs.
         if (-not $script:CancelRequested) { Send-AnalyticsEvent -Result "failure" }
-        $reportResult = if ($script:CancelRequested) { "cancelled" } else { "failure" }
+        $reportResult = if (Test-CancelFlag) { "cancelled" } else { "failure" }
         Write-HtmlReport -Result $reportResult  # v1.10.0
         SetDownload -Pct 0 -Label "Failed - see log"
         SetExtract  -Pct 0 -Label "Failed - see log"
@@ -6833,15 +7269,18 @@ function Start-Install {
                 Start-Sleep -Milliseconds 500
                 Open-WindowsUpdate
             }
+        } elseif ($script:CancelRequested) {
+            # v1.18.1 - user-initiated cancel: don't make the operator dismiss
+            # an "Installation Failed" dialog for something they asked for.
+            # Just re-arm the UI so they can run again.
+            Log "Run cancelled - ready to run again."
+            Set-ButtonIdle
         } else {
             $msgText = "Driver installation failed or no pack was found.`nCheck the log:`n`n$LogFile`n`nReport: $ReportFile"
             # v1.12.0 - Add Windows Update prompt if drivers still missing
             if ($PromptWindowsUpdate -and $stillMissing -gt 0) {
                 $msgText += "`n`n$stillMissing drivers still missing.`nWould you like to open Windows Update to search for additional drivers?"
-                $result = [System.Windows.Forms.MessageBox]::Show(
-                    $msgText,
-                    "Installation Failed", "YesNo", "Warning"
-                )
+                $result = Show-TopMostMessageBox $msgText "Installation Failed" "YesNo" "Warning"
                 if ($result -eq [System.Windows.Forms.DialogResult]::Yes) {
                     Open-WindowsUpdate
                     Set-ButtonIdle
@@ -6849,10 +7288,7 @@ function Start-Install {
                     Set-ButtonIdle
                 }
             } else {
-                [System.Windows.Forms.MessageBox]::Show(
-                    $msgText,
-                    "Installation Failed", "OK", "Error"
-                )
+                Show-TopMostMessageBox $msgText "Installation Failed" "OK" "Error" | Out-Null
                 Set-ButtonIdle
             }
         }
@@ -6860,32 +7296,305 @@ function Start-Install {
 }
 
 # =========================
+# v1.17.0 - CRASH-SAFE WRAPPER
+# Field logs are the debugging lifeline; an unhandled exception inside a
+# vendor handler used to skip the analytics event AND the HTML report,
+# leaving nothing but a truncated .log. All entry points now come through
+# here: the exception is logged with message + position + stack trace, and
+# the analytics event / HTML report are emitted with result="crashed" -
+# unless the normal paths already wrote them (guard flags set inside
+# Send-AnalyticsEvent / Write-HtmlReport, reset at the top of Start-Install).
+# =========================
+function Invoke-StartInstallSafe {
+    try {
+        Start-Install
+    } catch {
+        $ex = $_
+        try {
+            Log "============================================" -Level "error"
+            Log "FATAL: unhandled exception - run aborted." -Level "error" -Event "crash" -Context @{
+                message = $ex.Exception.Message
+                type    = $ex.Exception.GetType().FullName
+            }
+            Log "  $($ex.Exception.Message)" -Level "error"
+            if ($ex.InvocationInfo -and $ex.InvocationInfo.PositionMessage) {
+                foreach ($l in ($ex.InvocationInfo.PositionMessage -split "`r?`n")) { Log "  $l" -Level "error" }
+            }
+            if ($ex.ScriptStackTrace) {
+                foreach ($l in ($ex.ScriptStackTrace -split "`r?`n")) { Log "    $l" -Level "error" }
+            }
+        } catch {}
+        if (-not $script:AnalyticsEventSent) { try { Send-AnalyticsEvent -Result "crashed" } catch {} }
+        if (-not $script:HtmlReportWritten)  { try { Write-HtmlReport    -Result "crashed" } catch {} }
+        try { Play-Sound -Event "Failure" } catch {}
+        if ($script:Headless) {
+            if (-not $script:Silent) {
+                Write-Host "CRASHED: unhandled exception - $($ex.Exception.Message)"
+                Write-Host "Log:    $LogFile"
+                Write-Host "Report: $ReportFile"
+            }
+        } else {
+            try { Set-ButtonIdle } catch {}
+            Show-TopMostMessageBox `
+                "The installer hit an unexpected error and stopped:`n`n$($ex.Exception.Message)`n`nLog: $LogFile`nReport: $ReportFile" `
+                "Installer Crashed" "OK" "Error" | Out-Null
+        }
+    }
+}
+
+# =========================
+# v1.18.0 - UI DRAIN + WORKER LAUNCHER (UI thread only)
+#
+# Invoke-UiOp owns ALL control mutation. It runs exclusively on the UI thread,
+# called by the drain timer below (and directly by UI-thread event handlers).
+# The bar-style state machines that used to live in SetDownload/SetExtract and
+# the button/spinner/dot logic moved here verbatim.
+# =========================
+function Invoke-UiOp {
+    param([hashtable]$m)
+    switch ($m.Op) {
+        'log' {
+            $lineColor = if ($m.Tone -and $ToneColors.ContainsKey($m.Tone)) { $ToneColors[$m.Tone] } else { $ColorConsoleFg }
+            $statusBox.SelectionStart  = $statusBox.TextLength
+            $statusBox.SelectionLength = 0
+            $statusBox.SelectionColor  = $lineColor
+            $statusBox.AppendText("$($m.Line)`r`n")
+            $statusBox.SelectionColor  = $ColorConsoleFg
+            if ($script:AutoScroll) { $statusBox.ScrollToCaret() }
+        }
+        'progress' {
+            $progress.Value = [math]::Min([math]::Max([int]$m.Value, 0), 100)
+        }
+        'dl' {
+            if ($m.Pct -ge 100) {
+                $dlBar.Style = "Continuous"
+                $dlBar.Value = 100
+            } elseif ($dlBar.Style -ne "Marquee") {
+                $dlBar.Style                 = "Marquee"
+                $dlBar.MarqueeAnimationSpeed = 25
+            }
+            $dlLabel.Text = $m.Label
+        }
+        'ex' {
+            if ($m.Pct -ge 100) {
+                $exBar.Style = "Continuous"
+                $exBar.Value = 100
+            } elseif ($m.Pct -lt 0) {
+                if ($exBar.Style -ne "Marquee") {
+                    $exBar.Style                 = "Marquee"
+                    $exBar.MarqueeAnimationSpeed = 30
+                }
+            } else {
+                if ($exBar.Style -ne "Continuous") { $exBar.Style = "Continuous" }
+                $exBar.Value = [math]::Min([int]$m.Pct, 99)
+            }
+            $exLabel.Text = $m.Label
+        }
+        'spin' {
+            if ($m.Dl)      { $dlSpinnerLabel.Text      = $m.Text; if ($m.Dots) { $dlStatusDot.ForeColor      = $ColorPrimary } }
+            if ($m.Ex)      { $exSpinnerLabel.Text      = $m.Text; if ($m.Dots) { $exStatusDot.ForeColor      = $ColorPrimary } }
+            if ($m.Overall) { $overallSpinnerLabel.Text = $m.Text; if ($m.Dots) { $overallStatusDot.ForeColor = $ColorAccent  } }
+        }
+        'spinstop' {
+            $txt = if ($m.Success) { " OK" } else { " XX" }
+            $dot = if ($m.Success) { $ColorSuccess } else { $ColorDanger }
+            switch ($m.Which) {
+                'dl' {
+                    $dlSpinnerLabel.Text      = $txt
+                    $dlSpinnerLabel.ForeColor = if ($m.Success) { $ColorPrimary } else { $ColorDanger }
+                    $dlStatusDot.ForeColor    = $dot
+                }
+                'ex' {
+                    $exSpinnerLabel.Text      = $txt
+                    $exSpinnerLabel.ForeColor = $dot
+                    $exStatusDot.ForeColor    = $dot
+                }
+                'overall' {
+                    $overallSpinnerLabel.Text      = $txt
+                    $overallSpinnerLabel.ForeColor = $dot
+                    $overallStatusDot.ForeColor    = $dot
+                }
+            }
+        }
+        'exheader' { $exHeaderLabel.Text = $m.Text }
+        'title' {
+            $subtitle.Text = $m.Subtitle
+            $form.Text     = "Driver Installer  -  $($m.Subtitle)"
+        }
+        'btnrun' {
+            $button.Enabled         = $false
+            $button.BackColor       = $ColorMutedBg
+            $button.ForeColor       = $ColorDisabledFg
+            $cancelButton.Enabled   = $true
+            $cancelButton.BackColor = $ColorDanger
+            $cancelButton.ForeColor = [System.Drawing.Color]::White
+            # Reset section dots back to muted - they light up as spinners fire
+            $dlStatusDot.ForeColor      = $ColorMuted
+            $exStatusDot.ForeColor      = $ColorMuted
+            $overallStatusDot.ForeColor = $ColorMuted
+        }
+        'btnidle' {
+            $button.Enabled         = $true
+            $button.BackColor       = $ColorPrimary
+            $button.ForeColor       = [System.Drawing.Color]::White
+            $cancelButton.Enabled   = $false
+            $cancelButton.BackColor = $ColorMutedBg
+            $cancelButton.ForeColor = $ColorDisabledFg
+        }
+        'missing' {
+            # Stored UI-side: Show-MissingDevicesWindow (link click) reads these
+            # on the UI thread / main runspace.
+            $script:GuiMissingDevices = @($m.Names)
+            $script:GuiMissingPhase   = $m.Phase
+            $n = @($m.Names).Count
+            if ($n -eq 0) {
+                $missingLink.Text    = "No devices missing drivers ($($m.Phase))"
+                $missingLink.Enabled = $false
+            } else {
+                $missingLink.Text    = "$n device(s) missing drivers ($($m.Phase)) - view list"
+                $missingLink.Enabled = $true
+            }
+        }
+        'quit' { $form.Close() }
+    }
+}
+
+function Start-WorkerInstall {
+    # Launch the install in a background STA runspace. The snapshot approach:
+    # every function and (nearly) every variable currently visible is copied
+    # into an InitialSessionState, so the worker sees the same world the main
+    # runspace would have - including param overrides, catalogs, log paths,
+    # and the shared $UiQueue/$UiSync objects (same instances, thread-safe).
+    # Control references ride along too, but the worker-side helpers never
+    # touch them (all UI mutation is enqueued back to this thread).
+    if ($script:WorkerPS) { return }   # a run is already in flight
+    $script:UiSync['CancelRequested'] = $false
+    $script:CancelRequested           = $false
+
+    $iss = [System.Management.Automation.Runspaces.InitialSessionState]::CreateDefault()
+    foreach ($fn in (Get-ChildItem Function:)) {
+        try {
+            $iss.Commands.Add((New-Object System.Management.Automation.Runspaces.SessionStateFunctionEntry($fn.Name, $fn.Definition)))
+        } catch {}
+    }
+    $skipVars = @(
+        # worker bookkeeping + this function's locals
+        'WorkerPS','WorkerHandle','WorkerRunspace','UiTimer','iss','fn','skipVars','v',
+        # automatics / readonly / host plumbing that must not be overridden
+        '_','null','true','false','input','args','foreach','switch','PSItem','Matches',
+        'MyInvocation','PSBoundParameters','PSCommandPath','PSScriptRoot','StackTrace',
+        'Error','ExecutionContext','Host','HOME','PID','PSVersionTable','PWD','ShellId',
+        'PSEdition','PSCulture','PSUICulture','ConsoleFileName','PROFILE','PSHOME',
+        'EnabledExperimentalFeatures','LASTEXITCODE'
+    )
+    foreach ($v in (Get-Variable)) {
+        if ($skipVars -contains $v.Name) { continue }
+        try {
+            $iss.Variables.Add((New-Object System.Management.Automation.Runspaces.SessionStateVariableEntry($v.Name, $v.Value, $null)))
+        } catch {}
+    }
+
+    $rs = [runspacefactory]::CreateRunspace($iss)
+    # STA is load-bearing: it lets every existing MessageBox, the Surface
+    # picker's ShowDialog, and Clipboard.SetText run unmodified on the worker
+    # thread (each pumps its own modal loop), blocking only the worker while
+    # this window stays live. ReuseThread keeps one STA thread for the run.
+    $rs.ApartmentState = "STA"
+    $rs.ThreadOptions  = "ReuseThread"
+    $rs.Open()
+
+    $script:WorkerRunspace = $rs
+    $script:WorkerPS       = [PowerShell]::Create()
+    $script:WorkerPS.Runspace = $rs
+    $null = $script:WorkerPS.AddScript('Invoke-StartInstallSafe')
+    $script:WorkerHandle = $script:WorkerPS.BeginInvoke()
+}
+
+# =========================
 # WIRE UP + LAUNCH
 # =========================
 if ($Headless) {
-    # Headless mode - run directly, no GUI
-    Start-Install
+    # Headless mode - run directly on this thread, no GUI, no worker runspace.
+    Invoke-StartInstallSafe
 } else {
-    # GUI mode - wire up form and show
-    $button.Add_Click({ Start-Install })
+    # Drain timer: ticks on the UI thread, applies queued UI ops, and detects
+    # worker completion. Capped per tick so a log burst can't hog the pump.
+    $script:WorkerPS       = $null
+    $script:WorkerHandle   = $null
+    $script:WorkerRunspace = $null
+    $script:UiTimer          = New-Object System.Windows.Forms.Timer
+    $script:UiTimer.Interval = 80
+    $script:UiTimer.Add_Tick({
+        $m = $null
+        $drained = 0
+        while ($drained -lt 500 -and $script:UiQueue.TryDequeue([ref]$m)) {
+            $drained++
+            try { Invoke-UiOp $m } catch {}
+        }
+        # Finalize only after the queue is fully flushed, so no trailing
+        # messages (final progress, button idle) get lost.
+        if ($script:WorkerPS -and $script:WorkerHandle.IsCompleted -and $script:UiQueue.IsEmpty) {
+            $ps = $script:WorkerPS
+            $script:WorkerPS = $null
+            try {
+                $ps.EndInvoke($script:WorkerHandle) | Out-Null
+            } catch {
+                # Something escaped even the crash wrapper (dispatch/parse-level).
+                $emsg = "[UI] Worker terminated abnormally: $($_.Exception.Message)"
+                try { Add-Content -Path $LogFile -Value $emsg -Encoding UTF8 } catch {}
+                try { Invoke-UiOp @{ Op = 'log'; Line = $emsg; Tone = 'error' } } catch {}
+            }
+            foreach ($e in @($ps.Streams.Error)) {
+                try { Invoke-UiOp @{ Op = 'log'; Line = "[worker error] $e"; Tone = 'error' } } catch {}
+            }
+            try { $ps.Dispose() } catch {}
+            try { if ($script:WorkerRunspace) { $script:WorkerRunspace.Dispose() } } catch {}
+            $script:WorkerRunspace = $null
+            $script:WorkerHandle   = $null
+            # Belt-and-braces: if the worker died without sending btnidle.
+            try { Invoke-UiOp @{ Op = 'btnidle' } } catch {}
+        }
+    })
+
+    $button.Add_Click({ Start-WorkerInstall })
 
     $cancelButton.Add_Click({
         if ($cancelButton.Enabled) {
-            $script:CancelRequested = $true
+            # v1.18.0 - the worker polls $UiSync via Test-CancelFlag; the local
+            # flag is kept coherent for any main-runspace readers.
+            $script:UiSync['CancelRequested'] = $true
+            $script:CancelRequested           = $true
             Log "--- Cancel requested by user ---"
             Play-Sound -Event "Cancel"
             $cancelButton.Enabled   = $false
             $cancelButton.BackColor = [System.Drawing.Color]::FromArgb(160, 160, 160)
-            [System.Windows.Forms.Application]::DoEvents()
         }
+    })
+
+    $soundCheckbox.Add_CheckedChanged({
+        # Mirror into the sync table - Play-Sound runs on the worker runspace
+        # and must not read the checkbox control directly.
+        $script:UiSync['SoundEnabled'] = $soundCheckbox.Checked
+    })
+
+    $form.Add_FormClosing({
+        # Closing the window mid-run: signal cancel so the worker's own cancel
+        # paths kill curl/extract children (best-effort - if the process exits
+        # first, the children die with it anyway).
+        if ($script:WorkerPS) { $script:UiSync['CancelRequested'] = $true }
     })
 
     $form.Add_Shown({
         $form.Activate()
-        Start-Sleep -Milliseconds 300
+        $script:UiTimer.Start()
         Log "Running startup checks..."
-        Start-Install
+        # Auto-run on launch is INTENTIONAL (removed in v1.6.0, deliberately
+        # restored in v1.6.1): bench workflow is double-click-and-walk-away.
+        # The "no missing drivers - run anyway?" prompt inside Start-Install
+        # is the guard against pointless runs.
+        Start-WorkerInstall
     })
 
     [void]$form.ShowDialog()
+    $script:UiTimer.Stop()
 }
