@@ -6775,16 +6775,21 @@ function Start-Install {
             $msgText = "Drivers installed successfully for:`n$model$missingLine`n`nReport saved to:`n$ReportFile"
             # v1.12.0 - Add Windows Update prompt if drivers still missing
             if ($PromptWindowsUpdate -and $stillMissing -gt 0) {
-                $msgText += "`n`n$stillMissing drivers still missing.`nWould you like to open Windows Update to search for additional drivers?`n`nSelect Yes to open Windows Update, No to skip, or Cancel to reboot."
+                # v1.16.1 - Framed around the reboot question. Cancel (and Esc) is the
+                # safe no-op. Yes = reboot now, No = open Windows Update, Cancel = nothing.
+                $msgText += "`n`n$stillMissing driver(s) still missing. Would you like to reboot?`n`n" +
+                            "  - Yes:     reboot now to finish installing drivers`n" +
+                            "  - No:      open Windows Update to search for the rest`n" +
+                            "  - Cancel:  do nothing"
                 $result = [System.Windows.Forms.MessageBox]::Show(
                     $msgText,
                     "Installation Complete", "YesNoCancel", "Information"
                 )
                 if ($result -eq [System.Windows.Forms.DialogResult]::Yes) {
+                    Restart-Computer -Force
+                } elseif ($result -eq [System.Windows.Forms.DialogResult]::No) {
                     Open-WindowsUpdate
                     Set-ButtonIdle
-                } elseif ($result -eq [System.Windows.Forms.DialogResult]::Cancel) {
-                    Restart-Computer -Force
                 } else {
                     Set-ButtonIdle
                 }
