@@ -147,7 +147,7 @@
     if (!total) { $("dia-kpis").innerHTML = ""; $("dia-tbody").innerHTML =
         '<tr><td colspan="8" class="dia-empty">No runs recorded yet.</td></tr>'; return; }
 
-    var succ = 0, resolved = 0, instTotal = 0, durTotal = 0, durN = 0;
+    var succ = 0, resolved = 0, instTotal = 0, durs = [];
     var mfr = {}, ver = {}, models = {}, results = {};
     rows.forEach(function (r) {
       var res = String(r.result || "").toLowerCase();
@@ -158,25 +158,29 @@
         var d = num(mb) - num(ma); if (d > 0) resolved += d;
       }
       instTotal += num(r.inf_count);
-      if (num(r.duration_sec) > 0) { durTotal += num(r.duration_sec); durN++; }
+      if (num(r.duration_sec) > 0) { durs.push(num(r.duration_sec)); }
       var m = (r.manufacturer || "Unknown").trim() || "Unknown"; mfr[m] = (mfr[m]||0)+1;
-      var v = (r.script_version || "?").trim() || "?"; ver[v] = (ver[v]||0)+1;
+      var v = String(r.script_version == null ? "" : r.script_version).trim();
+      if (/^\d+\.\d+/.test(v)) { ver[v] = (ver[v]||0)+1; } // ignore junk/drifted values
       if (r.model) models[r.model] = 1;
     });
 
     var rate = total ? Math.round((succ/total)*100) : 0;
-    var avgDur = durN ? Math.round(durTotal/durN) : 0;
+    // Median, not mean - old rows have drifted/garbage duration values that
+    // would otherwise skew a mean into the tens of minutes.
+    durs.sort(function (a, b) { return a - b; });
+    var medDur = durs.length ? durs[Math.floor((durs.length - 1) / 2)] : 0;
     $("dia-kpis").innerHTML =
       kpi(total, "Total runs") +
       kpi(rate + "%", "Success rate") +
       kpi(Object.keys(models).length, "Unique models") +
       kpi(resolved.toLocaleString(), "Devices resolved") +
       kpi(instTotal.toLocaleString(), "Drivers installed") +
-      kpi(fmtDur(avgDur), "Avg run time");
+      kpi(fmtDur(medDur), "Median run time");
 
     renderDonut(results, total);
     renderBars("dia-mfr", mfr, 6);
-    renderBars("dia-versions", ver, 8, true);
+    renderBars("dia-versions", ver, 8); // rank by frequency (robust to dirty version data)
     renderTimeline(rows);
     applyFilter();
   }
