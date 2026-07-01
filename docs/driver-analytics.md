@@ -17,13 +17,9 @@
       <h3>Top manufacturers</h3>
       <div id="dia-mfr" class="dia-bars"></div>
     </section>
-    <section class="dia-card">
-      <h3>Runs (last 14 days)</h3>
-      <div id="dia-timeline" class="dia-timeline"></div>
-    </section>
-    <section class="dia-card">
-      <h3>Script versions</h3>
-      <div id="dia-versions" class="dia-bars"></div>
+    <section class="dia-card dia-wide">
+      <h3>Top models</h3>
+      <div id="dia-models" class="dia-bars dia-bars-wide"></div>
     </section>
   </div>
 
@@ -68,6 +64,7 @@
 .dia-kpi .l { color:var(--dia-muted); font-size:.78rem; margin-top:.25rem; text-transform:uppercase; letter-spacing:.03em; }
 
 .dia-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:1rem; margin-bottom:1rem; }
+.dia-grid .dia-wide { grid-column:1 / -1; }
 .dia-card { border:1px solid var(--dia-line); border-radius:.75rem; padding:1rem 1.1rem; background:var(--dia-card); }
 .dia-card h3 { margin:.1rem 0 .9rem; font-size:.95rem; }
 
@@ -79,17 +76,10 @@
 .dia-bars { display:flex; flex-direction:column; gap:.55rem; }
 .dia-bar { display:grid; grid-template-columns:9rem 1fr auto; align-items:center; gap:.6rem; font-size:.85rem; }
 .dia-bar .name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--dia-muted); }
-.dia-bar .track { background:color-mix(in srgb, var(--md-default-fg-color) 8%, transparent); border-radius:6px; height:.7rem; overflow:hidden; }
-.dia-bar .fill { height:100%; background:var(--dia-fill); border-radius:6px; }
+.dia-bar .track { display:block; background:color-mix(in srgb, var(--md-default-fg-color) 8%, transparent); border-radius:6px; height:.7rem; overflow:hidden; }
+.dia-bar .fill { display:block; height:100%; background:var(--dia-fill); border-radius:6px; min-width:6px; }
 .dia-bar .val { font-variant-numeric:tabular-nums; }
-
-.dia-timeline { display:flex; align-items:flex-end; gap:4px; height:120px; }
-.dia-timeline .col { flex:1; display:flex; flex-direction:column; justify-content:flex-end; align-items:center; gap:4px; height:100%; }
-.dia-timeline .stack { width:70%; min-height:2px; border-radius:3px 3px 0 0; background:var(--dia-fill);
-  display:flex; flex-direction:column-reverse; overflow:hidden; }
-.dia-timeline .seg-ok { background:var(--dia-ok); }
-.dia-timeline .seg-fail { background:var(--dia-fail); }
-.dia-timeline .cap { font-size:.62rem; color:var(--dia-muted); }
+.dia-bars-wide .dia-bar { grid-template-columns:16rem 1fr auto; }
 
 .dia-tablecard { padding-bottom:.5rem; }
 .dia-tablehead { display:flex; align-items:center; gap:1rem; flex-wrap:wrap; margin-bottom:.6rem; }
@@ -148,7 +138,7 @@
         '<tr><td colspan="8" class="dia-empty">No runs recorded yet.</td></tr>'; return; }
 
     var succ = 0, resolved = 0, instTotal = 0, durs = [];
-    var mfr = {}, ver = {}, models = {}, results = {};
+    var mfr = {}, models = {}, results = {};
     rows.forEach(function (r) {
       var res = String(r.result || "").toLowerCase();
       results[res] = (results[res] || 0) + 1;
@@ -160,9 +150,8 @@
       instTotal += num(r.inf_count);
       if (num(r.duration_sec) > 0) { durs.push(num(r.duration_sec)); }
       var m = (r.manufacturer || "Unknown").trim() || "Unknown"; mfr[m] = (mfr[m]||0)+1;
-      var v = String(r.script_version == null ? "" : r.script_version).trim();
-      if (/^\d+\.\d+/.test(v)) { ver[v] = (ver[v]||0)+1; } // ignore junk/drifted values
-      if (r.model) models[r.model] = 1;
+      var mdl = String(r.model == null ? "" : r.model).trim();
+      if (mdl) models[mdl] = (models[mdl]||0)+1;
     });
 
     var rate = total ? Math.round((succ/total)*100) : 0;
@@ -180,8 +169,7 @@
 
     renderDonut(results, total);
     renderBars("dia-mfr", mfr, 6);
-    renderBars("dia-versions", ver, 8); // rank by frequency (robust to dirty version data)
-    renderTimeline(rows);
+    renderBars("dia-models", models, 10);
     applyFilter();
   }
 
@@ -210,39 +198,15 @@
     }).join("");
   }
 
-  function renderBars(elId, map, limit, isVersion) {
+  function renderBars(elId, map, limit) {
     var arr = Object.keys(map).map(function (k) { return [k, map[k]]; })
-      .sort(function (a, b) { return isVersion ? cmpVer(b[0],a[0]) : b[1]-a[1]; });
-    if (!isVersion) arr = arr.slice(0, limit); else arr = arr.slice(0, limit);
+      .sort(function (a, b) { return b[1]-a[1]; }).slice(0, limit);
     var max = arr.reduce(function (m, x) { return Math.max(m, x[1]); }, 0) || 1;
     $(elId).innerHTML = arr.map(function (x) {
       return '<div class="dia-bar"><span class="name" title="'+esc(x[0])+'">'+esc(x[0])+'</span>'+
         '<span class="track"><span class="fill" style="width:'+Math.max(3,(x[1]/max*100))+'%"></span></span>'+
         '<span class="val">'+x[1]+'</span></div>';
     }).join("") || '<div class="dia-empty">No data.</div>';
-  }
-  function cmpVer(a,b){ var pa=String(a).split(".").map(Number), pb=String(b).split(".").map(Number);
-    for(var i=0;i<Math.max(pa.length,pb.length);i++){ var d=(pa[i]||0)-(pb[i]||0); if(d) return d; } return 0; }
-
-  function renderTimeline(rows) {
-    var days = [], byDay = {};
-    for (var i = 13; i >= 0; i--) { var d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()-i);
-      var k = d.toISOString().slice(0,10); days.push({key:k,d:d}); byDay[k] = {ok:0,other:0}; }
-    rows.forEach(function (r) {
-      var dt = new Date(r.timestamp); if (isNaN(dt)) return;
-      var k = dt.toISOString().slice(0,10); if (!byDay[k]) return;
-      if (String(r.result||"").toLowerCase()==="success") byDay[k].ok++; else byDay[k].other++;
-    });
-    var max = days.reduce(function (m, x) { var t = byDay[x.key].ok+byDay[x.key].other; return Math.max(m,t); }, 0) || 1;
-    $("dia-timeline").innerHTML = days.map(function (x) {
-      var v = byDay[x.key], t = v.ok+v.other, h = t ? Math.max(6,(t/max*100)) : 0;
-      var okH = t ? (v.ok/t*100) : 0;
-      var stack = t ? '<span class="stack" style="height:'+h+'%" title="'+x.key+': '+t+' run(s)">'+
-        '<span class="seg-fail" style="height:'+(100-okH)+'%"></span>'+
-        '<span class="seg-ok" style="height:'+okH+'%"></span></span>' : '<span class="stack" style="height:2px"></span>';
-      var lbl = (x.d.getDate()===1 || x.d.getDay()===1) ? (x.d.getMonth()+1)+"/"+x.d.getDate() : "";
-      return '<div class="col">'+stack+'<span class="cap">'+lbl+'</span></div>';
-    }).join("");
   }
 
   function applyFilter() {
