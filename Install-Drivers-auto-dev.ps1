@@ -59,6 +59,28 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.18.2 - Cancellable Windows Update phase (field report: Cancel during the
+#           WU fallback left the Install button greyed out for minutes).
+#           Root cause: the WUA COM calls (IUpdateSearcher.Search,
+#           IUpdateDownloader.Download, IUpdateInstaller.Install) are
+#           synchronous and can each block for many minutes; the cancel
+#           checks only ran BETWEEN them, so the worker sat inside COM
+#           unable to notice the flag.
+#           (1) Install-DriversViaWindowsUpdate rewritten to run the WUA work
+#               in a child powershell.exe (same poll-and-kill pattern as the
+#               curl/expand/7z phases). The child streams prefixed lines
+#               (LOG:/ERR:/PHASE:/INSTALLED:/RESULT:) to a redirected stdout
+#               file; the parent relays them through the normal Log sink,
+#               drives the progress labels, feeds analytics, and KILLS the
+#               child within one 700ms poll when Cancel is clicked. A 20-min
+#               no-output watchdog guards against a hung WU service.
+#           (2) End-of-run: a cancelled run no longer enters the success
+#               branch even when the vendor phase had succeeded (Cancel during
+#               the WU fallback used to fire BOTH "cancelled" AND "success"
+#               analytics events and pop the completion dialog). Cancelled
+#               runs now always take the cancelled path: report written with
+#               result=cancelled, no dialog, UI re-armed.
+#
 # v1.18.1 - Fix hidden worker dialogs + cancel UX (field report: clicking
 #           Cancel right after a run started left the Install button greyed -
 #           the "Installation Failed" MessageBox had opened BEHIND the main
@@ -633,7 +655,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.18.1"
+$SCRIPT_VERSION = "1.18.2"
 
 # =============================================================
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
@@ -1163,6 +1185,21 @@ function Open-WindowsUpdate {
 #
 # Returns: [int] number of driver updates successfully installed (0 on none/error).
 function Install-DriversViaWindowsUpdate {
+    # v1.18.2 - REWRITTEN as a killable child process. The WUA COM calls
+    # (Search/Download/Install) are synchronous and can each block for many
+    # minutes; previously a Cancel during this phase left the worker (and the
+    # greyed-out UI) stuck until the COM call returned, because the
+    # Test-Cancelled checks only ran BETWEEN the calls. The WUA work now runs
+    # in a child powershell.exe (same poll-and-kill pattern as the curl and
+    # extraction phases); Cancel kills the child within one 700ms poll.
+    #
+    # Child stdout protocol (one item per line, streamed to a redirected file):
+    #   LOG:<msg>          relayed to the normal Log sink
+    #   ERR:<msg>          relayed at warn level
+    #   PHASE:download     switches progress labels to the download phase
+    #   PHASE:install      switches progress labels to the install phase
+    #   INSTALLED:<title>  logged + appended to AnalyticsInstalledDrivers
+    #   RESULT:<n>         final installed count (function return value)
     if ($script:TestMode) {
         Log "Windows Update driver search skipped (TestMode dry-run)."
         return 0
@@ -1172,102 +1209,190 @@ function Install-DriversViaWindowsUpdate {
     Log "=== WINDOWS UPDATE: searching for drivers (vendor-pack-free fallback) ==="
     SetDownload -Pct 0 -Label "Searching Windows Update..."
 
+    # Single-quoted here-string: nothing here is expanded by the parent; the
+    # child evaluates it all. Logic is identical to the pre-v1.18.2 in-process
+    # version (incl. ServerSelection 2 = public WU service on WSUS-managed
+    # boxes, EULA auto-accept, ResultCode 2/3 = success).
+    $childScript = @'
+try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
+$ErrorActionPreference = "Continue"
+function Out-Line([string]$s) { [Console]::Out.WriteLine($s) }
+try {
+    $session = New-Object -ComObject Microsoft.Update.Session
+    $session.ClientApplicationID = "DriverInstaller"
+} catch {
+    Out-Line "ERR:Could not create Windows Update session: $($_.Exception.Message)"
+    Out-Line "RESULT:0"; exit 0
+}
+$searchResult = $null
+try {
+    $searcher = $session.CreateUpdateSearcher()
+    try { $searcher.ServerSelection = 2 } catch {}
+    try { $searcher.Online = $true } catch {}
+    Out-Line "LOG:  Querying Windows Update (IsInstalled=0 and Type='Driver')..."
+    $searchResult = $searcher.Search("IsInstalled=0 and Type='Driver'")
+} catch {
+    Out-Line "ERR:Windows Update driver search failed: $($_.Exception.Message)"
+    Out-Line "ERR:(Machine may be offline or the Windows Update service is disabled.)"
+    Out-Line "RESULT:0"; exit 0
+}
+$found = @($searchResult.Updates)
+if ($found.Count -eq 0) {
+    Out-Line "LOG:  Windows Update returned no applicable driver updates."
+    Out-Line "RESULT:0"; exit 0
+}
+Out-Line "LOG:  Windows Update offers $($found.Count) driver update(s):"
+$toInstall = New-Object -ComObject Microsoft.Update.UpdateColl
+foreach ($u in $found) {
+    Out-Line "LOG:    - $($u.Title)"
+    try { if (-not $u.EulaAccepted) { $u.AcceptEula() } } catch {}
+    $null = $toInstall.Add($u)
+}
+Out-Line "PHASE:download"
+try {
+    $downloader = $session.CreateUpdateDownloader()
+    $downloader.Updates = $toInstall
+    Out-Line "LOG:  Downloading $($toInstall.Count) driver update(s)..."
+    $null = $downloader.Download()
+} catch {
+    Out-Line "ERR:Windows Update download failed: $($_.Exception.Message)"
+    Out-Line "RESULT:0"; exit 0
+}
+$downloaded = New-Object -ComObject Microsoft.Update.UpdateColl
+foreach ($u in $toInstall) {
+    if ($u.IsDownloaded) { $null = $downloaded.Add($u) }
+    else { Out-Line "LOG:    Not downloaded (skipped): $($u.Title)" }
+}
+if ($downloaded.Count -eq 0) {
+    Out-Line "LOG:  No driver updates downloaded successfully."
+    Out-Line "RESULT:0"; exit 0
+}
+Out-Line "PHASE:install"
+try {
+    $installer = $session.CreateUpdateInstaller()
+    $installer.Updates = $downloaded
+    Out-Line "LOG:  Installing $($downloaded.Count) driver update(s)..."
+    $instResult = $installer.Install()
+} catch {
+    Out-Line "ERR:Windows Update install failed: $($_.Exception.Message)"
+    Out-Line "RESULT:0"; exit 0
+}
+$installedCount = 0
+for ($i = 0; $i -lt $downloaded.Count; $i++) {
+    $u = $downloaded.Item($i)
+    $rc = 0
+    try { $rc = $instResult.GetUpdateResult($i).ResultCode } catch {}
+    if ($rc -eq 2 -or $rc -eq 3) {
+        $installedCount++
+        Out-Line ("INSTALLED:" + $u.Title)
+    } else {
+        Out-Line "LOG:    Failed (rc=$rc): $($u.Title)"
+    }
+}
+if ($instResult.RebootRequired) {
+    Out-Line "LOG:  NOTE: a reboot is required to finish applying some Windows Update drivers."
+}
+Out-Line "RESULT:$installedCount"
+'@
+
+    $childPath = Join-Path $env:TEMP "wua-driver-phase.ps1"
+    $childOut  = Join-Path $env:TEMP ("wua-driver-phase-" + $PID + ".out")
     try {
-        $session = New-Object -ComObject Microsoft.Update.Session
-        $session.ClientApplicationID = "DriverInstaller"
+        Set-Content -Path $childPath -Value $childScript -Encoding UTF8 -Force
+        if (Test-Path $childOut) { Remove-Item $childOut -Force -EA SilentlyContinue }
     } catch {
-        Log "  Could not create Windows Update session: $($_.Exception.Message)"
+        Log "  Could not stage WU child script: $($_.Exception.Message)" -Level "warn"
         return 0
     }
 
-    # Search the WU service for not-installed driver-class updates. ServerSelection
-    # 2 = ssWindowsUpdate forces the public Windows Update service (which carries
-    # OEM/IHV driver packages) even on a box that is otherwise WSUS-managed; if the
-    # assignment isn't honoured we fall back to the default service silently.
-    $searchResult = $null
+    $proc = $null
     try {
-        $searcher = $session.CreateUpdateSearcher()
-        try { $searcher.ServerSelection = 2 } catch {}
-        try { $searcher.Online = $true } catch {}
-        Log "  Querying Windows Update (IsInstalled=0 and Type='Driver')..."
-        $searchResult = $searcher.Search("IsInstalled=0 and Type='Driver'")
+        $proc = Start-Process -FilePath "powershell.exe" `
+            -ArgumentList "-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File","`"$childPath`"" `
+            -RedirectStandardOutput $childOut -WindowStyle Hidden -PassThru
     } catch {
-        Log "  Windows Update driver search failed: $($_.Exception.Message)"
-        Log "  (Machine may be offline or the Windows Update service is disabled.)"
-        return 0
-    }
-    if (Test-Cancelled) { return 0 }
-
-    $found = @($searchResult.Updates)
-    if ($found.Count -eq 0) {
-        Log "  Windows Update returned no applicable driver updates."
-        return 0
-    }
-    Log "  Windows Update offers $($found.Count) driver update(s):"
-
-    $toInstall = New-Object -ComObject Microsoft.Update.UpdateColl
-    foreach ($u in $found) {
-        Log "    - $($u.Title)"
-        try { if (-not $u.EulaAccepted) { $u.AcceptEula() } } catch {}
-        $null = $toInstall.Add($u)
-    }
-
-    # Download phase
-    SetDownload -Pct 10 -Label "Downloading WU drivers..."
-    SetProgress 75
-    try {
-        $downloader = $session.CreateUpdateDownloader()
-        $downloader.Updates = $toInstall
-        Log "  Downloading $($toInstall.Count) driver update(s)..."
-        $null = $downloader.Download()
-    } catch {
-        Log "  Windows Update download failed: $($_.Exception.Message)"
-        return 0
-    }
-    if (Test-Cancelled) { return 0 }
-
-    $downloaded = New-Object -ComObject Microsoft.Update.UpdateColl
-    foreach ($u in $toInstall) {
-        if ($u.IsDownloaded) { $null = $downloaded.Add($u) }
-        else { Log "    Not downloaded (skipped): $($u.Title)" }
-    }
-    if ($downloaded.Count -eq 0) {
-        Log "  No driver updates downloaded successfully."
+        Log "  Could not start WU child process: $($_.Exception.Message)" -Level "warn"
         return 0
     }
 
-    # Install phase
-    SetExtract -Pct 50 -Label "Installing WU drivers..."
-    SetProgress 85
-    try {
-        $installer = $session.CreateUpdateInstaller()
-        $installer.Updates = $downloaded
-        Log "  Installing $($downloaded.Count) driver update(s)..."
-        $instResult = $installer.Install()
-    } catch {
-        Log "  Windows Update install failed: $($_.Exception.Message)"
-        return 0
-    }
-
-    # Per-update ResultCode: 2 = Succeeded, 3 = SucceededWithErrors
     $installedCount = 0
-    for ($i = 0; $i -lt $downloaded.Count; $i++) {
-        $u = $downloaded.Item($i)
-        $rc = 0
-        try { $rc = $instResult.GetUpdateResult($i).ResultCode } catch {}
-        if ($rc -eq 2 -or $rc -eq 3) {
-            $installedCount++
-            Log "    Installed: $($u.Title)"
-            $null = $script:AnalyticsInstalledDrivers.Add("WU: $($u.Title)")
-        } else {
-            Log "    Failed (rc=$rc): $($u.Title)"
+    $offset         = 0L
+    $quietMs        = 0
+    $QuietLimitMs   = 20 * 60 * 1000   # 20 min with zero output = hung WU service; kill
+
+    while ($true) {
+        # Read HasExited BEFORE draining so the post-exit drain below always
+        # captures the child's final lines (incl. RESULT:).
+        $exited  = $proc.HasExited
+        $newData = $null
+        try {
+            if (Test-Path $childOut) {
+                $fs = [System.IO.File]::Open($childOut, [System.IO.FileMode]::Open,
+                        [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+                try {
+                    if ($fs.Length -gt $offset) {
+                        $null = $fs.Seek($offset, [System.IO.SeekOrigin]::Begin)
+                        $buf  = New-Object byte[] ($fs.Length - $offset)
+                        $null = $fs.Read($buf, 0, $buf.Length)
+                        $newData = [System.Text.Encoding]::UTF8.GetString($buf)
+                    }
+                } finally { $fs.Close() }
+            }
+        } catch {}
+        if ($newData) {
+            # Consume only complete lines; a partially-flushed last line stays
+            # in the file for the next poll (offset doesn't advance past it).
+            $lastNl = $newData.LastIndexOf("`n")
+            if ($lastNl -ge 0) {
+                $chunk   = $newData.Substring(0, $lastNl + 1)
+                $offset += [System.Text.Encoding]::UTF8.GetByteCount($chunk)
+                $quietMs = 0
+                foreach ($rawLine in ($chunk -split "`r?`n")) {
+                    if ([string]::IsNullOrWhiteSpace($rawLine)) { continue }
+                    if     ($rawLine.StartsWith("LOG:")) { Log $rawLine.Substring(4) }
+                    elseif ($rawLine.StartsWith("ERR:")) { Log "  $($rawLine.Substring(4))" -Level "warn" }
+                    elseif ($rawLine.StartsWith("INSTALLED:")) {
+                        $t = $rawLine.Substring(10)
+                        Log "    Installed: $t"
+                        $null = $script:AnalyticsInstalledDrivers.Add("WU: $t")
+                    }
+                    elseif ($rawLine.StartsWith("PHASE:download")) {
+                        SetDownload -Pct 10 -Label "Downloading WU drivers..."
+                        SetProgress 75
+                    }
+                    elseif ($rawLine.StartsWith("PHASE:install")) {
+                        SetExtract -Pct 50 -Label "Installing WU drivers..."
+                        SetProgress 85
+                    }
+                    elseif ($rawLine.StartsWith("RESULT:")) {
+                        $installedCount = [int]$rawLine.Substring(7)
+                    }
+                    else { Log "  $rawLine" }
+                }
+            }
+        }
+        if ($exited) { break }
+
+        if (Test-CancelFlag) {
+            Log "  Cancel detected - stopping Windows Update phase." -Level "cancel"
+            try { $proc.Kill() } catch {}
+            try { $proc.WaitForExit(3000) | Out-Null } catch {}
+            break
+        }
+
+        Start-Sleep -Milliseconds 700
+        $quietMs += 700
+        Step-AllSpinners
+        if ($quietMs -ge $QuietLimitMs) {
+            Log "  WARNING: Windows Update phase produced no output for 20 min - killing." -Level "warn"
+            try { $proc.Kill() } catch {}
+            break
         }
     }
+    try { Remove-Item $childOut  -Force -EA SilentlyContinue } catch {}
+    try { Remove-Item $childPath -Force -EA SilentlyContinue } catch {}
 
     Log "  Windows Update installed $installedCount driver(s)."
-    if ($instResult.RebootRequired) {
-        Log "  NOTE: a reboot is required to finish applying some Windows Update drivers."
-    }
     return $installedCount
 }
 
@@ -7043,7 +7168,11 @@ function Start-Install {
     if (Test-CancelFlag) { Send-AnalyticsEvent -Result "cancelled" }
 
     Log "--------------------------------------------"
-    if ($success) {
+    # v1.18.2 - a cancelled run must never take the success path, even when the
+    # vendor phase itself succeeded (e.g. Cancel clicked during the WU fallback).
+    # Pre-v1.18.2 that combination fired BOTH "cancelled" and "success" analytics
+    # events and popped the completion dialog on a run the operator just aborted.
+    if ($success -and -not $script:CancelRequested) {
         SetProgress 100
         SetDownload -Pct 100 -Label "Complete"
         SetExtract  -Pct 100 -Label "Complete"
