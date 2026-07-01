@@ -2,6 +2,13 @@
 
 <div class="dia" id="dia-root">
   <div class="dia-toolbar">
+    <div class="dia-range" id="dia-range">
+      <button type="button" data-days="0" class="active">All time</button>
+      <button type="button" data-days="7">7 days</button>
+      <button type="button" data-days="14">14 days</button>
+      <button type="button" data-days="30">1 month</button>
+      <button type="button" data-days="180">6 months</button>
+    </div>
     <span class="dia-status" id="dia-status">Loading analytics…</span>
     <button class="dia-refresh" id="dia-refresh" type="button" title="Refresh now">↻ Refresh</button>
   </div>
@@ -22,6 +29,16 @@
       <div id="dia-models" class="dia-bars dia-bars-wide"></div>
     </section>
   </div>
+
+  <section class="dia-card" style="margin-bottom:1rem;">
+    <h3>Most common missing drivers</h3>
+    <div class="dia-tablescroll">
+      <table class="dia-table">
+        <thead><tr><th>Driver</th><th class="num">Runs</th><th>Most-affected model</th></tr></thead>
+        <tbody id="dia-drv-body"></tbody>
+      </table>
+    </div>
+  </section>
 
   <section class="dia-card dia-tablecard">
     <div class="dia-tablehead">
@@ -52,8 +69,15 @@
   --dia-fill: var(--md-primary-fg-color);
   font-feature-settings:"tnum"; }
 .dia * { box-sizing:border-box; }
-.dia-toolbar { display:flex; align-items:center; gap:.75rem; margin:.25rem 0 1rem; }
+.dia-toolbar { display:flex; align-items:center; gap:.6rem .75rem; margin:.25rem 0 1rem; flex-wrap:wrap; }
+.dia-range { display:inline-flex; flex-wrap:wrap; border:1px solid var(--dia-line); border-radius:.6rem; overflow:hidden; }
+.dia-range button { border:0; border-right:1px solid var(--dia-line); background:transparent; color:var(--dia-muted);
+  padding:.35rem .8rem; cursor:pointer; font-size:.82rem; }
+.dia-range button:last-child { border-right:0; }
+.dia-range button.active { background:var(--dia-fill); color:#fff; }
+.dia-range button:hover:not(.active) { color:var(--md-typeset-color); }
 .dia-status { color:var(--dia-muted); font-size:.85rem; }
+.dia-sub { color:var(--dia-muted); font-size:.9em; }
 .dia-refresh { margin-left:auto; border:1px solid var(--dia-line); background:transparent;
   color:var(--md-typeset-color); border-radius:.5rem; padding:.35rem .7rem; cursor:pointer; font-size:.85rem; }
 .dia-refresh:hover { border-color:var(--dia-fill); color:var(--dia-fill); }
@@ -114,7 +138,7 @@
   var num = function (v) { var n = Number(v); return isNaN(n) ? 0 : n; };
   var esc = function (s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {
     return ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" })[c]; }); };
-  var ALL = [];
+  var RAW = [], ALL = [], curDays = 0;   // RAW = all rows; ALL = current time-range subset
 
   function resultClass(r) {
     r = String(r || "").toLowerCase();
@@ -132,10 +156,15 @@
   function kpi(v, l) { return '<div class="dia-kpi"><div class="v">' + v + '</div><div class="l">' + l + '</div></div>'; }
 
   function render(rows) {
-    ALL = rows;
     var total = rows.length;
-    if (!total) { $("dia-kpis").innerHTML = ""; $("dia-tbody").innerHTML =
-        '<tr><td colspan="8" class="dia-empty">No runs recorded yet.</td></tr>'; return; }
+    if (!total) {
+      $("dia-kpis").innerHTML = "";
+      ["dia-donut","dia-legend","dia-mfr","dia-models"].forEach(function (id) { var e=$(id); if (e) e.innerHTML=""; });
+      $("dia-drv-body").innerHTML = '<tr><td colspan="3" class="dia-empty">No runs in this range.</td></tr>';
+      $("dia-tbody").innerHTML = '<tr><td colspan="8" class="dia-empty">No runs in this range.</td></tr>';
+      $("dia-foot").textContent = "";
+      return;
+    }
 
     var succ = 0, resolved = 0, instTotal = 0, durs = [];
     var mfr = {}, models = {}, results = {};
@@ -170,7 +199,48 @@
     renderDonut(results, total);
     renderBars("dia-mfr", mfr, 6);
     renderBars("dia-models", models, 10);
+    renderDrivers(rows);
     applyFilter();
+  }
+
+  // "Most common missing drivers": aggregate the driver files downloaded across
+  // runs (driver_urls), and for each driver the model it most often lands on.
+  function drvName(url) {
+    var n = url.split("?")[0].replace(/\/+$/,"").split("/").pop();
+    n = n.replace(/\.(exe|msi|msu|cab|zip)$/i, "").split("_")[0];   // strip ext + Dell releaseID suffix
+    return n.replace(/-/g, " ").trim();
+  }
+  function alnum(s) { return String(s).toLowerCase().replace(/[^a-z0-9]/g, ""); }
+  function renderDrivers(rows) {
+    var drv = {};
+    rows.forEach(function (r) {
+      var model = (String(r.model || "").trim()) || "Unknown";
+      var nm = alnum(model);
+      var mt = model.toLowerCase().split(/[^a-z0-9]+/).filter(function (t) { return t.length >= 3; });
+      var seen = {};
+      String(r.driver_urls || "").split(",").forEach(function (u) {
+        u = u.trim();
+        if (!/^https?:/i.test(u)) return;                 // skip legacy device-name rows
+        var n = drvName(u); if (n.length < 4) return;
+        var na = alnum(n);
+        if (/^[0-9a-f]{4}$/.test(na)) return;             // HP SysID pack
+        if (nm && (na.indexOf(nm) >= 0 || nm.indexOf(na) >= 0)) return;  // the model's own full pack
+        if (mt.indexOf(n.toLowerCase().split(/[^a-z0-9]+/)[0]) >= 0) return; // name starts with a model token
+        if (seen[n]) return; seen[n] = 1;                 // count once per run
+        if (!drv[n]) drv[n] = { count: 0, models: {} };
+        drv[n].count++;
+        drv[n].models[model] = (drv[n].models[model] || 0) + 1;
+      });
+    });
+    var arr = Object.keys(drv).map(function (n) {
+      var m = drv[n].models, top = "—", tc = 0;
+      Object.keys(m).forEach(function (k) { if (m[k] > tc) { tc = m[k]; top = k; } });
+      return { name: n, count: drv[n].count, model: top, mc: tc };
+    }).sort(function (a, b) { return b.count - a.count; }).slice(0, 12);
+    $("dia-drv-body").innerHTML = arr.map(function (x) {
+      return "<tr><td>" + esc(x.name) + '</td><td class="num">' + x.count + "</td><td>" +
+        esc(x.model) + ' <span class="dia-sub">(' + x.mc + ")</span></td></tr>";
+    }).join("") || '<tr><td colspan="3" class="dia-empty">No driver data in this range.</td></tr>';
   }
 
   function renderDonut(results, total) {

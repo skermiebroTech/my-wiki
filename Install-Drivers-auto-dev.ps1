@@ -21,6 +21,10 @@
 #   -Manufacturer  Override WMI manufacturer detection (Dell, HP, Lenovo, Microsoft, Dynabook)
 #   -Model         Override WMI model detection
 #   -Headless      Skip GUI, write to console only (auto-set when any param is passed)
+#   -Gui           v1.17.0 - force GUI mode even when other params are passed
+#                  (overrides the auto-headless heuristic). Lets a GUI run use
+#                  -MaxParallelDownloads, -PromptWindowsUpdate:$false, etc.
+#                  Ignored when -Silent is set.
 #   -Silent        Like -Headless but ALSO suppresses console output (log file only).
 #                  Forces -Headless on. Useful when launched from another script that
 #                  shouldn't have its stdout polluted, or for unattended scheduled tasks.
@@ -54,6 +58,36 @@
 #   DriverInstaller_<ts>.events.json - NDJSON structured event log (always)
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
+#
+# v1.17.0 - Usability round (dev). Six changes, no vendor logic touched:
+#           (1) Colour-coded GUI console: Log's inferred/explicit level now
+#               drives the RichTextBox line colour (error=red, warn/cancel=
+#               amber, debug=grey). The .log / .events.json sinks are unchanged.
+#           (2) Missing-device link in the footer: after each device scan the
+#               GUI shows "N device(s) missing drivers - view list"; clicking
+#               opens a NON-modal window listing the device names (non-modal so
+#               it can't block the DoEvents-pumped install loop). Refreshed
+#               after the before-scan, the post-vendor rescan and the
+#               post-fallback rescan.
+#           (3) Crash-safe artefacts: all entry points now call Start-Install
+#               through Invoke-StartInstallSafe, which catches any unhandled
+#               exception, logs message + stack trace, and emits the analytics
+#               event and HTML report with result="crashed" (both ValidateSets
+#               extended). Guard flags ($script:AnalyticsEventSent /
+#               $script:HtmlReportWritten) prevent double-reporting when the
+#               crash happens after the normal report/event already fired.
+#           (4) New -Gui switch: overrides the "any param implies -Headless"
+#               heuristic, so a GUI run can use -MaxParallelDownloads,
+#               -PromptWindowsUpdate:$false, etc. -Silent still wins.
+#           (5) Elevation relaunch now re-runs the CURRENT file via
+#               $PSCommandPath when the script was started from disk; only the
+#               true irm|iex case re-fetches from GitHub main. Stops a locally
+#               edited dev copy silently swapping to the published version on
+#               elevation.
+#           (6) Disk-space preflight in Invoke-CurlDownload: when the expected
+#               size is known from the HEAD probe, require free space >= 3x the
+#               pack size on the target drive (download + extract headroom) and
+#               fail fast with a clear log line instead of dying mid-extract.
 #
 # v1.16.0 - Stranded child-device support + Dell support-page fix.
 #           (1) Parent-walk for devices with no PCI ID of their own. New helper
@@ -516,6 +550,7 @@ param(
     [string]$MachineType  = "",   # Lenovo only: override 4-char machine type prefix (e.g. 20XX)
     [string]$DriverRoot   = "C:\DRIVERS",  # Override default driver root (useful for parallel testing)
     [switch]$Headless,
+    [switch]$Gui,           # v1.17.0 - force GUI even when other params are passed (overrides auto-headless; -Silent still wins).
     [switch]$Silent,        # v1.10.0 - log-only mode (no GUI, no console). Implies -Headless.
     [switch]$TestMode,      # v1.10.0 - dry-run: detect + report but do not mutate system.
     [switch]$Diagnostic,    # v1.10.0 - verbose logging (per-step timings, env extras).
@@ -532,13 +567,17 @@ if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" `
     -or $SkipInstall -or $SkipCleanup -or $Silent -or $TestMode -or $Diagnostic -or $NoAnalytics -or $PromptWindowsUpdate -eq $false) {
     $Headless = $true
 }
+# v1.17.0 - explicit -Gui overrides the heuristic above, so a GUI run can carry
+# custom params (e.g. -Gui -MaxParallelDownloads 5). -Silent still wins below:
+# a silent GUI is a contradiction.
+if ($Gui) { $Headless = $false }
 if ($Silent) { $Headless = $true }
 
 # =============================================================
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.16.1"
+$SCRIPT_VERSION = "1.17.0"
 
 # =============================================================
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
@@ -631,6 +670,10 @@ $ColorMutedBg     = [System.Drawing.Color]::FromArgb(107, 114, 128)   # gray-500
 $ColorDisabledFg  = [System.Drawing.Color]::FromArgb(243, 244, 246)   # gray-100 (near-white text on disabled btn)
 $ColorConsoleBg   = [System.Drawing.Color]::FromArgb(17,  24,  39)    # console bg (gray-900)
 $ColorConsoleFg   = [System.Drawing.Color]::FromArgb(209, 250, 229)   # console fg (green-100 - bright mint, ~16:1 contrast on bg)
+# v1.17.0 - per-level console line colours (all chosen for contrast on ConsoleBg gray-900)
+$ColorLogError    = [System.Drawing.Color]::FromArgb(248, 113, 113)   # red-400   - error lines
+$ColorLogWarn     = [System.Drawing.Color]::FromArgb(252, 211, 77)    # amber-300 - warn/cancel lines
+$ColorLogDebug    = [System.Drawing.Color]::FromArgb(156, 163, 175)   # gray-400  - diagnostic lines
 
 # =========================
 # FORM
@@ -872,6 +915,22 @@ $logLabel.Font      = $FontUISmall
 $logLabel.Text      = "Log: $LogFile"
 $logLabel.UseCompatibleTextRendering = $false
 $form.Controls.Add($logLabel)
+
+# v1.17.0 - Missing-device summary link. Refreshed by Update-MissingDeviceLink
+# after each device scan; click opens a NON-modal list window (Show, not
+# ShowDialog - a modal dialog would freeze the DoEvents-pumped install loop).
+$missingLink              = New-Object System.Windows.Forms.LinkLabel
+$missingLink.AutoSize     = $true
+$missingLink.Font         = $FontUISmall
+$missingLink.LinkColor    = $ColorPrimary
+$missingLink.DisabledLinkColor = $ColorTextLo
+$missingLink.LinkBehavior = "HoverUnderline"
+$missingLink.Location     = New-Object System.Drawing.Point(28, 510)
+$missingLink.Text         = "Missing drivers: not scanned yet"
+$missingLink.Enabled      = $false
+$missingLink.UseCompatibleTextRendering = $false
+$missingLink.Add_LinkClicked({ Show-MissingDevicesWindow })
+$form.Controls.Add($missingLink)
 
 # =========================
 # SOUND TOGGLE CHECKBOX + ACTION BUTTONS
@@ -1350,12 +1409,35 @@ function Log {
     $ts   = $now.ToString('HH:mm:ss')
     $line = "[$ts] $msg"
 
+    # Heuristic level inference keeps existing one-arg Log calls working;
+    # explicit -Level wins when supplied. v1.17.0 - moved AHEAD of the human
+    # sinks so the GUI console can colour the line by level.
+    if (-not $Level) {
+        if ($msg -match '(?i)\bERROR\b|FATAL|FAILED|cannot') { $Level = 'error' }
+        elseif ($msg -match '(?i)\bWARNING\b|WARN\b')        { $Level = 'warn'  }
+        elseif ($msg -match '(?i)\bcancel(led)?\b')          { $Level = 'cancel' }
+        else                                                  { $Level = 'info' }
+    }
+
     # Human sinks
     if (-not $script:Silent) {
         if ($script:Headless) {
             Write-Host $line
         } else {
+            # v1.17.0 - colour by level so errors/warnings stand out when
+            # scanning a 2000-line run. Info keeps the default console mint.
+            $lineColor = switch ($Level) {
+                'error'  { $ColorLogError }
+                'warn'   { $ColorLogWarn }
+                'cancel' { $ColorLogWarn }
+                'debug'  { $ColorLogDebug }
+                default  { $ColorConsoleFg }
+            }
+            $statusBox.SelectionStart  = $statusBox.TextLength
+            $statusBox.SelectionLength = 0
+            $statusBox.SelectionColor  = $lineColor
             $statusBox.AppendText("$line`r`n")
+            $statusBox.SelectionColor  = $ColorConsoleFg
             # v1.11.0 - only snap to bottom when auto-scroll is on. When the user
             # has scrolled back to read history, $script:AutoScroll = $false stops
             # the textbox yanking them down on every new log line.
@@ -1365,14 +1447,7 @@ function Log {
     }
     Add-Content -Path $LogFile -Value $line -Encoding UTF8
 
-    # Structured NDJSON sink. Heuristic level inference keeps existing
-    # one-arg Log calls working; explicit -Level wins when supplied.
-    if (-not $Level) {
-        if ($msg -match '(?i)\bERROR\b|FATAL|FAILED|cannot') { $Level = 'error' }
-        elseif ($msg -match '(?i)\bWARNING\b|WARN\b')        { $Level = 'warn'  }
-        elseif ($msg -match '(?i)\bcancel(led)?\b')          { $Level = 'cancel' }
-        else                                                  { $Level = 'info' }
-    }
+    # Structured NDJSON sink.
     try {
         $evt = [ordered]@{
             ts             = $now.ToString('o')
@@ -1565,6 +1640,75 @@ function Get-MissingDriverNames {
     }
 }
 
+# =========================
+# v1.17.0 - GUI MISSING-DEVICE SUMMARY
+# Update-MissingDeviceLink refreshes the footer link after each scan (before
+# install, after the vendor phase, after the WU/catalog fallbacks) so the
+# operator can see what the tool sees without digging through the console.
+# Show-MissingDevicesWindow opens a non-modal window listing the captured
+# names - non-modal so it can't block the install loop, which pumps via
+# DoEvents on the same thread.
+# =========================
+$script:GuiMissingDevices = @()
+$script:GuiMissingPhase   = ""
+
+function Update-MissingDeviceLink {
+    param([string[]]$Names, [string]$Phase = "detected")
+    $script:GuiMissingDevices = @($Names)
+    $script:GuiMissingPhase   = $Phase
+    if ($script:Headless) { return }
+    $n = @($Names).Count
+    if ($n -eq 0) {
+        $missingLink.Text    = "No devices missing drivers ($Phase)"
+        $missingLink.Enabled = $false
+    } else {
+        $missingLink.Text    = "$n device(s) missing drivers ($Phase) - view list"
+        $missingLink.Enabled = $true
+    }
+    [System.Windows.Forms.Application]::DoEvents()
+}
+
+function Show-MissingDevicesWindow {
+    if ($script:Headless) { return }
+    $names = @($script:GuiMissingDevices)
+
+    $win               = New-Object System.Windows.Forms.Form
+    $win.Text          = "Devices missing drivers"
+    $win.Size          = New-Object System.Drawing.Size(480, 380)
+    $win.StartPosition = "CenterParent"
+    $win.BackColor     = $ColorBg
+    $win.Font          = $FontUI
+    $win.MaximizeBox   = $false
+    $win.MinimizeBox   = $false
+
+    $hdr           = New-Object System.Windows.Forms.Label
+    $hdr.AutoSize  = $true
+    $hdr.Font      = $FontUIBold
+    $hdr.ForeColor = $ColorTextHi
+    $hdr.Location  = New-Object System.Drawing.Point(12, 12)
+    $hdr.Text      = if ($names.Count -gt 0) {
+        "$($names.Count) device(s) with missing/broken drivers ($($script:GuiMissingPhase)):"
+    } else {
+        "No devices with missing/broken drivers ($($script:GuiMissingPhase))."
+    }
+    $hdr.UseCompatibleTextRendering = $false
+    $win.Controls.Add($hdr)
+
+    $list            = New-Object System.Windows.Forms.TextBox
+    $list.Multiline  = $true
+    $list.ReadOnly   = $true
+    $list.ScrollBars = "Vertical"
+    $list.WordWrap   = $false
+    $list.Font       = $FontMonoSm
+    $list.Size       = New-Object System.Drawing.Size(440, 290)
+    $list.Location   = New-Object System.Drawing.Point(12, 38)
+    $list.Text       = (@($names | ForEach-Object { "  - $_" }) -join "`r`n")
+    $win.Controls.Add($list)
+
+    # Non-modal: Show() returns immediately, keeping the main run pumping.
+    $win.Show($form)
+}
+
 function Write-MissingDriverDetails {
     # Detailed end-of-run dump of every device still in problem state.
     # Pulls HardwareID + CompatibleID arrays from Get-PnpDevice (Win32_PnPEntity
@@ -1651,7 +1795,7 @@ function Write-VerboseDiagnostics {
 # =========================
 function Write-HtmlReport {
     param(
-        [Parameter(Mandatory=$true)][ValidateSet("success","failure","cancelled","testmode")]
+        [Parameter(Mandatory=$true)][ValidateSet("success","failure","cancelled","testmode","crashed")]
         [string]$Result
     )
     try {
@@ -1672,6 +1816,7 @@ function Write-HtmlReport {
             "failure"   { "#c92a2a" }
             "cancelled" { "#a37b00" }
             "testmode"  { "#1864ab" }
+            "crashed"   { "#7c3aed" }   # v1.17.0 - violet: distinct from ordinary failure red
         }
         $statusLabel = $Result.ToUpper()
 
@@ -1867,6 +2012,7 @@ function Write-HtmlReport {
 "@
         $utf8NoBom = New-Object System.Text.UTF8Encoding $false
         [System.IO.File]::WriteAllText($ReportFile, $html, $utf8NoBom)
+        $script:HtmlReportWritten = $true   # v1.17.0 - crash handler only writes a "crashed" report if none exists yet
         Log "HTML report saved to: $ReportFile" -Level "info" -Event "report_written"
     } catch {
         Log "  WARNING: HTML report generation failed - $($_.Exception.Message)" -Level "warn"
@@ -2016,9 +2162,12 @@ function Add-DownloadRecord {
 
 function Send-AnalyticsEvent {
     param(
-        [ValidateSet("success","failure","cancelled","testmode")]
+        [ValidateSet("success","failure","cancelled","testmode","crashed")]
         [string]$Result
     )
+    # v1.17.0 - mark that an analytics event was recorded for this run, so the
+    # crash handler doesn't emit a duplicate "crashed" row after a normal one.
+    $script:AnalyticsEventSent = $true
     $durationSec = 0
     if ($script:AnalyticsStartTime) {
         $durationSec = [int]((Get-Date) - $script:AnalyticsStartTime).TotalSeconds
@@ -2180,6 +2329,33 @@ function Send-AnalyticsEvent {
 }
 
 # =========================
+# v1.17.0 - DISK-SPACE PREFLIGHT
+# Packs run 1-4 GB and extract to 2-3x that; dying mid-extract on a small SSD
+# is the worst failure mode (half-written driver store, no clear error).
+# Requires free >= $RequiredBytes on the drive holding $Path. Fail-open: any
+# error in the check itself (UNC path, odd image) returns $true so a broken
+# check can never block a legitimate install.
+# =========================
+function Test-DiskSpace {
+    param([string]$Path, [long]$RequiredBytes)
+    try {
+        $full = [System.IO.Path]::GetFullPath($Path)
+        $root = [System.IO.Path]::GetPathRoot($full)
+        if (-not $root) { return $true }
+        $di   = New-Object System.IO.DriveInfo($root)
+        $free = $di.AvailableFreeSpace
+        if ($free -lt $RequiredBytes) {
+            Log ("  ERROR: not enough disk space on {0} - {1:N1} GB free, ~{2:N1} GB needed (download + extract headroom)." -f `
+                $root, ($free / 1GB), ($RequiredBytes / 1GB)) -Level "error" -Event "disk_space" -Context @{
+                    drive = $root; free_bytes = $free; required_bytes = $RequiredBytes
+                }
+            return $false
+        }
+        return $true
+    } catch { return $true }
+}
+
+# =========================
 # CURL DOWNLOAD
 # =========================
 function Invoke-CurlDownload {
@@ -2204,6 +2380,15 @@ function Invoke-CurlDownload {
 
     $totalMB = if ($totalBytes -gt 0) { [math]::Round($totalBytes / 1MB, 1) } else { 0 }
     if ($totalMB -gt 0) { Log "  Expected size: $totalMB MB" }
+
+    # v1.17.0 - preflight: need the pack itself plus extraction headroom (~3x).
+    # Only possible when the HEAD probe returned a size; unknown-size downloads
+    # proceed as before.
+    if ($totalBytes -gt 0 -and -not (Test-DiskSpace -Path $OutFile -RequiredBytes ($totalBytes * 3))) {
+        SetDownload -Pct 0 -Label "Failed - not enough disk space"
+        Stop-DlSpinner -Success $false
+        return $false
+    }
 
     $psi                 = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName        = "curl.exe"
@@ -6429,6 +6614,8 @@ function Start-Install {
     $script:AnalyticsDownloadUrls    = New-Object System.Collections.Generic.List[hashtable]   # v1.13.1
     $script:AnalyticsStartTime       = Get-Date
     $script:7zInstalled              = $false
+    $script:HtmlReportWritten        = $false   # v1.17.0 - crash-handler guards
+    $script:AnalyticsEventSent       = $false
     $script:Headless                 = [bool]$Headless
     # v1.10.0 - re-anchor mode flags on each Start-Install invocation. The
     # script-scope assignments at top-of-file cover the irm|iex path; this
@@ -6448,9 +6635,20 @@ function Start-Install {
             exit 1
         }
         Log "Not running as admin - re-launching elevated..."
-        Start-Process powershell `
-            "-WindowStyle Hidden -ExecutionPolicy Bypass -Command `"irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto.ps1 | iex`"" `
-            -Verb RunAs
+        # v1.17.0 - when the script was started from a file on disk, relaunch
+        # THAT file, not the published GitHub copy. Pre-v1.17.0 a locally edited
+        # dev copy silently swapped to raw.githubusercontent main on elevation.
+        # $PSCommandPath is empty only in the true irm|iex case, which keeps
+        # the original URL relaunch as its fallback.
+        if ($PSCommandPath) {
+            Start-Process powershell `
+                "-ExecutionPolicy Bypass -File `"$PSCommandPath`"" `
+                -Verb RunAs
+        } else {
+            Start-Process powershell `
+                "-WindowStyle Hidden -ExecutionPolicy Bypass -Command `"irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto.ps1 | iex`"" `
+                -Verb RunAs
+        }
         $form.Close()
         exit
     }
@@ -6528,6 +6726,7 @@ function Start-Install {
         Log "Missing devices (before):"
         foreach ($n in $beforeNames) { Log "  - $n" }
     }
+    Update-MissingDeviceLink -Names $beforeNames -Phase "before install"   # v1.17.0
 
     # Offer to skip if no missing drivers detected
     if ($script:AnalyticsMissingBefore -eq 0) {
@@ -6682,6 +6881,7 @@ function Start-Install {
     } else { 0 }
     Log "Missing drivers AFTER  install: $($script:AnalyticsMissingAfter)"
     Log "Devices resolved by this install: $missingDelta"
+    Update-MissingDeviceLink -Names $afterNames -Phase "after install"   # v1.17.0
     Write-MissingDriverDetails
 
     # v1.15.0 - Universal vendor-pack-free fallbacks. If devices are STILL missing
@@ -6706,7 +6906,9 @@ function Start-Install {
             Log "Re-scanning devices after fallback driver installs..."
             $script:AnalyticsMissingAfter = Get-MissingDriverCount
             $script:AnalyticsMissingAfterList.Clear()
-            foreach ($n in (Get-MissingDriverNames)) { $script:AnalyticsMissingAfterList.Add($n) | Out-Null }
+            $afterNames = Get-MissingDriverNames
+            foreach ($n in $afterNames) { $script:AnalyticsMissingAfterList.Add($n) | Out-Null }
+            Update-MissingDeviceLink -Names $afterNames -Phase "after fallbacks"   # v1.17.0
             $missingDelta = if ($script:AnalyticsMissingBefore -ge 0 -and $script:AnalyticsMissingAfter -ge 0) {
                 $script:AnalyticsMissingBefore - $script:AnalyticsMissingAfter
             } else { 0 }
@@ -6860,14 +7062,62 @@ function Start-Install {
 }
 
 # =========================
+# v1.17.0 - CRASH-SAFE WRAPPER
+# Field logs are the debugging lifeline; an unhandled exception inside a
+# vendor handler used to skip the analytics event AND the HTML report,
+# leaving nothing but a truncated .log. All entry points now come through
+# here: the exception is logged with message + position + stack trace, and
+# the analytics event / HTML report are emitted with result="crashed" -
+# unless the normal paths already wrote them (guard flags set inside
+# Send-AnalyticsEvent / Write-HtmlReport, reset at the top of Start-Install).
+# =========================
+function Invoke-StartInstallSafe {
+    try {
+        Start-Install
+    } catch {
+        $ex = $_
+        try {
+            Log "============================================" -Level "error"
+            Log "FATAL: unhandled exception - run aborted." -Level "error" -Event "crash" -Context @{
+                message = $ex.Exception.Message
+                type    = $ex.Exception.GetType().FullName
+            }
+            Log "  $($ex.Exception.Message)" -Level "error"
+            if ($ex.InvocationInfo -and $ex.InvocationInfo.PositionMessage) {
+                foreach ($l in ($ex.InvocationInfo.PositionMessage -split "`r?`n")) { Log "  $l" -Level "error" }
+            }
+            if ($ex.ScriptStackTrace) {
+                foreach ($l in ($ex.ScriptStackTrace -split "`r?`n")) { Log "    $l" -Level "error" }
+            }
+        } catch {}
+        if (-not $script:AnalyticsEventSent) { try { Send-AnalyticsEvent -Result "crashed" } catch {} }
+        if (-not $script:HtmlReportWritten)  { try { Write-HtmlReport    -Result "crashed" } catch {} }
+        try { Play-Sound -Event "Failure" } catch {}
+        if ($script:Headless) {
+            if (-not $script:Silent) {
+                Write-Host "CRASHED: unhandled exception - $($ex.Exception.Message)"
+                Write-Host "Log:    $LogFile"
+                Write-Host "Report: $ReportFile"
+            }
+        } else {
+            try { Set-ButtonIdle } catch {}
+            [System.Windows.Forms.MessageBox]::Show(
+                "The installer hit an unexpected error and stopped:`n`n$($ex.Exception.Message)`n`nLog: $LogFile`nReport: $ReportFile",
+                "Installer Crashed", "OK", "Error"
+            ) | Out-Null
+        }
+    }
+}
+
+# =========================
 # WIRE UP + LAUNCH
 # =========================
 if ($Headless) {
     # Headless mode - run directly, no GUI
-    Start-Install
+    Invoke-StartInstallSafe
 } else {
     # GUI mode - wire up form and show
-    $button.Add_Click({ Start-Install })
+    $button.Add_Click({ Invoke-StartInstallSafe })
 
     $cancelButton.Add_Click({
         if ($cancelButton.Enabled) {
@@ -6884,7 +7134,11 @@ if ($Headless) {
         $form.Activate()
         Start-Sleep -Milliseconds 300
         Log "Running startup checks..."
-        Start-Install
+        # Auto-run on launch is INTENTIONAL (removed in v1.6.0, deliberately
+        # restored in v1.6.1): bench workflow is double-click-and-walk-away.
+        # The "no missing drivers - run anyway?" prompt inside Start-Install
+        # is the guard against pointless runs.
+        Invoke-StartInstallSafe
     })
 
     [void]$form.ShowDialog()
