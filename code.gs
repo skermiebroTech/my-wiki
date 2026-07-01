@@ -160,9 +160,62 @@ function _numOrBlank(v) {
 }
 
 
-// ----- OPTIONAL: GET handler for browser sanity check -----
-// Lets you hit the deployment URL in a browser and confirm it's live.
-// Open the URL; you should see "Driver Installer webhook is alive."
-function doGet() {
-  return _textResponse('Driver Installer webhook is alive. POST JSON to record a run.');
+// ----- GET handler: serves the analytics rows as JSON for the wiki dashboard -----
+// The wiki "Driver Installer Analytics" page fetches this endpoint client-side
+// and renders it. Returns the most recent MAX_GET_ROWS rows, NEWEST FIRST, as an
+// array of objects keyed by stable snake_case names (not the human header text).
+//
+// After editing this file you MUST redeploy for the change to take effect:
+//   Deploy > Manage deployments > (existing deployment) > Edit (pencil) >
+//   Version: New version > Deploy.   Do NOT create a new deployment - that
+//   changes the URL and breaks both the PowerShell webhook and the wiki page.
+//
+// CORS: an Apps Script web app deployed "Execute as me / Anyone" serves GET
+// responses with Access-Control-Allow-Origin:* (the /exec call 302-redirects to
+// googleusercontent.com), so the wiki can fetch it directly from the browser.
+const MAX_GET_ROWS = 1000;
+const FIELD_KEYS = [
+  'timestamp','result','manufacturer','model','serial','os_version','os_build',
+  'inf_count','download_mb','missing_before','missing_after','duration_sec',
+  'script_version','installed_drivers','driver_urls','missing_after_list'
+];
+
+function doGet(e) {
+  // ?ping=1 keeps the old plain-text liveness check available.
+  if (e && e.parameter && e.parameter.ping) {
+    return _textResponse('Driver Installer webhook is alive. POST JSON to record a run.');
+  }
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName(SHEET_NAME);
+    if (!sheet || sheet.getLastRow() < 2) {
+      return _jsonResponse({ rows: [], count: 0, generated: new Date().toISOString() });
+    }
+    var lastRow = sheet.getLastRow();
+    var lastCol = Math.min(sheet.getLastColumn(), FIELD_KEYS.length);
+    var startRow = Math.max(2, lastRow - MAX_GET_ROWS + 1);   // skip header row 1
+    var numRows  = lastRow - startRow + 1;
+    var values   = sheet.getRange(startRow, 1, numRows, lastCol).getValues();
+
+    var rows = [];
+    for (var i = values.length - 1; i >= 0; i--) {            // newest first
+      var src = values[i];
+      var obj = {};
+      for (var c = 0; c < lastCol; c++) {
+        var v = src[c];
+        if (c === 0 && v instanceof Date) { v = v.toISOString(); }
+        obj[FIELD_KEYS[c]] = v;
+      }
+      rows.push(obj);
+    }
+    return _jsonResponse({ rows: rows, count: rows.length, generated: new Date().toISOString() });
+  } catch (err) {
+    return _jsonResponse({ error: (err && err.message) ? err.message : String(err), rows: [] });
+  }
+}
+
+function _jsonResponse(obj) {
+  return ContentService
+    .createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
 }

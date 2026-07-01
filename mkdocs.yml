@@ -29,6 +29,7 @@ theme:
 
 nav:
   - Home: index.md
+  - Driver Installer Analytics: driver-analytics.md
   - Auto Installer Docs: Auto-Installer-Docs.md
   - Manual Driver Installation Docs: driver-installation.md
   - Installing CAB file drivers: cab-file-driver-installation.md
