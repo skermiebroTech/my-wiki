@@ -538,7 +538,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.16.0"
+$SCRIPT_VERSION = "1.16.1"
 
 # =============================================================
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
@@ -2451,7 +2451,7 @@ function Invoke-CurlDownloadParallel {
     # Final accounting
     $batchMB = [math]::Round($batchBytes / 1MB, 1)
     $script:AnalyticsDownloadMB = [math]::Round($script:AnalyticsDownloadMB + $batchMB, 1)
-    $ok = ($results | Where-Object { $_.Success }).Count
+    $ok = @($results | Where-Object { $_.Success }).Count   # v1.16.1: @() forces array so single-success .Count is 1, not the hashtable's key count (was reporting "8/1 OK")
     Log "Parallel download finished: $ok/$total OK, total $batchMB MB" `
         -Level "info" -Event "parallel_dl_done" -Context @{ ok=$ok; total=$total; mb=$batchMB }
     SetDownload -Pct 100 -Label "Parallel: $ok/$total complete ($batchMB MB)"
@@ -3258,11 +3258,23 @@ function Start-DellDriverInstall {
         return $false
     }
 
+    # v1.16.1 - the catalog also keys every Model node by systemID, which equals the
+    # box's SystemSKUNumber (e.g. 0942 -> "Precision 3431"). Matching on that is far
+    # more robust than name matching, which breaks when the WMI Model carries a
+    # form-factor word the catalog omits (WMI "Precision Tower 3431" vs catalog
+    # "Precision 3431"). We try systemID first, then fall back to name tokens.
+    $systemSKU = $null
+    try { $systemSKU = (Get-CimInstance Win32_ComputerSystem).SystemSKUNumber.Trim() } catch {}
+    if ($systemSKU) { Log "  Catalog match key - SystemSKUNumber: $systemSKU" }
+
     $searchNames = @()
     if ($ModelName) {
         $searchNames += $ModelName
         $searchNames += ($ModelName -replace '\s+Notebook.*$','')
         $searchNames += ($ModelName -replace '^Dell\s+','')
+        # v1.16.1 - drop form-factor words the catalog doesn't use, so
+        # "Precision Tower 3431" also matches the catalog's "Precision 3431".
+        $searchNames += ((($ModelName -replace '(?i)\b(Tower|Desktop|SFF|MFF|USFF|AIO|All[- ]in[- ]One|Rack|Mini|Micro|Workstation)\b',' ') -replace '\s{2,}',' ').Trim())
         $searchNames = $searchNames | Select-Object -Unique | Where-Object { $_.Length -gt 3 }
     }
     Log "Searching catalog - model tokens: $($searchNames -join ' | ')"
@@ -3271,6 +3283,11 @@ function Start-DellDriverInstall {
     foreach ($pkg in $cat.SelectNodes("//*[local-name()='DriverPackage']")) {
         $modelMatched = $false
         foreach ($modelNode in $pkg.SelectNodes(".//*[local-name()='Model']")) {
+            # v1.16.1 - systemID == SystemSKUNumber is the authoritative match
+            if ($systemSKU) {
+                $idAttr = $modelNode.GetAttribute("systemID")
+                if ($idAttr -and ($idAttr -ieq $systemSKU)) { $modelMatched = $true; break }
+            }
             $nameAttr = $modelNode.GetAttribute("name")
             foreach ($tok in $searchNames) {
                 if ($nameAttr -ieq $tok) { $modelMatched = $true; break }
