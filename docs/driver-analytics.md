@@ -17,21 +17,21 @@
 
   <div class="dia-grid">
     <section class="dia-card">
-      <h3>Run results</h3>
+      <h3>Run results <span class="dia-info" data-tip="Every run in the selected range, grouped by the result it reported: Success, Failure, Cancelled, Test mode, or Other (unrecognised results). Percentages are of all runs in range.">?</span></h3>
       <div class="dia-donut-wrap"><div id="dia-donut"></div><div class="dia-legend" id="dia-legend"></div></div>
     </section>
     <section class="dia-card">
-      <h3>Top manufacturers</h3>
+      <h3>Top manufacturers <span class="dia-info" data-tip="Number of runs per device manufacturer in the selected range. Counts runs, not unique machines — the same PC run twice counts twice. Runs with no manufacturer show as Unknown.">?</span></h3>
       <div id="dia-mfr" class="dia-bars"></div>
     </section>
     <section class="dia-card dia-wide">
-      <h3>Top models</h3>
+      <h3>Top models <span class="dia-info" data-tip="Number of runs per device model in the selected range. Counts runs, not unique machines. Runs that didn't report a model are left out.">?</span></h3>
       <div id="dia-models" class="dia-bars dia-bars-wide"></div>
     </section>
   </div>
 
   <section class="dia-card" style="margin-bottom:1rem;">
-    <h3>Most common missing drivers</h3>
+    <h3>Most common missing drivers <span class="dia-info" data-tip="Individual driver packages the installer downloaded, ranked by how many runs needed them (counted once per run). Full model driver packs and HP SysID packs are excluded so only specific missing drivers show. The model column is the device that most often needed that driver.">?</span></h3>
     <div class="dia-tablescroll">
       <table class="dia-table">
         <thead><tr><th>Driver</th><th class="num">Runs</th><th>Most-affected model</th></tr></thead>
@@ -42,15 +42,21 @@
 
   <section class="dia-card dia-tablecard">
     <div class="dia-tablehead">
-      <h3>Recent runs</h3>
+      <h3>Recent runs <span class="dia-info" data-tip="Every individual run in the selected range, newest first (capped at 200 rows — use the filter to narrow down). Hover a column header for what it means.">?</span></h3>
       <input type="search" id="dia-filter" placeholder="Filter by model, manufacturer, result…" />
     </div>
     <div class="dia-tablescroll">
       <table class="dia-table" id="dia-table">
         <thead>
           <tr>
-            <th>When</th><th>Result</th><th>Manufacturer</th><th>Model</th>
-            <th>Ver</th><th class="num">Missing</th><th class="num">Installed</th><th class="num">Duration</th>
+            <th title="Date and time the run reported in, in your local timezone">When</th>
+            <th title="Outcome the run reported: success, failure, cancelled, or test mode">Result</th>
+            <th title="Device manufacturer reported by the run">Manufacturer</th>
+            <th title="Device model reported by the run">Model</th>
+            <th title="Version of the installer script that ran">Ver</th>
+            <th class="num" title="Devices with missing drivers: count before the run → count after (— if not reported)">Missing</th>
+            <th class="num" title="Number of driver packages (INF files) the run installed">Installed</th>
+            <th class="num" title="How long the run took from start to finish">Duration</th>
           </tr>
         </thead>
         <tbody id="dia-tbody"></tbody>
@@ -123,6 +129,24 @@
 
 .dia-foot { color:var(--dia-muted); font-size:.78rem; margin-top:1rem; }
 .dia-empty { color:var(--dia-muted); padding:1rem 0; }
+
+.dia-info { display:inline-flex; align-items:center; justify-content:center; width:.95rem; height:.95rem;
+  border-radius:50%; border:1px solid var(--dia-muted); color:var(--dia-muted);
+  font-size:.6rem; font-weight:700; line-height:1; vertical-align:.1rem; cursor:help; user-select:none; }
+.dia-info:hover { border-color:var(--dia-fill); color:var(--dia-fill); }
+.dia [data-tip] { position:relative; }
+.dia-kpi[data-tip] { cursor:help; }
+.dia [data-tip]::before { content:""; position:absolute; left:50%; bottom:calc(100% + .2rem);
+  transform:translateX(-50%); border:.3rem solid transparent; border-top-color:var(--md-default-fg-color);
+  opacity:0; visibility:hidden; transition:opacity .12s ease; pointer-events:none; z-index:20; }
+.dia [data-tip]::after { content:attr(data-tip); position:absolute; left:50%; bottom:calc(100% + .7rem);
+  transform:translateX(-50%) translateY(3px); width:max-content; max-width:min(280px, 78vw); white-space:normal;
+  background:var(--md-default-fg-color); color:var(--md-default-bg-color);
+  font-size:.74rem; font-weight:400; line-height:1.5; text-transform:none; letter-spacing:normal; text-align:left;
+  padding:.55rem .7rem; border-radius:.5rem; box-shadow:0 4px 14px rgba(0,0,0,.25);
+  opacity:0; visibility:hidden; transition:opacity .12s ease, transform .12s ease; pointer-events:none; z-index:20; }
+.dia [data-tip]:hover::before, .dia [data-tip]:hover::after { opacity:1; visibility:visible; }
+.dia [data-tip]:hover::after { transform:translateX(-50%); }
 </style>
 
 <script>
@@ -153,7 +177,7 @@
     return d.toLocaleDateString(undefined,{month:"short",day:"numeric"}) + " " +
            d.toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"}); }
 
-  function kpi(v, l) { return '<div class="dia-kpi"><div class="v">' + v + '</div><div class="l">' + l + '</div></div>'; }
+  function kpi(v, l, tip) { return '<div class="dia-kpi" data-tip="' + esc(tip) + '"><div class="v">' + v + '</div><div class="l">' + l + '</div></div>'; }
 
   function render(rows) {
     var total = rows.length;
@@ -189,12 +213,25 @@
     durs.sort(function (a, b) { return a - b; });
     var medDur = durs.length ? durs[Math.floor((durs.length - 1) / 2)] : 0;
     $("dia-kpis").innerHTML =
-      kpi(total, "Total runs") +
-      kpi(rate + "%", "Success rate") +
-      kpi(Object.keys(models).length, "Unique models") +
-      kpi(resolved.toLocaleString(), "Devices resolved") +
-      kpi(instTotal.toLocaleString(), "Drivers installed") +
-      kpi(fmtDur(medDur), "Median run time");
+      kpi(total, "Total runs",
+        "Every time the installer script ran and reported back in the selected time range. " +
+        "Counts runs, not machines — the same PC run twice counts as 2. Includes failed, cancelled and test-mode runs.") +
+      kpi(rate + "%", "Success rate",
+        "Share of all runs in range that reported a result of “success”. " +
+        "Failed, cancelled and test-mode runs all count against this.") +
+      kpi(Object.keys(models).length, "Unique models",
+        "Number of distinct device model names seen across runs in range. " +
+        "Runs that didn't report a model are not counted.") +
+      kpi(resolved.toLocaleString(), "Devices resolved",
+        "Total devices that went from missing a driver to having one: the drop in Device Manager's " +
+        "missing-driver count from before each run to after, summed across runs in range. " +
+        "Only counts runs that reported both numbers; runs where the count didn't improve add 0.") +
+      kpi(instTotal.toLocaleString(), "Drivers installed",
+        "Total driver packages (INF files) installed, summed across all runs in range — " +
+        "including runs that ultimately failed or were cancelled.") +
+      kpi(fmtDur(medDur), "Median run time",
+        "Median start-to-finish duration of runs in range that reported a duration. " +
+        "Median (middle value) rather than average, so a few very long runs don't skew it.");
 
     renderDonut(results, total);
     renderBars("dia-mfr", mfr, 6);
