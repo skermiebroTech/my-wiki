@@ -59,6 +59,29 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.21.0 - Dell individual mode: stop re-installing what's already installed;
+#           escalate to the full pack instead (field report: Latitude 7450,
+#           run 20260706_140814 + operator confirmed a REBOOT did not clear
+#           the camera). v1.20.0's DUP /s run completed with exit 0 and the
+#           AVStream camera still failed to load - so the graphics package,
+#           installed every possible way at the exact version already bound
+#           (32.0.101.8724), provably cannot fix DISPLAY\INT3480. The camera's
+#           VIDEO\VEN_8086&DEV_7D45 hardware IDs point at the iGPU, so
+#           hardware-ID matching keeps picking the graphics driver; the real
+#           fix likely lives in a companion package (IPU/sensor camera stack)
+#           the matcher cannot discover from this device's IDs.
+#           (1) Already-installed pre-check: when CatalogPC matches a package,
+#               compare its vendorVersion against the device's bound driver
+#               version (DEVPKEY_Device_DriverVersion). Same version = the
+#               package can't help; the device is treated as unmatched. Saves
+#               the 1.4GB re-download this machine has now paid four times.
+#           (2) Escalation: individual-mode success is no longer taken at face
+#               value - if devices are still in a problem state afterwards
+#               (or the pre-check bailed), the run falls through to the full
+#               driver pack, which ships every INF for the model including
+#               the camera stack. The end-of-run remediation pass then
+#               re-enumerates the device against the enlarged driver store.
+#
 # v1.20.0 - Dell DUP silent-run fallback (field report: Latitude 7450, run
 #           20260706_135222). The v1.19.x PnP remediation executed cleanly but
 #           could NOT clear the AVStream camera: restart-device succeeded yet
@@ -708,7 +731,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.20.0"
+$SCRIPT_VERSION = "1.21.0"
 
 # =============================================================
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
@@ -3656,7 +3679,12 @@ function Start-DellIndividualDriverInstall {
             try { $driverName = $component.SelectSingleNode("*[local-name()='Name']/*[local-name()='Display']").InnerText } catch {}
             $driverDate = [datetime]::MinValue
             try { $driverDate = [datetime]::Parse($component.GetAttribute("dateTime")) } catch {}
-            $deviceMatches.Add([PSCustomObject]@{ Path = $driverPath; Name = $driverName; Date = $driverDate }) | Out-Null
+            $deviceMatches.Add([PSCustomObject]@{
+                Path    = $driverPath
+                Name    = $driverName
+                Date    = $driverDate
+                Version = $component.GetAttribute("vendorVersion")   # v1.21.0 - for the already-installed pre-check
+            }) | Out-Null
         }
 
         if ($deviceMatches.Count -eq 0) {
@@ -3674,6 +3702,31 @@ function Start-DellIndividualDriverInstall {
         Log "  Matched '$($dev.Name)'"
         Log "    Driver : $($best.Name)"
         Log "    Path   : $($best.Path)"
+
+        # v1.21.0 - already-installed pre-check. Field case (Latitude 7450,
+        # runs 132747..140814): the AVStream camera's VIDEO\VEN_8086&DEV_7D45
+        # hardware IDs point at the iGPU, so the matcher kept picking the Intel
+        # graphics package - the exact version already bound to the device.
+        # Four runs proved re-installing it can't fix anything: INF add, full
+        # DUP /s run, PnP restart/remove/rescan and a reboot all left the
+        # camera at Code 39. If the device already has the offered version,
+        # treat it as unmatched: the strict path then escalates to the full
+        # driver pack, which carries companion packages (IPU/sensor camera
+        # stacks) that hardware-ID matching cannot discover.
+        $curVer = $null
+        try {
+            $curVer = [string](Get-PnpDeviceProperty -InstanceId $dev.DeviceID `
+                -KeyName 'DEVPKEY_Device_DriverVersion' -EA Stop).Data
+        } catch {}
+        if ($curVer -and $best.Version -and ($curVer -eq [string]$best.Version)) {
+            Log "    Device already has this exact driver version bound ($curVer) -"
+            Log "    re-installing the same package cannot fix it."
+            $allMatched = $false
+            if ($BestEffort) { continue }
+            Log "    Will fall back to the full driver pack for companion packages."
+            break
+        }
+
         if (-not ($toDownload | Where-Object { $_.Path -eq $best.Path })) {
             $toDownload.Add([PSCustomObject]@{
                 DeviceName = $dev.Name
@@ -3888,14 +3941,25 @@ function Start-DellDriverInstall {
             Log "Missing devices ($missingCount) within threshold - attempting individual driver lookup..."
             $individualResult = Start-DellIndividualDriverInstall -DriverRoot $DriverRoot -ServiceTag $serviceTag -IsWin11 $isWin11
             if ($individualResult -eq $true) {
-                Log "Individual driver install complete."
-                return $true
+                # v1.21.0 - individual-mode "success" used to be taken at face
+                # value even when the devices it targeted were still broken
+                # (Latitude 7450: camera at Code 39 through four runs). Verify,
+                # and escalate to the full pack when anything is still missing.
+                $stillBroken = Get-MissingDriverCount
+                if ($stillBroken -le 0) {
+                    Log "Individual driver install complete."
+                    return $true
+                }
+                Log "Individual install finished but $stillBroken device(s) are still in a problem"
+                Log "state - escalating to the full driver pack (it carries companion packages"
+                Log "that hardware-ID matching cannot discover, e.g. IPU/sensor camera stacks)."
             } elseif ($individualResult -eq $false) {
                 # Cancelled or hard failure
                 return $false
+            } else {
+                # $null = no catalog match found, fall through to full pack
+                Log "Falling back to full driver pack install..."
             }
-            # $null = no catalog match found, fall through to full pack
-            Log "Falling back to full driver pack install..."
         }
     }
 
