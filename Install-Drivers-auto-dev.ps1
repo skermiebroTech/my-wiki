@@ -59,6 +59,30 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.20.0 - Dell DUP silent-run fallback (field report: Latitude 7450, run
+#           20260706_135222). The v1.19.x PnP remediation executed cleanly but
+#           could NOT clear the AVStream camera: restart-device succeeded yet
+#           the device stayed at Code 39, and remove-device + scan-devices
+#           re-enumerated it straight back into CM_PROB_DRIVER_FAILED_LOAD.
+#           Diagnosis: the driver package binds but fails to load because the
+#           camera component's services/registrations only exist after the
+#           full vendor installer runs - pnputil /add-driver copies the INF
+#           into the store but never executes the package's setup logic.
+#           (1) New Invoke-DellDupFallback in the Dell individual-driver path:
+#               after the INF pass, if the device that motivated a package is
+#               still in a problem state, run the already-downloaded Dell
+#               Update Package silently ("<pkg>.EXE /s") via the generic
+#               process runner (Invoke-LenovoPackageCommand: cancel, spinner,
+#               25-min timeout). Exit 0 = OK, exit 2 = reboot required (sets
+#               new $script:DupRebootRequired, surfaced as a completion NOTE).
+#               The later global remediation pass then gets a real chance to
+#               restart the device into a working state. $toDownload entries
+#               now carry DeviceID so the fallback can re-check the exact
+#               originating device.
+#           (2) Remediation header now logs with explicit -Level "info" - the
+#               level heuristic matched "error" in the header text and wrote
+#               it to events.json at level=error (cosmetic).
+#
 # v1.19.1 - Fix crash introduced by v1.19.0 (field report: Latitude 7450, run
 #           20260706_134546 aborted with result=crashed right after the vendor
 #           phase). Log's $msg parameter is Mandatory, and PowerShell rejects
@@ -684,7 +708,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.19.1"
+$SCRIPT_VERSION = "1.20.0"
 
 # =============================================================
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
@@ -2060,7 +2084,10 @@ function Invoke-ProblemDeviceRemediation {
     if ($broken.Count -eq 0) { return 0 }
 
     Log ""
-    Log "=== PNP REMEDIATION: $($broken.Count) device(s) in a driver-load error state ==="
+    # v1.20.0 - explicit -Level: the heuristic in Log matched "error" in this
+    # header and recorded it at level=error in events.json (seen in field run
+    # 20260706_135222 - cosmetic, but it pollutes error-level filtering).
+    Log "=== PNP REMEDIATION: $($broken.Count) device(s) in a driver-load error state ===" -Level "info"
     $needRescan = $false
     foreach ($dev in $broken) {
         if (Test-CancelFlag) { Log "  Cancelled."; break }
@@ -2500,6 +2527,10 @@ $script:AnalyticsMissingAfter    = -1
 $script:AnalyticsMissingBeforeList = New-Object System.Collections.Generic.List[string]   # v1.11.0
 $script:AnalyticsMissingAfterList  = New-Object System.Collections.Generic.List[string]   # v1.11.0
 $script:AnalyticsInstalledDrivers = New-Object System.Collections.Generic.List[string]
+# v1.20.0 - set when a silently-run vendor installer (Dell DUP fallback) exits
+# with "reboot required". Surfaced as a log NOTE in the completion path so the
+# operator knows a still-broken device may clear itself on restart.
+$script:DupRebootRequired = $false
 # v1.13.1 - every file we successfully pull is recorded here so the HTML
 # report can list re-downloadable driver URLs. Each entry is a hashtable:
 #   @{ Url=...; FileName=...; MB=<double>; Kind='driver'|'catalog' }
@@ -3648,6 +3679,7 @@ function Start-DellIndividualDriverInstall {
                 DeviceName = $dev.Name
                 DriverName = $best.Name
                 Path       = $best.Path
+                DeviceID   = $dev.DeviceID   # v1.20.0 - lets the DUP fallback re-check this exact device
             })
         }
     }
@@ -3720,7 +3752,79 @@ function Start-DellIndividualDriverInstall {
     foreach ($extractDir in (Get-Item (Join-Path $DriverRoot "Dell_Individual_*") -EA SilentlyContinue)) {
         if (Install-DriversFromPath -BasePath $extractDir.FullName) { $anyInstalled = $true }
     }
+
+    # v1.20.0 - DUP silent-run fallback: if the device that motivated a package
+    # is still broken after the raw INF pass, run the downloaded Dell Update
+    # Package itself with /s. Field case (Latitude 7450): AVStream camera at
+    # Code 39 with iigd_dch.inf already "up-to-date" - the INF add and the PnP
+    # restart/re-enumerate remediation both left it failing to load, because
+    # the camera component's services/registrations only exist after the full
+    # installer runs; pnputil /add-driver never executes those.
+    if (-not $SkipInstall -and -not $script:TestMode -and -not (Test-Cancelled)) {
+        Invoke-DellDupFallback -Packages $toDownload -DriverRoot $DriverRoot
+    }
     return $anyInstalled
+}
+
+function Invoke-DellDupFallback {
+    # v1.20.0 - see call site above. Only fires for packages whose originating
+    # device is still in a problem state, so the usual case (INF pass fixed
+    # everything) costs one Get-PnpDevice per package and nothing else.
+    param(
+        [System.Collections.Generic.List[object]]$Packages,
+        [string]$DriverRoot
+    )
+    foreach ($drv in $Packages) {
+        if (Test-Cancelled) { return }
+        if (-not $drv.DeviceID) { continue }
+
+        $stillBroken = $false
+        try {
+            $chk = Get-PnpDevice -InstanceId $drv.DeviceID -EA Stop
+            $stillBroken = ([int]$chk.ConfigManagerErrorCode -ne 0)
+        } catch {
+            continue   # device instance gone (re-enumerated away) - nothing to fix
+        }
+        if (-not $stillBroken) { continue }
+
+        $dupFile = Join-Path $DriverRoot ([System.IO.Path]::GetFileName($drv.Path))
+        if (-not (Test-Path $dupFile)) {
+            Log "  '$($drv.DeviceName)' still in problem state but DUP file is gone - skipping installer fallback."
+            continue
+        }
+
+        Log "  '$($drv.DeviceName)' still in problem state after the INF pass."
+        Log "  Running the Dell package installer silently (registers services and"
+        Log "  components that a raw pnputil /add-driver skips). This can take a few minutes..."
+        Log "    $([System.IO.Path]::GetFileName($drv.Path)) /s"
+        SetExtract -Pct -1 -Label "Running installer: $($drv.DriverName)"
+        $rc = Invoke-LenovoPackageCommand -Command "`"$dupFile`" /s" -WorkingDir $DriverRoot -TimeoutSec 1500
+        # DUP exit codes: 0=success, 1=failure, 2=reboot required,
+        # 3=soft dependency error, 4=hard dependency, 5=platform unsupported.
+        # -9997..-9999 come from Invoke-LenovoPackageCommand (exec error /
+        # cancelled / timeout) and are already logged there.
+        switch ($rc) {
+            0 { Log "  Installer completed OK (exit 0)." }
+            2 {
+                Log "  Installer completed - REBOOT REQUIRED to finish (exit 2)."
+                $script:DupRebootRequired = $true
+            }
+            default { Log "  Installer exit code: $rc" }
+        }
+        if ($rc -ne 0 -and $rc -ne 2) { continue }
+
+        Start-Sleep -Seconds 3
+        try {
+            $chk = Get-PnpDevice -InstanceId $drv.DeviceID -EA Stop
+            if ([int]$chk.ConfigManagerErrorCode -eq 0) {
+                Log "  '$($drv.DeviceName)' cleared by the installer run."
+            } else {
+                Log "  '$($drv.DeviceName)' still [ERR $($chk.ConfigManagerErrorCode)] after the installer run$(if ($rc -eq 2) { ' - may clear after reboot' })."
+            }
+        } catch {
+            Log "  '$($drv.DeviceName)' no longer enumerable after the installer run - re-check after reboot."
+        }
+    }
 }
 
 # =========================
@@ -7335,6 +7439,10 @@ function Start-Install {
         SetDownload -Pct 100 -Label "Complete"
         SetExtract  -Pct 100 -Label "Complete"
         Log "Driver installation complete!"
+        if ($script:DupRebootRequired) {
+            Log "NOTE: a vendor installer requested a reboot - device(s) still shown as"
+            Log "      missing may clear themselves on the next restart."
+        }
         Log "Log saved to: $LogFile"
         Send-AnalyticsEvent -Result "success"
         Write-HtmlReport    -Result "success"  # v1.10.0
