@@ -59,6 +59,27 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.22.0 - Dell camera companion-package lookup (field-confirmed root cause:
+#           the Latitude 7450 AVStream camera's Code 39 is fixed by the
+#           "Intel 2D Imaging MCU / Visual Sensing Controller" DUP -
+#           Intel-2D-Imaging-MCU-Visual-Sensing-Controller-Driver_WXX55_
+#           WIN64_73.22000.5.14_A06_02.EXE - which CatalogPC lists for this
+#           model but which no hardware-ID match can reach: the camera's
+#           VIDEO\VEN_8086&DEV_7D45 IDs are the iGPU's, and the IVSC device
+#           itself never appears in a problem state).
+#           New Find-DellCameraCompanionPackages: same ComponentType/OS/SKU
+#           catalog filters as the hardware-ID matcher, but selects by package
+#           Display name (camera / webcam / visual sensing / imaging MCU /
+#           IPU), newest release per package name. Wired into the v1.21.0
+#           already-installed pre-check: when a camera-ish device (name or
+#           hardware ID says camera/INT3480/IPU) matches only a package that
+#           is already bound at the same version, the companion set is queued
+#           instead of bailing straight to the full pack. Companions inherit
+#           the camera's DeviceID, so the v1.20.0 DUP /s fallback and the
+#           v1.19.x PnP remediation chain fire for them too. The full-pack
+#           escalation (v1.21.0) remains as the net when no companion exists
+#           or companions don't clear the device.
+#
 # v1.21.0 - Dell individual mode: stop re-installing what's already installed;
 #           escalate to the full pack instead (field report: Latitude 7450,
 #           run 20260706_140814 + operator confirmed a REBOOT did not clear
@@ -731,7 +752,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.21.0"
+$SCRIPT_VERSION = "1.22.0"
 
 # =============================================================
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
@@ -3487,6 +3508,64 @@ function Get-DeviceParentVenDev {
     return @()
 }
 
+function Find-DellCameraCompanionPackages {
+    # v1.22.0 - Camera devices are frequently un-fixable through their own
+    # hardware IDs: the Latitude 7450's AVStream camera carries the iGPU's
+    # VEN/DEV, so hardware-ID matching can only ever re-offer the graphics
+    # package. Field-confirmed fix was the "Intel 2D Imaging MCU / Visual
+    # Sensing Controller" DUP - listed in CatalogPC for this SKU, but never
+    # reachable by PCIInfo matching from the camera device. This helper walks
+    # the already-parsed CatalogPC with the SAME ComponentType/OS/SKU filters
+    # as the hardware-ID matcher, but selects by package Display name instead:
+    # anything camera-related (camera / webcam / visual sensing / imaging MCU
+    # / IPU). Newest release per package name wins.
+    param(
+        [xml]$Catalog,
+        [string]$SystemSKU,
+        [bool]$IsWin11,
+        [bool]$IgnoreSkuFilter,
+        [string]$ExcludePath = "",
+        [string[]]$Win11Codes,
+        [string[]]$Win10Codes
+    )
+    $nameRx = '(?i)camera|webcam|visual\s*sensing|imaging\s*mcu|\bIPU\b'
+    $found  = @{}   # Display name -> newest matching entry
+    foreach ($component in $Catalog.SelectNodes("//*[local-name()='SoftwareComponent']")) {
+        $typeNode = $component.SelectSingleNode("*[local-name()='ComponentType']")
+        if ($typeNode -and $typeNode.GetAttribute("value") -ne "DRVR") { continue }
+
+        $osMatch = $false
+        $targetCodes = if ($IsWin11) { $Win11Codes } else { $Win10Codes }
+        foreach ($osNode in $component.SelectNodes(".//*[local-name()='OperatingSystem']")) {
+            if ($targetCodes -contains $osNode.GetAttribute("osCode")) { $osMatch = $true; break }
+        }
+        if (-not $osMatch) { continue }
+
+        if ($SystemSKU -and -not $IgnoreSkuFilter) {
+            $modelMatch = $false
+            foreach ($modelNode in $component.SelectNodes(".//*[local-name()='Model']")) {
+                if ($modelNode.GetAttribute("systemID").ToUpper() -eq $SystemSKU) { $modelMatch = $true; break }
+            }
+            if (-not $modelMatch) { continue }
+        }
+
+        $name = ""
+        try { $name = $component.SelectSingleNode("*[local-name()='Name']/*[local-name()='Display']").InnerText } catch {}
+        if (-not $name -or $name -notmatch $nameRx) { continue }
+
+        $path = $component.GetAttribute("path")
+        if (-not $path -or $path -eq $ExcludePath) { continue }
+
+        $date = [datetime]::MinValue
+        try { $date = [datetime]::Parse($component.GetAttribute("dateTime")) } catch {}
+
+        if (-not $found[$name] -or $date -gt $found[$name].Date) {
+            $found[$name] = [PSCustomObject]@{ Path = $path; Name = $name; Date = $date }
+        }
+    }
+    return ,@($found.Values)
+}
+
 function Start-DellIndividualDriverInstall {
     param(
         [string]$DriverRoot, [string]$ServiceTag, [bool]$IsWin11,
@@ -3721,9 +3800,40 @@ function Start-DellIndividualDriverInstall {
         if ($curVer -and $best.Version -and ($curVer -eq [string]$best.Version)) {
             Log "    Device already has this exact driver version bound ($curVer) -"
             Log "    re-installing the same package cannot fix it."
+
+            # v1.22.0 - camera companion lookup. Field-confirmed on the
+            # Latitude 7450: the AVStream camera's Code 39 is fixed by the
+            # Intel 2D Imaging MCU / Visual Sensing Controller DUP, which
+            # CatalogPC lists for this SKU but hardware-ID matching can never
+            # reach from the camera's (iGPU-derived) IDs.
+            $isCameraDev = ($dev.Name -match '(?i)camera|webcam') -or
+                           ((@($dev.HardwareIDs) -match 'INT3480|IPU').Count -gt 0)
+            $companions = @()
+            if ($isCameraDev) {
+                $companions = @(Find-DellCameraCompanionPackages -Catalog $cat -SystemSKU $systemSKU `
+                    -IsWin11 $IsWin11 -IgnoreSkuFilter ([bool]$IgnoreSkuFilter) -ExcludePath $best.Path `
+                    -Win11Codes $win11Codes -Win10Codes $win10Codes)
+            }
+            if ($companions.Count -gt 0) {
+                Log "    Trying $($companions.Count) camera companion package(s) from CatalogPC instead:"
+                foreach ($c in $companions) {
+                    Log "      + $($c.Name)"
+                    Log "        Path : $($c.Path)"
+                    if (-not ($toDownload | Where-Object { $_.Path -eq $c.Path })) {
+                        $toDownload.Add([PSCustomObject]@{
+                            DeviceName = $dev.Name
+                            DriverName = $c.Name
+                            Path       = $c.Path
+                            DeviceID   = $dev.DeviceID
+                        })
+                    }
+                }
+                continue
+            }
+
             $allMatched = $false
             if ($BestEffort) { continue }
-            Log "    Will fall back to the full driver pack for companion packages."
+            Log "    No companion packages found - will fall back to the full driver pack."
             break
         }
 
