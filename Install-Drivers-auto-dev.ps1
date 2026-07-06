@@ -59,6 +59,24 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.19.0 - PnP remediation pass for "driver present but not loaded" devices
+#           (field report: Latitude 7450, Intel(R) AVStream Camera stuck at
+#           Code 39). The device's servicing package (Intel graphics,
+#           iigd_dch.inf) was already up-to-date on the machine, so the Dell
+#           individual-driver path re-downloaded 1.4GB and re-added 23 INFs to
+#           no effect, and the WU + MS-catalog fallbacks had nothing to offer
+#           (VIDEO\ bus hardware IDs aren't in the catalog). Run ended
+#           missing 1 -> 1 with installed=0.
+#           New Invoke-ProblemDeviceRemediation runs after the vendor phase and
+#           before the AFTER-install snapshot: for every device whose
+#           ConfigManagerErrorCode means the driver exists but isn't loaded
+#           (3, 10, 14, 21, 38, 39, 43, 52) it tries pnputil /restart-device,
+#           then (if still broken) pnputil /remove-device + /scan-devices so
+#           PnP re-enumerates the device and re-binds the best-ranked driver
+#           from the store. Codes 22 (disabled by user), 28 (no driver staged
+#           at all - the WU/catalog fallbacks own that case) and 45 (device
+#           not connected) are deliberately not touched.
+#
 # v1.18.2 - Cancellable Windows Update phase (field report: Cancel during the
 #           WU fallback left the Install button greyed out for minutes).
 #           Root cause: the WUA COM calls (IUpdateSearcher.Search,
@@ -655,7 +673,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.18.2"
+$SCRIPT_VERSION = "1.19.0"
 
 # =============================================================
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
@@ -1989,6 +2007,120 @@ function Write-MissingDriverDetails {
             # still enough to identify the device; skip the extra detail.
         }
     }
+}
+
+# =========================
+# v1.19.0 - PROBLEM-DEVICE PNP REMEDIATION
+# Field case (Latitude 7450): Intel(R) AVStream Camera (DISPLAY\INT3480) stuck
+# at Code 39 while its servicing package (iigd_dch.inf, Intel graphics) was
+# already installed and reported "up-to-date on device" - re-adding INFs was a
+# no-op, Windows Update returned nothing, and the MS Update Catalog has no
+# entries for VIDEO\ bus hardware IDs. A device in that state doesn't need
+# another driver package; it needs PnP to reload the one it has. For each
+# device whose error code means "driver present but not loaded / device
+# wedged", try in order:
+#   (1) pnputil /restart-device <instance-id>
+#   (2) still broken: pnputil /remove-device <instance-id>, then one
+#       /scan-devices at the end so PnP re-enumerates and re-binds the
+#       best-ranked driver from the store.
+# Codes NOT retried: 22 (disabled by user - operator choice), 28 (no driver
+# staged at all - the WU/catalog fallbacks own that case), 45 (device not
+# connected). pnputil /restart-device requires Win10 2004+; on older builds
+# the command fails, gets logged, and the pass degrades to a no-op.
+# =========================
+$script:PnpRemediationCodes = @(3, 10, 14, 21, 38, 39, 43, 52)
+
+function Invoke-ProblemDeviceRemediation {
+    # Returns the number of devices whose error state was cleared.
+    try {
+        $broken = @(Get-CimInstance Win32_PnPEntity -EA Stop |
+                    Where-Object { $_.ConfigManagerErrorCode -ne 0 -and
+                                   $script:PnpRemediationCodes -contains [int]$_.ConfigManagerErrorCode })
+    } catch {
+        Log "  WARNING: remediation device enumeration failed: $($_.Exception.Message)"
+        return 0
+    }
+    if ($broken.Count -eq 0) { return 0 }
+
+    Log ""
+    Log "=== PNP REMEDIATION: $($broken.Count) device(s) in a driver-load error state ==="
+    $needRescan = $false
+    foreach ($dev in $broken) {
+        if (Test-CancelFlag) { Log "  Cancelled."; break }
+        $name = if ($dev.Name)        { $dev.Name }
+                elseif ($dev.Caption) { $dev.Caption }
+                else                  { '(unnamed device)' }
+        $id = $dev.DeviceID
+        Log "  [ERR $($dev.ConfigManagerErrorCode)] $name"
+        Log "    pnputil /restart-device `"$id`""
+        $out = pnputil /restart-device "$id" 2>&1
+        $rc  = $LASTEXITCODE
+        foreach ($l in $out) {
+            $line = ([string]$l).Trim()
+            if ($line -and $line -notlike 'Microsoft PnP Utility*') { Log "      $line" }
+        }
+        if ($rc -eq 3010) {
+            Log "    Restart staged - reboot required to complete."
+            continue
+        }
+
+        # Give PnP a moment to reload the driver, then re-check this device.
+        Start-Sleep -Seconds 2
+        $cleared = $false
+        try {
+            $chk = Get-PnpDevice -InstanceId $id -EA Stop
+            $cleared = ([int]$chk.ConfigManagerErrorCode -eq 0)
+        } catch {
+            # Device vanished after restart - the trailing scan re-creates it.
+            $needRescan = $true
+            continue
+        }
+        if ($cleared) {
+            Log "    Restart cleared the error state."
+            continue
+        }
+
+        # Restart wasn't enough - remove the device instance so the rescan
+        # re-enumerates it from scratch and re-binds the best-ranked driver.
+        Log "    Still [ERR] after restart - pnputil /remove-device `"$id`""
+        $out = pnputil /remove-device "$id" 2>&1
+        foreach ($l in $out) {
+            $line = ([string]$l).Trim()
+            if ($line -and $line -notlike 'Microsoft PnP Utility*') { Log "      $line" }
+        }
+        $needRescan = $true
+    }
+
+    if ($needRescan -and -not (Test-CancelFlag)) {
+        Log "  pnputil /scan-devices (re-enumerating removed devices)..."
+        try {
+            $out = pnputil /scan-devices 2>&1
+            foreach ($l in $out) {
+                $line = ([string]$l).Trim()
+                if ($line -and $line -notlike 'Microsoft PnP Utility*') { Log "    $line" }
+            }
+        } catch {
+            Log "    scan-devices failed: $($_.Exception.Message)"
+        }
+        # Binding after re-enumeration is asynchronous; give it a few seconds
+        # so the AFTER-install snapshot doesn't read a half-settled state.
+        Start-Sleep -Seconds 5
+    }
+
+    # Count how many of the devices we touched are no longer in error. Compare
+    # by instance ID - a re-enumerated PnP device keeps its instance path.
+    $stillIds = @()
+    try {
+        $stillIds = @(Get-CimInstance Win32_PnPEntity -EA Stop |
+                      Where-Object { $_.ConfigManagerErrorCode -ne 0 } |
+                      Select-Object -ExpandProperty DeviceID)
+    } catch {}
+    $resolved = 0
+    foreach ($dev in $broken) {
+        if ($stillIds -notcontains $dev.DeviceID) { $resolved++ }
+    }
+    Log "  Remediation result: $resolved of $($broken.Count) device(s) cleared."
+    return $resolved
 }
 
 # =========================
@@ -7104,6 +7236,15 @@ function Start-Install {
 
     # Remove 7-Zip before cleanup - must happen before C:\DRIVERS is deleted
     if ($script:7zInstalled) { Remove-7Zip }
+
+    # v1.19.0 - PnP remediation: restart / re-enumerate devices whose driver is
+    # present but failed to load (e.g. Code 39 AVStream camera). Runs before
+    # the AFTER snapshot so the count and the WU/catalog fallbacks see the
+    # post-remediation state.
+    if (-not $script:TestMode -and -not $SkipInstall -and -not (Test-CancelFlag)) {
+        $remediated = Invoke-ProblemDeviceRemediation
+        if ($remediated -gt 0) { Log "PnP remediation resolved $remediated device(s)." }
+    }
 
     # Snapshot missing drivers after install
     $script:AnalyticsMissingAfter = Get-MissingDriverCount
