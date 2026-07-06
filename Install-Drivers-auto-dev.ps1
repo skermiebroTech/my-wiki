@@ -59,6 +59,17 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.19.1 - Fix crash introduced by v1.19.0 (field report: Latitude 7450, run
+#           20260706_134546 aborted with result=crashed right after the vendor
+#           phase). Log's $msg parameter is Mandatory, and PowerShell rejects
+#           an empty string for mandatory string params, so the remediation
+#           pass's blank spacer line (`Log ""`) threw a
+#           ParameterBindingValidationException that the crash wrapper caught.
+#           Fix: [AllowEmptyString()] on Log's $msg. This also defuses 14
+#           pre-existing `Log ""` call sites (Lenovo consumer-catalog rescan /
+#           force-bind helpers, WU fallback) that were latent crashes on any
+#           machine that reached them.
+#
 # v1.19.0 - PnP remediation pass for "driver present but not loaded" devices
 #           (field report: Latitude 7450, Intel(R) AVStream Camera stuck at
 #           Code 39). The device's servicing package (Intel graphics,
@@ -673,7 +684,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.19.0"
+$SCRIPT_VERSION = "1.19.1"
 
 # =============================================================
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
@@ -1624,7 +1635,13 @@ function Log {
     # call sites don't need to change. Pass -Level / -Event / -Context to a
     # future structured caller and they'll override the inferred values.
     param(
-        [Parameter(Mandatory=$true, Position=0)] [string]$msg,
+        # v1.19.1 - AllowEmptyString: Mandatory string params reject "" by
+        # default, so every `Log ""` spacer line (15 call sites - the Lenovo
+        # rescan/force-bind helpers and the v1.19.0 remediation pass) threw a
+        # ParameterBindingValidationException and killed the run. Field crash:
+        # Latitude 7450, run 20260706_134546, aborted right after the vendor
+        # phase when the remediation pass logged its blank leader line.
+        [Parameter(Mandatory=$true, Position=0)] [AllowEmptyString()] [string]$msg,
         [string]$Level   = $null,
         [string]$Event   = $null,
         [hashtable]$Context = $null
