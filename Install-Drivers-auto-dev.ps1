@@ -59,6 +59,29 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.23.0 - Camera companion rescue: run the companion DUPs, always (field
+#           report: Latitude 7450, run 20260707_110701 on a FRESH install -
+#           camera still failed after the whole chain). Two gaps closed:
+#           (1) The v1.22.0 companion lookup only fired inside the
+#               already-installed pre-check, which a fresh image never hits
+#               (the camera isn't bound at the catalog version yet), so the
+#               camera went graphics-DUP -> full pack -> WU -> catalog and
+#               stayed broken.
+#           (2) INF-adding a companion is NOT enough: the full pack added
+#               IVSC.inf and pnputil said "Already exists in the system",
+#               yet the camera stayed at Code 39. The IVSC/IPU DUPs also
+#               deploy MCU firmware + services that pnputil never touches -
+#               the operator confirmed running the IVSC DUP by hand fixes
+#               the camera.
+#           New Invoke-DellCameraCompanionRescue runs at the end of the Dell
+#           individual path regardless of which matching branch executed: for
+#           each camera-ish device still in a problem state, download the
+#           CatalogPC camera companion packages and RUN each installer
+#           silently (/s, 15-min timeout, cancel-aware), restarting the
+#           camera and re-checking after each. Stops at the first companion
+#           that clears the device; reboot-required exits set the v1.20.0
+#           completion NOTE flag.
+#
 # v1.22.0 - Dell camera companion-package lookup (field-confirmed root cause:
 #           the Latitude 7450 AVStream camera's Code 39 is fixed by the
 #           "Intel 2D Imaging MCU / Visual Sensing Controller" DUP -
@@ -752,7 +775,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.22.0"
+$SCRIPT_VERSION = "1.23.0"
 
 # =============================================================
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
@@ -3925,8 +3948,102 @@ function Start-DellIndividualDriverInstall {
     # installer runs; pnputil /add-driver never executes those.
     if (-not $SkipInstall -and -not $script:TestMode -and -not (Test-Cancelled)) {
         Invoke-DellDupFallback -Packages $toDownload -DriverRoot $DriverRoot
+
+        # v1.23.0 - camera companion rescue. Runs regardless of which matching
+        # branch executed above: run 20260707_110701 (fresh install) showed the
+        # v1.22.0 companion lookup never firing because it was gated behind the
+        # already-installed pre-check, which a fresh image doesn't hit.
+        Invoke-DellCameraCompanionRescue -MissingDevices $missingDevices -Catalog $cat `
+            -SystemSKU $systemSKU -IsWin11 $IsWin11 -IgnoreSkuFilter ([bool]$IgnoreSkuFilter) `
+            -DriverRoot $DriverRoot -Win11Codes $win11Codes -Win10Codes $win10Codes
     }
     return $anyInstalled
+}
+
+function Invoke-DellCameraCompanionRescue {
+    # v1.23.0 - final camera-specific tier of the Dell individual path. For
+    # every camera-ish missing device still in a problem state after its own
+    # package (and the DUP fallback) ran, download the CatalogPC camera
+    # companion packages and RUN each installer silently. Running the EXE is
+    # the point: run 20260707_110701 proved the INF alone is not enough -
+    # the full pack added IVSC.inf ("Already exists in the system") and the
+    # camera still failed to load. The IVSC/IPU DUPs also deploy MCU firmware
+    # and services that pnputil /add-driver never touches; the operator
+    # confirmed running the IVSC DUP by hand is what actually fixes the
+    # Latitude 7450's AVStream camera.
+    param(
+        $MissingDevices,
+        [xml]$Catalog,
+        [string]$SystemSKU,
+        [bool]$IsWin11,
+        [bool]$IgnoreSkuFilter,
+        [string]$DriverRoot,
+        [string[]]$Win11Codes,
+        [string[]]$Win10Codes
+    )
+
+    foreach ($dev in $MissingDevices) {
+        if (Test-Cancelled) { return }
+        $isCameraDev = ($dev.Name -match '(?i)camera|webcam') -or
+                       ((@($dev.HardwareIDs) -match 'INT3480|IPU').Count -gt 0)
+        if (-not $isCameraDev) { continue }
+
+        $stillBroken = $false
+        try {
+            $stillBroken = ([int](Get-PnpDevice -InstanceId $dev.DeviceID -EA Stop).ConfigManagerErrorCode -ne 0)
+        } catch { continue }   # device instance gone - nothing to rescue
+        if (-not $stillBroken) { continue }
+
+        Log "Camera companion rescue: '$($dev.Name)' is still in a problem state after its"
+        Log "own package - searching CatalogPC for camera companion packages (IVSC/IPU/webcam)..."
+        $companions = @(Find-DellCameraCompanionPackages -Catalog $Catalog -SystemSKU $SystemSKU `
+            -IsWin11 $IsWin11 -IgnoreSkuFilter $IgnoreSkuFilter `
+            -Win11Codes $Win11Codes -Win10Codes $Win10Codes)
+        if ($companions.Count -eq 0) {
+            Log "  No camera companion packages listed for this model."
+            continue
+        }
+
+        $ci = 0
+        foreach ($c in $companions) {
+            $ci++
+            if (Test-Cancelled) { return }
+            Log "  [$ci/$($companions.Count)] $($c.Name)"
+            $dupFile = Join-Path $DriverRoot ([System.IO.Path]::GetFileName($c.Path))
+            if (-not (Test-Path $dupFile)) {
+                SetDownload -Pct -1 -Label "Companion: $($c.Name)"
+                if (-not (Invoke-CurlDownload -Url "https://downloads.dell.com/$($c.Path)" -OutFile $dupFile)) {
+                    Log "    Download failed - skipping this companion."
+                    continue
+                }
+            }
+            Log "    Running installer silently: $([System.IO.Path]::GetFileName($c.Path)) /s"
+            SetExtract -Pct -1 -Label "Companion installer: $($c.Name)"
+            $rc = Invoke-LenovoPackageCommand -Command "`"$dupFile`" /s" -WorkingDir $DriverRoot -TimeoutSec 900
+            switch ($rc) {
+                0 { Log "    Installer completed OK (exit 0)." }
+                2 {
+                    Log "    Installer completed - REBOOT REQUIRED to finish (exit 2)."
+                    $script:DupRebootRequired = $true
+                }
+                default { Log "    Installer exit code: $rc" }
+            }
+            if ($rc -ne 0 -and $rc -ne 2) { continue }
+
+            # Kick the camera and see if this companion was the missing piece.
+            try { $null = pnputil /restart-device "$($dev.DeviceID)" 2>&1 } catch {}
+            Start-Sleep -Seconds 3
+            try {
+                if ([int](Get-PnpDevice -InstanceId $dev.DeviceID -EA Stop).ConfigManagerErrorCode -eq 0) {
+                    Log "    '$($dev.Name)' cleared - companion rescue succeeded."
+                    break
+                }
+                Log "    Camera still in a problem state - trying next companion (if any)."
+            } catch {
+                Log "    Camera not enumerable right now - it may re-appear on the end-of-run rescan."
+            }
+        }
+    }
 }
 
 function Invoke-DellDupFallback {
