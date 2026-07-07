@@ -59,6 +59,126 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.23.0 - Camera companion rescue: run the companion DUPs, always (field
+#           report: Latitude 7450, run 20260707_110701 on a FRESH install -
+#           camera still failed after the whole chain). Two gaps closed:
+#           (1) The v1.22.0 companion lookup only fired inside the
+#               already-installed pre-check, which a fresh image never hits
+#               (the camera isn't bound at the catalog version yet), so the
+#               camera went graphics-DUP -> full pack -> WU -> catalog and
+#               stayed broken.
+#           (2) INF-adding a companion is NOT enough: the full pack added
+#               IVSC.inf and pnputil said "Already exists in the system",
+#               yet the camera stayed at Code 39. The IVSC/IPU DUPs also
+#               deploy MCU firmware + services that pnputil never touches -
+#               the operator confirmed running the IVSC DUP by hand fixes
+#               the camera.
+#           New Invoke-DellCameraCompanionRescue runs at the end of the Dell
+#           individual path regardless of which matching branch executed: for
+#           each camera-ish device still in a problem state, download the
+#           CatalogPC camera companion packages and RUN each installer
+#           silently (/s, 15-min timeout, cancel-aware), restarting the
+#           camera and re-checking after each. Stops at the first companion
+#           that clears the device; reboot-required exits set the v1.20.0
+#           completion NOTE flag.
+#
+# v1.22.0 - Dell camera companion-package lookup (field-confirmed root cause:
+#           the Latitude 7450 AVStream camera's Code 39 is fixed by the
+#           "Intel 2D Imaging MCU / Visual Sensing Controller" DUP -
+#           Intel-2D-Imaging-MCU-Visual-Sensing-Controller-Driver_WXX55_
+#           WIN64_73.22000.5.14_A06_02.EXE - which CatalogPC lists for this
+#           model but which no hardware-ID match can reach: the camera's
+#           VIDEO\VEN_8086&DEV_7D45 IDs are the iGPU's, and the IVSC device
+#           itself never appears in a problem state).
+#           New Find-DellCameraCompanionPackages: same ComponentType/OS/SKU
+#           catalog filters as the hardware-ID matcher, but selects by package
+#           Display name (camera / webcam / visual sensing / imaging MCU /
+#           IPU), newest release per package name. Wired into the v1.21.0
+#           already-installed pre-check: when a camera-ish device (name or
+#           hardware ID says camera/INT3480/IPU) matches only a package that
+#           is already bound at the same version, the companion set is queued
+#           instead of bailing straight to the full pack. Companions inherit
+#           the camera's DeviceID, so the v1.20.0 DUP /s fallback and the
+#           v1.19.x PnP remediation chain fire for them too. The full-pack
+#           escalation (v1.21.0) remains as the net when no companion exists
+#           or companions don't clear the device.
+#
+# v1.21.0 - Dell individual mode: stop re-installing what's already installed;
+#           escalate to the full pack instead (field report: Latitude 7450,
+#           run 20260706_140814 + operator confirmed a REBOOT did not clear
+#           the camera). v1.20.0's DUP /s run completed with exit 0 and the
+#           AVStream camera still failed to load - so the graphics package,
+#           installed every possible way at the exact version already bound
+#           (32.0.101.8724), provably cannot fix DISPLAY\INT3480. The camera's
+#           VIDEO\VEN_8086&DEV_7D45 hardware IDs point at the iGPU, so
+#           hardware-ID matching keeps picking the graphics driver; the real
+#           fix likely lives in a companion package (IPU/sensor camera stack)
+#           the matcher cannot discover from this device's IDs.
+#           (1) Already-installed pre-check: when CatalogPC matches a package,
+#               compare its vendorVersion against the device's bound driver
+#               version (DEVPKEY_Device_DriverVersion). Same version = the
+#               package can't help; the device is treated as unmatched. Saves
+#               the 1.4GB re-download this machine has now paid four times.
+#           (2) Escalation: individual-mode success is no longer taken at face
+#               value - if devices are still in a problem state afterwards
+#               (or the pre-check bailed), the run falls through to the full
+#               driver pack, which ships every INF for the model including
+#               the camera stack. The end-of-run remediation pass then
+#               re-enumerates the device against the enlarged driver store.
+#
+# v1.20.0 - Dell DUP silent-run fallback (field report: Latitude 7450, run
+#           20260706_135222). The v1.19.x PnP remediation executed cleanly but
+#           could NOT clear the AVStream camera: restart-device succeeded yet
+#           the device stayed at Code 39, and remove-device + scan-devices
+#           re-enumerated it straight back into CM_PROB_DRIVER_FAILED_LOAD.
+#           Diagnosis: the driver package binds but fails to load because the
+#           camera component's services/registrations only exist after the
+#           full vendor installer runs - pnputil /add-driver copies the INF
+#           into the store but never executes the package's setup logic.
+#           (1) New Invoke-DellDupFallback in the Dell individual-driver path:
+#               after the INF pass, if the device that motivated a package is
+#               still in a problem state, run the already-downloaded Dell
+#               Update Package silently ("<pkg>.EXE /s") via the generic
+#               process runner (Invoke-LenovoPackageCommand: cancel, spinner,
+#               25-min timeout). Exit 0 = OK, exit 2 = reboot required (sets
+#               new $script:DupRebootRequired, surfaced as a completion NOTE).
+#               The later global remediation pass then gets a real chance to
+#               restart the device into a working state. $toDownload entries
+#               now carry DeviceID so the fallback can re-check the exact
+#               originating device.
+#           (2) Remediation header now logs with explicit -Level "info" - the
+#               level heuristic matched "error" in the header text and wrote
+#               it to events.json at level=error (cosmetic).
+#
+# v1.19.1 - Fix crash introduced by v1.19.0 (field report: Latitude 7450, run
+#           20260706_134546 aborted with result=crashed right after the vendor
+#           phase). Log's $msg parameter is Mandatory, and PowerShell rejects
+#           an empty string for mandatory string params, so the remediation
+#           pass's blank spacer line (`Log ""`) threw a
+#           ParameterBindingValidationException that the crash wrapper caught.
+#           Fix: [AllowEmptyString()] on Log's $msg. This also defuses 14
+#           pre-existing `Log ""` call sites (Lenovo consumer-catalog rescan /
+#           force-bind helpers, WU fallback) that were latent crashes on any
+#           machine that reached them.
+#
+# v1.19.0 - PnP remediation pass for "driver present but not loaded" devices
+#           (field report: Latitude 7450, Intel(R) AVStream Camera stuck at
+#           Code 39). The device's servicing package (Intel graphics,
+#           iigd_dch.inf) was already up-to-date on the machine, so the Dell
+#           individual-driver path re-downloaded 1.4GB and re-added 23 INFs to
+#           no effect, and the WU + MS-catalog fallbacks had nothing to offer
+#           (VIDEO\ bus hardware IDs aren't in the catalog). Run ended
+#           missing 1 -> 1 with installed=0.
+#           New Invoke-ProblemDeviceRemediation runs after the vendor phase and
+#           before the AFTER-install snapshot: for every device whose
+#           ConfigManagerErrorCode means the driver exists but isn't loaded
+#           (3, 10, 14, 21, 38, 39, 43, 52) it tries pnputil /restart-device,
+#           then (if still broken) pnputil /remove-device + /scan-devices so
+#           PnP re-enumerates the device and re-binds the best-ranked driver
+#           from the store. Codes 22 (disabled by user), 28 (no driver staged
+#           at all - the WU/catalog fallbacks own that case) and 45 (device
+#           not connected) are deliberately not touched.
+#
 # v1.18.2 - Cancellable Windows Update phase (field report: Cancel during the
 #           WU fallback left the Install button greyed out for minutes).
 #           Root cause: the WUA COM calls (IUpdateSearcher.Search,
@@ -655,7 +775,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.18.2"
+$SCRIPT_VERSION = "1.23.0"
 
 # =============================================================
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
@@ -1606,7 +1726,13 @@ function Log {
     # call sites don't need to change. Pass -Level / -Event / -Context to a
     # future structured caller and they'll override the inferred values.
     param(
-        [Parameter(Mandatory=$true, Position=0)] [string]$msg,
+        # v1.19.1 - AllowEmptyString: Mandatory string params reject "" by
+        # default, so every `Log ""` spacer line (15 call sites - the Lenovo
+        # rescan/force-bind helpers and the v1.19.0 remediation pass) threw a
+        # ParameterBindingValidationException and killed the run. Field crash:
+        # Latitude 7450, run 20260706_134546, aborted right after the vendor
+        # phase when the remediation pass logged its blank leader line.
+        [Parameter(Mandatory=$true, Position=0)] [AllowEmptyString()] [string]$msg,
         [string]$Level   = $null,
         [string]$Event   = $null,
         [hashtable]$Context = $null
@@ -1992,6 +2118,123 @@ function Write-MissingDriverDetails {
 }
 
 # =========================
+# v1.19.0 - PROBLEM-DEVICE PNP REMEDIATION
+# Field case (Latitude 7450): Intel(R) AVStream Camera (DISPLAY\INT3480) stuck
+# at Code 39 while its servicing package (iigd_dch.inf, Intel graphics) was
+# already installed and reported "up-to-date on device" - re-adding INFs was a
+# no-op, Windows Update returned nothing, and the MS Update Catalog has no
+# entries for VIDEO\ bus hardware IDs. A device in that state doesn't need
+# another driver package; it needs PnP to reload the one it has. For each
+# device whose error code means "driver present but not loaded / device
+# wedged", try in order:
+#   (1) pnputil /restart-device <instance-id>
+#   (2) still broken: pnputil /remove-device <instance-id>, then one
+#       /scan-devices at the end so PnP re-enumerates and re-binds the
+#       best-ranked driver from the store.
+# Codes NOT retried: 22 (disabled by user - operator choice), 28 (no driver
+# staged at all - the WU/catalog fallbacks own that case), 45 (device not
+# connected). pnputil /restart-device requires Win10 2004+; on older builds
+# the command fails, gets logged, and the pass degrades to a no-op.
+# =========================
+$script:PnpRemediationCodes = @(3, 10, 14, 21, 38, 39, 43, 52)
+
+function Invoke-ProblemDeviceRemediation {
+    # Returns the number of devices whose error state was cleared.
+    try {
+        $broken = @(Get-CimInstance Win32_PnPEntity -EA Stop |
+                    Where-Object { $_.ConfigManagerErrorCode -ne 0 -and
+                                   $script:PnpRemediationCodes -contains [int]$_.ConfigManagerErrorCode })
+    } catch {
+        Log "  WARNING: remediation device enumeration failed: $($_.Exception.Message)"
+        return 0
+    }
+    if ($broken.Count -eq 0) { return 0 }
+
+    Log ""
+    # v1.20.0 - explicit -Level: the heuristic in Log matched "error" in this
+    # header and recorded it at level=error in events.json (seen in field run
+    # 20260706_135222 - cosmetic, but it pollutes error-level filtering).
+    Log "=== PNP REMEDIATION: $($broken.Count) device(s) in a driver-load error state ===" -Level "info"
+    $needRescan = $false
+    foreach ($dev in $broken) {
+        if (Test-CancelFlag) { Log "  Cancelled."; break }
+        $name = if ($dev.Name)        { $dev.Name }
+                elseif ($dev.Caption) { $dev.Caption }
+                else                  { '(unnamed device)' }
+        $id = $dev.DeviceID
+        Log "  [ERR $($dev.ConfigManagerErrorCode)] $name"
+        Log "    pnputil /restart-device `"$id`""
+        $out = pnputil /restart-device "$id" 2>&1
+        $rc  = $LASTEXITCODE
+        foreach ($l in $out) {
+            $line = ([string]$l).Trim()
+            if ($line -and $line -notlike 'Microsoft PnP Utility*') { Log "      $line" }
+        }
+        if ($rc -eq 3010) {
+            Log "    Restart staged - reboot required to complete."
+            continue
+        }
+
+        # Give PnP a moment to reload the driver, then re-check this device.
+        Start-Sleep -Seconds 2
+        $cleared = $false
+        try {
+            $chk = Get-PnpDevice -InstanceId $id -EA Stop
+            $cleared = ([int]$chk.ConfigManagerErrorCode -eq 0)
+        } catch {
+            # Device vanished after restart - the trailing scan re-creates it.
+            $needRescan = $true
+            continue
+        }
+        if ($cleared) {
+            Log "    Restart cleared the error state."
+            continue
+        }
+
+        # Restart wasn't enough - remove the device instance so the rescan
+        # re-enumerates it from scratch and re-binds the best-ranked driver.
+        Log "    Still [ERR] after restart - pnputil /remove-device `"$id`""
+        $out = pnputil /remove-device "$id" 2>&1
+        foreach ($l in $out) {
+            $line = ([string]$l).Trim()
+            if ($line -and $line -notlike 'Microsoft PnP Utility*') { Log "      $line" }
+        }
+        $needRescan = $true
+    }
+
+    if ($needRescan -and -not (Test-CancelFlag)) {
+        Log "  pnputil /scan-devices (re-enumerating removed devices)..."
+        try {
+            $out = pnputil /scan-devices 2>&1
+            foreach ($l in $out) {
+                $line = ([string]$l).Trim()
+                if ($line -and $line -notlike 'Microsoft PnP Utility*') { Log "    $line" }
+            }
+        } catch {
+            Log "    scan-devices failed: $($_.Exception.Message)"
+        }
+        # Binding after re-enumeration is asynchronous; give it a few seconds
+        # so the AFTER-install snapshot doesn't read a half-settled state.
+        Start-Sleep -Seconds 5
+    }
+
+    # Count how many of the devices we touched are no longer in error. Compare
+    # by instance ID - a re-enumerated PnP device keeps its instance path.
+    $stillIds = @()
+    try {
+        $stillIds = @(Get-CimInstance Win32_PnPEntity -EA Stop |
+                      Where-Object { $_.ConfigManagerErrorCode -ne 0 } |
+                      Select-Object -ExpandProperty DeviceID)
+    } catch {}
+    $resolved = 0
+    foreach ($dev in $broken) {
+        if ($stillIds -notcontains $dev.DeviceID) { $resolved++ }
+    }
+    Log "  Remediation result: $resolved of $($broken.Count) device(s) cleared."
+    return $resolved
+}
+
+# =========================
 # v1.10.0 - VERBOSE DIAGNOSTICS
 # Only emits when -Diagnostic was passed. Complements (does not replace)
 # Write-DeviceInfo, which always runs.
@@ -2351,6 +2594,10 @@ $script:AnalyticsMissingAfter    = -1
 $script:AnalyticsMissingBeforeList = New-Object System.Collections.Generic.List[string]   # v1.11.0
 $script:AnalyticsMissingAfterList  = New-Object System.Collections.Generic.List[string]   # v1.11.0
 $script:AnalyticsInstalledDrivers = New-Object System.Collections.Generic.List[string]
+# v1.20.0 - set when a silently-run vendor installer (Dell DUP fallback) exits
+# with "reboot required". Surfaced as a log NOTE in the completion path so the
+# operator knows a still-broken device may clear itself on restart.
+$script:DupRebootRequired = $false
 # v1.13.1 - every file we successfully pull is recorded here so the HTML
 # report can list re-downloadable driver URLs. Each entry is a hashtable:
 #   @{ Url=...; FileName=...; MB=<double>; Kind='driver'|'catalog' }
@@ -3284,6 +3531,64 @@ function Get-DeviceParentVenDev {
     return @()
 }
 
+function Find-DellCameraCompanionPackages {
+    # v1.22.0 - Camera devices are frequently un-fixable through their own
+    # hardware IDs: the Latitude 7450's AVStream camera carries the iGPU's
+    # VEN/DEV, so hardware-ID matching can only ever re-offer the graphics
+    # package. Field-confirmed fix was the "Intel 2D Imaging MCU / Visual
+    # Sensing Controller" DUP - listed in CatalogPC for this SKU, but never
+    # reachable by PCIInfo matching from the camera device. This helper walks
+    # the already-parsed CatalogPC with the SAME ComponentType/OS/SKU filters
+    # as the hardware-ID matcher, but selects by package Display name instead:
+    # anything camera-related (camera / webcam / visual sensing / imaging MCU
+    # / IPU). Newest release per package name wins.
+    param(
+        [xml]$Catalog,
+        [string]$SystemSKU,
+        [bool]$IsWin11,
+        [bool]$IgnoreSkuFilter,
+        [string]$ExcludePath = "",
+        [string[]]$Win11Codes,
+        [string[]]$Win10Codes
+    )
+    $nameRx = '(?i)camera|webcam|visual\s*sensing|imaging\s*mcu|\bIPU\b'
+    $found  = @{}   # Display name -> newest matching entry
+    foreach ($component in $Catalog.SelectNodes("//*[local-name()='SoftwareComponent']")) {
+        $typeNode = $component.SelectSingleNode("*[local-name()='ComponentType']")
+        if ($typeNode -and $typeNode.GetAttribute("value") -ne "DRVR") { continue }
+
+        $osMatch = $false
+        $targetCodes = if ($IsWin11) { $Win11Codes } else { $Win10Codes }
+        foreach ($osNode in $component.SelectNodes(".//*[local-name()='OperatingSystem']")) {
+            if ($targetCodes -contains $osNode.GetAttribute("osCode")) { $osMatch = $true; break }
+        }
+        if (-not $osMatch) { continue }
+
+        if ($SystemSKU -and -not $IgnoreSkuFilter) {
+            $modelMatch = $false
+            foreach ($modelNode in $component.SelectNodes(".//*[local-name()='Model']")) {
+                if ($modelNode.GetAttribute("systemID").ToUpper() -eq $SystemSKU) { $modelMatch = $true; break }
+            }
+            if (-not $modelMatch) { continue }
+        }
+
+        $name = ""
+        try { $name = $component.SelectSingleNode("*[local-name()='Name']/*[local-name()='Display']").InnerText } catch {}
+        if (-not $name -or $name -notmatch $nameRx) { continue }
+
+        $path = $component.GetAttribute("path")
+        if (-not $path -or $path -eq $ExcludePath) { continue }
+
+        $date = [datetime]::MinValue
+        try { $date = [datetime]::Parse($component.GetAttribute("dateTime")) } catch {}
+
+        if (-not $found[$name] -or $date -gt $found[$name].Date) {
+            $found[$name] = [PSCustomObject]@{ Path = $path; Name = $name; Date = $date }
+        }
+    }
+    return ,@($found.Values)
+}
+
 function Start-DellIndividualDriverInstall {
     param(
         [string]$DriverRoot, [string]$ServiceTag, [bool]$IsWin11,
@@ -3476,7 +3781,12 @@ function Start-DellIndividualDriverInstall {
             try { $driverName = $component.SelectSingleNode("*[local-name()='Name']/*[local-name()='Display']").InnerText } catch {}
             $driverDate = [datetime]::MinValue
             try { $driverDate = [datetime]::Parse($component.GetAttribute("dateTime")) } catch {}
-            $deviceMatches.Add([PSCustomObject]@{ Path = $driverPath; Name = $driverName; Date = $driverDate }) | Out-Null
+            $deviceMatches.Add([PSCustomObject]@{
+                Path    = $driverPath
+                Name    = $driverName
+                Date    = $driverDate
+                Version = $component.GetAttribute("vendorVersion")   # v1.21.0 - for the already-installed pre-check
+            }) | Out-Null
         }
 
         if ($deviceMatches.Count -eq 0) {
@@ -3494,11 +3804,68 @@ function Start-DellIndividualDriverInstall {
         Log "  Matched '$($dev.Name)'"
         Log "    Driver : $($best.Name)"
         Log "    Path   : $($best.Path)"
+
+        # v1.21.0 - already-installed pre-check. Field case (Latitude 7450,
+        # runs 132747..140814): the AVStream camera's VIDEO\VEN_8086&DEV_7D45
+        # hardware IDs point at the iGPU, so the matcher kept picking the Intel
+        # graphics package - the exact version already bound to the device.
+        # Four runs proved re-installing it can't fix anything: INF add, full
+        # DUP /s run, PnP restart/remove/rescan and a reboot all left the
+        # camera at Code 39. If the device already has the offered version,
+        # treat it as unmatched: the strict path then escalates to the full
+        # driver pack, which carries companion packages (IPU/sensor camera
+        # stacks) that hardware-ID matching cannot discover.
+        $curVer = $null
+        try {
+            $curVer = [string](Get-PnpDeviceProperty -InstanceId $dev.DeviceID `
+                -KeyName 'DEVPKEY_Device_DriverVersion' -EA Stop).Data
+        } catch {}
+        if ($curVer -and $best.Version -and ($curVer -eq [string]$best.Version)) {
+            Log "    Device already has this exact driver version bound ($curVer) -"
+            Log "    re-installing the same package cannot fix it."
+
+            # v1.22.0 - camera companion lookup. Field-confirmed on the
+            # Latitude 7450: the AVStream camera's Code 39 is fixed by the
+            # Intel 2D Imaging MCU / Visual Sensing Controller DUP, which
+            # CatalogPC lists for this SKU but hardware-ID matching can never
+            # reach from the camera's (iGPU-derived) IDs.
+            $isCameraDev = ($dev.Name -match '(?i)camera|webcam') -or
+                           ((@($dev.HardwareIDs) -match 'INT3480|IPU').Count -gt 0)
+            $companions = @()
+            if ($isCameraDev) {
+                $companions = @(Find-DellCameraCompanionPackages -Catalog $cat -SystemSKU $systemSKU `
+                    -IsWin11 $IsWin11 -IgnoreSkuFilter ([bool]$IgnoreSkuFilter) -ExcludePath $best.Path `
+                    -Win11Codes $win11Codes -Win10Codes $win10Codes)
+            }
+            if ($companions.Count -gt 0) {
+                Log "    Trying $($companions.Count) camera companion package(s) from CatalogPC instead:"
+                foreach ($c in $companions) {
+                    Log "      + $($c.Name)"
+                    Log "        Path : $($c.Path)"
+                    if (-not ($toDownload | Where-Object { $_.Path -eq $c.Path })) {
+                        $toDownload.Add([PSCustomObject]@{
+                            DeviceName = $dev.Name
+                            DriverName = $c.Name
+                            Path       = $c.Path
+                            DeviceID   = $dev.DeviceID
+                        })
+                    }
+                }
+                continue
+            }
+
+            $allMatched = $false
+            if ($BestEffort) { continue }
+            Log "    No companion packages found - will fall back to the full driver pack."
+            break
+        }
+
         if (-not ($toDownload | Where-Object { $_.Path -eq $best.Path })) {
             $toDownload.Add([PSCustomObject]@{
                 DeviceName = $dev.Name
                 DriverName = $best.Name
                 Path       = $best.Path
+                DeviceID   = $dev.DeviceID   # v1.20.0 - lets the DUP fallback re-check this exact device
             })
         }
     }
@@ -3571,7 +3938,173 @@ function Start-DellIndividualDriverInstall {
     foreach ($extractDir in (Get-Item (Join-Path $DriverRoot "Dell_Individual_*") -EA SilentlyContinue)) {
         if (Install-DriversFromPath -BasePath $extractDir.FullName) { $anyInstalled = $true }
     }
+
+    # v1.20.0 - DUP silent-run fallback: if the device that motivated a package
+    # is still broken after the raw INF pass, run the downloaded Dell Update
+    # Package itself with /s. Field case (Latitude 7450): AVStream camera at
+    # Code 39 with iigd_dch.inf already "up-to-date" - the INF add and the PnP
+    # restart/re-enumerate remediation both left it failing to load, because
+    # the camera component's services/registrations only exist after the full
+    # installer runs; pnputil /add-driver never executes those.
+    if (-not $SkipInstall -and -not $script:TestMode -and -not (Test-Cancelled)) {
+        Invoke-DellDupFallback -Packages $toDownload -DriverRoot $DriverRoot
+
+        # v1.23.0 - camera companion rescue. Runs regardless of which matching
+        # branch executed above: run 20260707_110701 (fresh install) showed the
+        # v1.22.0 companion lookup never firing because it was gated behind the
+        # already-installed pre-check, which a fresh image doesn't hit.
+        Invoke-DellCameraCompanionRescue -MissingDevices $missingDevices -Catalog $cat `
+            -SystemSKU $systemSKU -IsWin11 $IsWin11 -IgnoreSkuFilter ([bool]$IgnoreSkuFilter) `
+            -DriverRoot $DriverRoot -Win11Codes $win11Codes -Win10Codes $win10Codes
+    }
     return $anyInstalled
+}
+
+function Invoke-DellCameraCompanionRescue {
+    # v1.23.0 - final camera-specific tier of the Dell individual path. For
+    # every camera-ish missing device still in a problem state after its own
+    # package (and the DUP fallback) ran, download the CatalogPC camera
+    # companion packages and RUN each installer silently. Running the EXE is
+    # the point: run 20260707_110701 proved the INF alone is not enough -
+    # the full pack added IVSC.inf ("Already exists in the system") and the
+    # camera still failed to load. The IVSC/IPU DUPs also deploy MCU firmware
+    # and services that pnputil /add-driver never touches; the operator
+    # confirmed running the IVSC DUP by hand is what actually fixes the
+    # Latitude 7450's AVStream camera.
+    param(
+        $MissingDevices,
+        [xml]$Catalog,
+        [string]$SystemSKU,
+        [bool]$IsWin11,
+        [bool]$IgnoreSkuFilter,
+        [string]$DriverRoot,
+        [string[]]$Win11Codes,
+        [string[]]$Win10Codes
+    )
+
+    foreach ($dev in $MissingDevices) {
+        if (Test-Cancelled) { return }
+        $isCameraDev = ($dev.Name -match '(?i)camera|webcam') -or
+                       ((@($dev.HardwareIDs) -match 'INT3480|IPU').Count -gt 0)
+        if (-not $isCameraDev) { continue }
+
+        $stillBroken = $false
+        try {
+            $stillBroken = ([int](Get-PnpDevice -InstanceId $dev.DeviceID -EA Stop).ConfigManagerErrorCode -ne 0)
+        } catch { continue }   # device instance gone - nothing to rescue
+        if (-not $stillBroken) { continue }
+
+        Log "Camera companion rescue: '$($dev.Name)' is still in a problem state after its"
+        Log "own package - searching CatalogPC for camera companion packages (IVSC/IPU/webcam)..."
+        $companions = @(Find-DellCameraCompanionPackages -Catalog $Catalog -SystemSKU $SystemSKU `
+            -IsWin11 $IsWin11 -IgnoreSkuFilter $IgnoreSkuFilter `
+            -Win11Codes $Win11Codes -Win10Codes $Win10Codes)
+        if ($companions.Count -eq 0) {
+            Log "  No camera companion packages listed for this model."
+            continue
+        }
+
+        $ci = 0
+        foreach ($c in $companions) {
+            $ci++
+            if (Test-Cancelled) { return }
+            Log "  [$ci/$($companions.Count)] $($c.Name)"
+            $dupFile = Join-Path $DriverRoot ([System.IO.Path]::GetFileName($c.Path))
+            if (-not (Test-Path $dupFile)) {
+                SetDownload -Pct -1 -Label "Companion: $($c.Name)"
+                if (-not (Invoke-CurlDownload -Url "https://downloads.dell.com/$($c.Path)" -OutFile $dupFile)) {
+                    Log "    Download failed - skipping this companion."
+                    continue
+                }
+            }
+            Log "    Running installer silently: $([System.IO.Path]::GetFileName($c.Path)) /s"
+            SetExtract -Pct -1 -Label "Companion installer: $($c.Name)"
+            $rc = Invoke-LenovoPackageCommand -Command "`"$dupFile`" /s" -WorkingDir $DriverRoot -TimeoutSec 900
+            switch ($rc) {
+                0 { Log "    Installer completed OK (exit 0)." }
+                2 {
+                    Log "    Installer completed - REBOOT REQUIRED to finish (exit 2)."
+                    $script:DupRebootRequired = $true
+                }
+                default { Log "    Installer exit code: $rc" }
+            }
+            if ($rc -ne 0 -and $rc -ne 2) { continue }
+
+            # Kick the camera and see if this companion was the missing piece.
+            try { $null = pnputil /restart-device "$($dev.DeviceID)" 2>&1 } catch {}
+            Start-Sleep -Seconds 3
+            try {
+                if ([int](Get-PnpDevice -InstanceId $dev.DeviceID -EA Stop).ConfigManagerErrorCode -eq 0) {
+                    Log "    '$($dev.Name)' cleared - companion rescue succeeded."
+                    break
+                }
+                Log "    Camera still in a problem state - trying next companion (if any)."
+            } catch {
+                Log "    Camera not enumerable right now - it may re-appear on the end-of-run rescan."
+            }
+        }
+    }
+}
+
+function Invoke-DellDupFallback {
+    # v1.20.0 - see call site above. Only fires for packages whose originating
+    # device is still in a problem state, so the usual case (INF pass fixed
+    # everything) costs one Get-PnpDevice per package and nothing else.
+    param(
+        [System.Collections.Generic.List[object]]$Packages,
+        [string]$DriverRoot
+    )
+    foreach ($drv in $Packages) {
+        if (Test-Cancelled) { return }
+        if (-not $drv.DeviceID) { continue }
+
+        $stillBroken = $false
+        try {
+            $chk = Get-PnpDevice -InstanceId $drv.DeviceID -EA Stop
+            $stillBroken = ([int]$chk.ConfigManagerErrorCode -ne 0)
+        } catch {
+            continue   # device instance gone (re-enumerated away) - nothing to fix
+        }
+        if (-not $stillBroken) { continue }
+
+        $dupFile = Join-Path $DriverRoot ([System.IO.Path]::GetFileName($drv.Path))
+        if (-not (Test-Path $dupFile)) {
+            Log "  '$($drv.DeviceName)' still in problem state but DUP file is gone - skipping installer fallback."
+            continue
+        }
+
+        Log "  '$($drv.DeviceName)' still in problem state after the INF pass."
+        Log "  Running the Dell package installer silently (registers services and"
+        Log "  components that a raw pnputil /add-driver skips). This can take a few minutes..."
+        Log "    $([System.IO.Path]::GetFileName($drv.Path)) /s"
+        SetExtract -Pct -1 -Label "Running installer: $($drv.DriverName)"
+        $rc = Invoke-LenovoPackageCommand -Command "`"$dupFile`" /s" -WorkingDir $DriverRoot -TimeoutSec 1500
+        # DUP exit codes: 0=success, 1=failure, 2=reboot required,
+        # 3=soft dependency error, 4=hard dependency, 5=platform unsupported.
+        # -9997..-9999 come from Invoke-LenovoPackageCommand (exec error /
+        # cancelled / timeout) and are already logged there.
+        switch ($rc) {
+            0 { Log "  Installer completed OK (exit 0)." }
+            2 {
+                Log "  Installer completed - REBOOT REQUIRED to finish (exit 2)."
+                $script:DupRebootRequired = $true
+            }
+            default { Log "  Installer exit code: $rc" }
+        }
+        if ($rc -ne 0 -and $rc -ne 2) { continue }
+
+        Start-Sleep -Seconds 3
+        try {
+            $chk = Get-PnpDevice -InstanceId $drv.DeviceID -EA Stop
+            if ([int]$chk.ConfigManagerErrorCode -eq 0) {
+                Log "  '$($drv.DeviceName)' cleared by the installer run."
+            } else {
+                Log "  '$($drv.DeviceName)' still [ERR $($chk.ConfigManagerErrorCode)] after the installer run$(if ($rc -eq 2) { ' - may clear after reboot' })."
+            }
+        } catch {
+            Log "  '$($drv.DeviceName)' no longer enumerable after the installer run - re-check after reboot."
+        }
+    }
 }
 
 # =========================
@@ -3635,14 +4168,25 @@ function Start-DellDriverInstall {
             Log "Missing devices ($missingCount) within threshold - attempting individual driver lookup..."
             $individualResult = Start-DellIndividualDriverInstall -DriverRoot $DriverRoot -ServiceTag $serviceTag -IsWin11 $isWin11
             if ($individualResult -eq $true) {
-                Log "Individual driver install complete."
-                return $true
+                # v1.21.0 - individual-mode "success" used to be taken at face
+                # value even when the devices it targeted were still broken
+                # (Latitude 7450: camera at Code 39 through four runs). Verify,
+                # and escalate to the full pack when anything is still missing.
+                $stillBroken = Get-MissingDriverCount
+                if ($stillBroken -le 0) {
+                    Log "Individual driver install complete."
+                    return $true
+                }
+                Log "Individual install finished but $stillBroken device(s) are still in a problem"
+                Log "state - escalating to the full driver pack (it carries companion packages"
+                Log "that hardware-ID matching cannot discover, e.g. IPU/sensor camera stacks)."
             } elseif ($individualResult -eq $false) {
                 # Cancelled or hard failure
                 return $false
+            } else {
+                # $null = no catalog match found, fall through to full pack
+                Log "Falling back to full driver pack install..."
             }
-            # $null = no catalog match found, fall through to full pack
-            Log "Falling back to full driver pack install..."
         }
     }
 
@@ -7105,6 +7649,15 @@ function Start-Install {
     # Remove 7-Zip before cleanup - must happen before C:\DRIVERS is deleted
     if ($script:7zInstalled) { Remove-7Zip }
 
+    # v1.19.0 - PnP remediation: restart / re-enumerate devices whose driver is
+    # present but failed to load (e.g. Code 39 AVStream camera). Runs before
+    # the AFTER snapshot so the count and the WU/catalog fallbacks see the
+    # post-remediation state.
+    if (-not $script:TestMode -and -not $SkipInstall -and -not (Test-CancelFlag)) {
+        $remediated = Invoke-ProblemDeviceRemediation
+        if ($remediated -gt 0) { Log "PnP remediation resolved $remediated device(s)." }
+    }
+
     # Snapshot missing drivers after install
     $script:AnalyticsMissingAfter = Get-MissingDriverCount
     # v1.11.0 - capture names of devices still unresolved so the analytics
@@ -7177,6 +7730,10 @@ function Start-Install {
         SetDownload -Pct 100 -Label "Complete"
         SetExtract  -Pct 100 -Label "Complete"
         Log "Driver installation complete!"
+        if ($script:DupRebootRequired) {
+            Log "NOTE: a vendor installer requested a reboot - device(s) still shown as"
+            Log "      missing may clear themselves on the next restart."
+        }
         Log "Log saved to: $LogFile"
         Send-AnalyticsEvent -Result "success"
         Write-HtmlReport    -Result "success"  # v1.10.0
