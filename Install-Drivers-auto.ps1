@@ -1,6 +1,6 @@
 ﻿# =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.24.1 (keep in sync with $SCRIPT_VERSION below)
+# Version: 1.16.0
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -59,50 +59,6 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
-# v1.24.1 - Fixes from the first full on-hardware test pass (Latitude
-#           7410 / SKU 09BE test box, plus live-CatalogPC unit tests of the
-#           v1.24.0 matcher helpers):
-#           (1) Find-DellCameraCompanionPackages "newest release per package
-#               name" never collapsed anything: Dell embeds the version INSIDE
-#               the Display name ("...Driver for Camera,74.22000.13.22,A07"),
-#               so every release was a distinct hash key - live catalog, SKU
-#               0CBF returned the SAME IVSC package three times (13.19/.21/
-#               .22) and the companion rescue would download + silently run
-#               all three, in arbitrary hashtable order (oldest possibly
-#               first). Now dedups on the name with the ",<version>,<rev>"
-#               suffix stripped and returns newest-first (the rescue stops at
-#               the first companion that clears the device, so order matters).
-#           (2) "[OVERRIDDEN via param]" appeared on EVERY run since v1.5.5:
-#               PowerShell variable names are case-insensitive, so Start-
-#               Install's "$manufacturer = ..." assignment IS $Manufacturer -
-#               the later "if ($Manufacturer -or $Model)" tested the detection
-#               RESULT, not the params. The log note now reflects whether an
-#               override was actually passed.
-#           (3) Same shadowing bug, worse consequence, in the Lenovo path:
-#               "$machineType = $null" nulled the -MachineType param before
-#               "if ($MachineType)" read it, so the documented override was
-#               silently ignored (WMI always won - forcing the Lenovo path
-#               from a non-Lenovo box derived a garbage "LATI" prefix from
-#               the local model instead of the requested machine type).
-#           (4) Log-sink error suppression never worked: Add-Content raises
-#               NON-terminating errors, so "try { Add-Content } catch {}"
-#               let a locked .log emit one error record PER LOG CALL to the
-#               error stream (observed live when a log viewer held the file:
-#               every line from mid-install onward was dropped AND spammed
-#               stderr; in GUI mode those echo as "[worker error]" lines).
-#               All log/events Add-Content sites now use -ErrorAction Stop
-#               (so the catch actually engages) and the .log write gets one
-#               short retry to ride out transient open-collisions.
-#           (5) Saved the file with a UTF-8 BOM. Without one, Windows
-#               PowerShell 5.1 reads "-File" runs as ANSI, so every non-ASCII
-#               glyph was mojibake: GUI title "Dell Inc. Â· Latitude 7410"
-#               (seen in the on-hardware GUI smoke test), spinner braille
-#               frames, the "●" status dots and "…" labels. The irm|iex
-#               Win+R path decodes UTF-8 and was always correct - but the
-#               v1.17.0 elevation relaunch uses -File on the local copy, so
-#               every elevated GUI session had the garbled variants. A
-#               leading BOM is treated as whitespace by the tokenizer, so
-#               the irm|iex path is unaffected.
 # v1.24.0 - Dell individual mode: SKU-relaxed catalog retry (field report:
 #           Latitude 7430 / SKU 0B0B, run 20260709_105131 - ONE missing device,
 #           the AX211 Wi-Fi at PCI\VEN_8086&DEV_51F0, triggered the full 1.4GB
@@ -853,7 +809,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.24.1"
+$SCRIPT_VERSION = "1.24.0"
 
 # =============================================================
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
@@ -1860,18 +1816,7 @@ function Log {
     # v1.18.0 - try/catch: the UI thread also logs the odd line (cancel click,
     # startup) while the worker is writing; a rare open-collision on the file
     # must never kill the run. Worst case one line is missing from the .log.
-    # v1.24.1 - -ErrorAction Stop is load-bearing: Add-Content raises NON-
-    # terminating errors, so the catch never engaged - a locked log file (live
-    # test: a tail that denied write sharing; in the field: any viewer that
-    # opens the log exclusively mid-run) emitted one error record PER LOG CALL
-    # into the error stream (echoed as "[worker error]" spam at end-of-run in
-    # GUI mode) while still dropping the line. One short retry rides out
-    # transient collisions; a persistently locked file now degrades silently
-    # to the console + events sinks.
-    for ($lfTry = 0; $lfTry -lt 2; $lfTry++) {
-        try { Add-Content -Path $LogFile -Value $line -Encoding UTF8 -ErrorAction Stop; break }
-        catch { if ($lfTry -eq 0) { Start-Sleep -Milliseconds 120 } }
-    }
+    try { Add-Content -Path $LogFile -Value $line -Encoding UTF8 } catch {}
 
     # Structured NDJSON sink.
     try {
@@ -1884,10 +1829,7 @@ function Log {
         if ($Event)   { $evt['event']   = $Event }
         if ($Context) { foreach ($k in $Context.Keys) { $evt[$k] = $Context[$k] } }
         $json = $evt | ConvertTo-Json -Compress -Depth 4
-        # v1.24.1 - -ErrorAction Stop for the same reason as the .log sink
-        # above: without it a locked events file leaks an error record per
-        # line instead of being swallowed by this catch.
-        Add-Content -Path $EventsLogFile -Value $json -Encoding UTF8 -ErrorAction Stop
+        Add-Content -Path $EventsLogFile -Value $json -Encoding UTF8
     } catch {
         # Never let event-log failure interrupt the script. Worst case: the
         # NDJSON sidecar is incomplete, but the canonical .log still has the line.
@@ -3644,7 +3586,7 @@ function Find-DellCameraCompanionPackages {
         [string[]]$Win10Codes
     )
     $nameRx = '(?i)camera|webcam|visual\s*sensing|imaging\s*mcu|\bIPU\b'
-    $found  = @{}   # base package name (version/rev stripped) -> newest matching entry
+    $found  = @{}   # Display name -> newest matching entry
     foreach ($component in $Catalog.SelectNodes("//*[local-name()='SoftwareComponent']")) {
         $typeNode = $component.SelectSingleNode("*[local-name()='ComponentType']")
         if ($typeNode -and $typeNode.GetAttribute("value") -ne "DRVR") { continue }
@@ -3674,18 +3616,8 @@ function Find-DellCameraCompanionPackages {
         $date = [datetime]::MinValue
         try { $date = [datetime]::Parse($component.GetAttribute("dateTime")) } catch {}
 
-        # v1.24.1 - dedup on the name with the ",<version>,<rev>" suffix
-        # stripped. Dell embeds the version INSIDE the Display name
-        # ("...Driver for Camera,74.22000.13.22,A07"), so keying the hash on
-        # the raw Display never collapsed releases: live-catalog test, SKU
-        # 0CBF (Latitude 7450) returned the SAME IVSC package three times
-        # (13.19/13.21/13.22) and the rescue would download and silently run
-        # all three - oldest possibly first, since hashtable order is
-        # arbitrary. Keying on the base name keeps one (newest) per package.
-        $baseName = if ($name -match '^(.+),\d[\d.]*,[A-Za-z]?\d+$') { $Matches[1] } else { $name }
-
-        if (-not $found[$baseName] -or $date -gt $found[$baseName].Date) {
-            $found[$baseName] = [PSCustomObject]@{ Path = $path; Name = $name; Date = $date }
+        if (-not $found[$name] -or $date -gt $found[$name].Date) {
+            $found[$name] = [PSCustomObject]@{ Path = $path; Name = $name; Date = $date }
         }
     }
     # v1.24.0 - was "return ,@($found.Values)": the leading comma made the
@@ -3694,9 +3626,7 @@ function Find-DellCameraCompanionPackages {
     # branch with an empty-path entry, and 2+ companions collapsed into a
     # single garbage item. Only the 1-companion field case worked. Emitting
     # the values plainly lets @() at the call sites count correctly.
-    # v1.24.1 - newest-first so the companion rescue tries the most recent
-    # release before older ones (it stops at the first that clears the device).
-    return @($found.Values | Sort-Object Date -Descending)
+    return @($found.Values)
 }
 
 # v1.24.0 - Scan the parsed CatalogPC for driver entries matching one device's
@@ -6384,18 +6314,11 @@ function Start-LenovoDriverInstall {
     SetDownload -Pct 0 -Label "Waiting..."
     SetExtract  -Pct 0 -Label "Waiting..."
 
-    # v1.24.1 - read the -MachineType param BEFORE "$machineType = $null" runs:
-    # variable names are case-insensitive, so that initializer created a local
-    # that shadowed the param, making "if ($MachineType)" always false - the
-    # documented -MachineType override has been silently ignored (WMI always
-    # won, so e.g. forcing the Lenovo path from a non-Lenovo test box derived
-    # a garbage prefix like "LATI" from the local model name instead).
-    $mtOverride  = $MachineType
     $machineType = $null
-    if ($mtOverride) {
+    if ($MachineType) {
         # Use override from -MachineType param - take first 4 chars uppercased
-        $machineType = $mtOverride.Substring(0, [math]::Min(4, $mtOverride.Length)).ToUpper()
-        Log "Machine type: $mtOverride  ->  prefix: $machineType  [overridden via param]"
+        $machineType = $MachineType.Substring(0, [math]::Min(4, $MachineType.Length)).ToUpper()
+        Log "Machine type: $MachineType  ->  prefix: $machineType  [overridden via param]"
     } else {
         try {
             $sku = (Get-CimInstance Win32_ComputerSystemProduct).Name.Trim()
@@ -7675,17 +7598,9 @@ function Start-Install {
 
     $cs = Get-CimInstance Win32_ComputerSystem
 
-    # Use param overrides if provided, otherwise read from WMI.
-    # v1.24.1 - capture the "was a param passed" facts BEFORE the assignments:
-    # PowerShell variable names are case-insensitive, so $manufacturer IS
-    # $Manufacturer - the first assignment below overwrites the param, and any
-    # later "if ($Manufacturer)" is really asking "did detection produce a
-    # value" (always yes). Every log since v1.5.5 claimed "[OVERRIDDEN via
-    # param]" even for pure WMI detection because of this.
-    $mfgOverridden   = [bool]$Manufacturer
-    $modelOverridden = [bool]$Model
-    $manufacturer = if ($mfgOverridden)   { $Manufacturer } else { $cs.Manufacturer.Trim() }
-    $model        = if ($modelOverridden) { $Model }        else { $cs.Model.Trim() }
+    # Use param overrides if provided, otherwise read from WMI
+    $manufacturer = if ($Manufacturer) { $Manufacturer } else { $cs.Manufacturer.Trim() }
+    $model        = if ($Model)        { $Model }        else { $cs.Model.Trim() }
 
     $script:AnalyticsManufacturer = $manufacturer
     $script:AnalyticsModel        = $model
@@ -7703,7 +7618,7 @@ function Start-Install {
         Set-UiTitle "$manufacturer  ·  $model"
     }
 
-    $overrideNote = if ($mfgOverridden -or $modelOverridden) { "  [OVERRIDDEN via param]" } else { "  (from WMI)" }
+    $overrideNote = if ($Manufacturer -or $Model) { "  [OVERRIDDEN via param]" } else { "  (from WMI)" }
     Log "Manufacturer : $manufacturer$overrideNote"
     Log "Model        : $model$overrideNote"
 
@@ -8311,7 +8226,7 @@ if ($Headless) {
             } catch {
                 # Something escaped even the crash wrapper (dispatch/parse-level).
                 $emsg = "[UI] Worker terminated abnormally: $($_.Exception.Message)"
-                try { Add-Content -Path $LogFile -Value $emsg -Encoding UTF8 -ErrorAction Stop } catch {}
+                try { Add-Content -Path $LogFile -Value $emsg -Encoding UTF8 } catch {}
                 try { Invoke-UiOp @{ Op = 'log'; Line = $emsg; Tone = 'error' } } catch {}
             }
             foreach ($e in @($ps.Streams.Error)) {
