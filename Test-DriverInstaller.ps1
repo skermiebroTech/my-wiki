@@ -12,8 +12,12 @@ param(
     [string]$LenovoMachineType = "20XX"
 )
 
-$ScriptVersion = "3.1.0"
-$RepoUrl       = "https://raw.githubusercontent.com/skermiebroTech/my-wiki/$Branch/Install-Drivers-auto-7z.ps1"
+# v3.1.1 - fixed parse error (stray 'x' after ShowDialog on the last line kept
+#          the whole harness from running) and updated RepoUrl: the old
+#          Install-Drivers-auto-7z.ps1 filename 404s since the rename to
+#          Install-Drivers-auto.ps1.
+$ScriptVersion = "3.1.1"
+$RepoUrl       = "https://raw.githubusercontent.com/skermiebroTech/my-wiki/$Branch/Install-Drivers-auto.ps1"
 $LogFile       = Join-Path ([Environment]::GetFolderPath("UserProfile")) `
                      ("Downloads\Test-DriverInstaller_" + (Get-Date -Format 'yyyyMMdd_HHmmss') + ".log")
 $ScriptCache   = "$env:TEMP\Install-Drivers-auto-test.ps1"
@@ -534,7 +538,7 @@ $form.Add_Shown({
         return
     }
     $kb  = [math]::Round((Get-Item $ScriptCache).Length / 1KB, 1)
-    $vl  = Get-Content $ScriptCache | Select-String '^\$ScriptVersion\s*=' | Select-Object -First 1
+    $vl  = Get-Content $ScriptCache | Select-String '^\$SCRIPT_VERSION\s*=' | Select-Object -First 1
     $ver = if ($vl) { ($vl.ToString() -replace '.*"(.*)".*', '$1') } else { "?" }
     UILog "Downloaded $kb KB  |  Script v$ver"
     $summaryLbl.Text      = "Script v$ver ready. Launching parallel jobs..."
@@ -835,4 +839,4 @@ $form.Add_Shown({
 })
 
 $form.Add_FormClosed({ $ticker.Stop() })
-[void]$form.ShowDialog()x
+[void]$form.ShowDialog()
