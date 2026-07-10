@@ -1,6 +1,6 @@
-﻿# =============================================================
+# =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.16.0
+# Version: 1.24.2 (keep in sync with $SCRIPT_VERSION below)
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -58,6 +58,54 @@
 #   DriverInstaller_<ts>.events.json - NDJSON structured event log (always)
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
+#
+# v1.24.2 - ASCII-only source file; replaces the v1.24.1 BOM fix. The BOM broke
+#           the irm|iex one-liner on Windows PowerShell 5.1: irm returns the
+#           UTF-8 BOM as a literal U+FEFF char, and 5.1's tokenizer does NOT
+#           treat it as whitespace (PS7 does). Line 1 then isn't a comment, so
+#           param() is no longer the first statement and every parameter default
+#           fails with InvalidLeftHandSide. Fix: file saved UTF-8 WITHOUT BOM,
+#           and every non-ASCII GUI glyph (braille spinner frames, status dots,
+#           ellipses, middle-dot title separator) is built at runtime via
+#           [char]. Pure-ASCII bytes decode identically under every host and
+#           encoding, so irm|iex, -File on a clone, and the elevated -File
+#           relaunch all render correctly.
+#           KEEP THIS FILE PURE ASCII - do not paste literal glyphs into it.
+# v1.24.1 - Five fixes from the on-hardware test pass (see dev copy changelog),
+#           including the UTF-8 BOM save that v1.24.2 reverts.
+# v1.24.0 - Dell individual mode: SKU-relaxed catalog retry (field report:
+#           Latitude 7430 / SKU 0B0B, run 20260709_105131 - ONE missing device,
+#           the AX211 Wi-Fi at PCI\VEN_8086&DEV_51F0, triggered the full 1.4GB
+#           driver pack). Root cause verified against the live CatalogPC: Dell
+#           tags 59 components with SKU 0B0B, but none of the 26 packages
+#           listing the AX211 silicon names that SKU - the per-model index is
+#           simply incomplete for networking DUPs - so the strict SKU-filtered
+#           match found nothing and bailed to the pack.
+#           (1) Catalog scan extracted to Find-DellCatalogDeviceMatches; when
+#               the SKU-filtered pass matches nothing, it reruns with the model
+#               filter relaxed (silicon VEN/DEV only). When the device exposes
+#               a SUBSYS and any relaxed entry agrees on it exactly, only those
+#               entries are trusted, so the retry cannot select a package Dell
+#               ships solely for other OEM variants of the same chip. (NOTE:
+#               CatalogPC stores subsystem halves swapped vs SUBSYS_ddddvvvv -
+#               pairs are compared unordered.)
+#           (2) Match ranking replaces the date-only "newest wins" pick: Dell
+#               lists Bluetooth DUPs under the same Wi-Fi PCI function, and the
+#               BT package can carry a newer catalog dateTime than the Wi-Fi
+#               package (24.40.0.3 BT 08:56 vs 24.40.0.4 Wi-Fi 07:48, both
+#               2026-04-08) - date-only sort would bind a missing Network
+#               Controller to the Bluetooth driver, whose install can't clear
+#               the device and would escalate to the full pack anyway. Rank by
+#               device/package Bluetooth-ness agreement, then exact subsystem
+#               hit, then date.
+#           (3) Find-DellCameraCompanionPackages return fix (found while
+#               unit-testing the new helper): "return ,@(...)" emitted the
+#               array as ONE pipeline object, so the callers' @() wrapper
+#               always counted exactly 1 - zero companions still entered the
+#               "found" branch (bogus empty-path download attempt instead of
+#               the "No camera companion packages" path), and 2+ companions
+#               collapsed into one garbage entry. Only the single-companion
+#               case (the Latitude 7450 IVSC field fix) worked by accident.
 #
 # v1.23.0 - Camera companion rescue: run the companion DUPs, always (field
 #           report: Latitude 7450, run 20260707_110701 on a FRESH install -
@@ -775,10 +823,10 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.23.0"
+$SCRIPT_VERSION = "1.24.2"
 
 # =============================================================
-$SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
+$SpinnerFrames   = @(0x280B,0x2819,0x2839,0x2838,0x283C,0x2834,0x2826,0x2827,0x2807,0x280F | ForEach-Object { [string][char]$_ })  # braille spinner frames via [char] - source must stay pure ASCII (v1.24.2)
 $SpinnerIndex    = 0
 $CancelRequested = $false
 
@@ -947,7 +995,7 @@ $subtitle.AutoSize  = $true
 $subtitle.Font      = $FontSubtitle
 $subtitle.ForeColor = $ColorTextMid
 $subtitle.Location  = New-Object System.Drawing.Point(16, 56)
-$subtitle.Text      = "Detecting hardware…"
+$subtitle.Text      = "Detecting hardware$([char]0x2026)"
 $subtitle.UseCompatibleTextRendering = $false
 $form.Controls.Add($subtitle)
 
@@ -964,7 +1012,7 @@ $form.Controls.Add($versionLabel)
 # =========================
 # CONSOLE / STATUS CARD
 # Dark console box wrapped in a faint border so it reads as a "card".
-# The status box is a CHILD of the border panel, not a sibling on the form —
+# The status box is a CHILD of the border panel, not a sibling on the form -
 # v1.11.0 fix: siblings on $form fight over Z-order (first-added wins in
 # WinForms), which made the border panel render OVER the textbox and the
 # whole console appeared as a grey rectangle.
@@ -997,7 +1045,7 @@ $statusCardBorder.Controls.Add($statusBox)        # CHILD of the panel - no Z-or
 # Variable names are preserved from the pre-v1.11.0 layout so the helpers
 # (SetDownload, SetExtract, Step-*Spinner, Stop-*Spinner, Test-Cancelled)
 # work without modification. New variables introduced for the redesign:
-#   $dlStatusDot / $exStatusDot / $overallStatusDot   - small "●" labels
+#   $dlStatusDot / $exStatusDot / $overallStatusDot   - small status-dot ([char]0x25CF) labels
 #   $dlHeaderLabel / $exHeaderLabel / $overallHeaderLabel
 #     (replaces $dlGroupBox.Text / $exGroupBox.Text / $overallGroupBox.Text;
 #      five external call sites that wrote to $exGroupBox.Text have been
@@ -1009,7 +1057,7 @@ $dlStatusDot           = New-Object System.Windows.Forms.Label
 $dlStatusDot.AutoSize  = $true
 $dlStatusDot.Font      = $FontStatusDot
 $dlStatusDot.ForeColor = $ColorMuted
-$dlStatusDot.Text      = "●"
+$dlStatusDot.Text      = "$([char]0x25CF)"
 $dlStatusDot.Location  = New-Object System.Drawing.Point(28, 322)
 $dlStatusDot.UseCompatibleTextRendering = $false
 $form.Controls.Add($dlStatusDot)
@@ -1038,7 +1086,7 @@ $dlLabel.Size      = New-Object System.Drawing.Size(396, 18)
 $dlLabel.Location  = New-Object System.Drawing.Point(188, 326)
 $dlLabel.Font      = $FontMonoSm
 $dlLabel.ForeColor = $ColorTextHi
-$dlLabel.Text      = "Waiting…"
+$dlLabel.Text      = "Waiting$([char]0x2026)"
 $dlLabel.TextAlign = "MiddleRight"
 $dlLabel.UseCompatibleTextRendering = $false
 $form.Controls.Add($dlLabel)
@@ -1057,7 +1105,7 @@ $exStatusDot           = New-Object System.Windows.Forms.Label
 $exStatusDot.AutoSize  = $true
 $exStatusDot.Font      = $FontStatusDot
 $exStatusDot.ForeColor = $ColorMuted
-$exStatusDot.Text      = "●"
+$exStatusDot.Text      = "$([char]0x25CF)"
 $exStatusDot.Location  = New-Object System.Drawing.Point(28, 376)
 $exStatusDot.UseCompatibleTextRendering = $false
 $form.Controls.Add($exStatusDot)
@@ -1086,7 +1134,7 @@ $exLabel.Size      = New-Object System.Drawing.Size(396, 18)
 $exLabel.Location  = New-Object System.Drawing.Point(188, 380)
 $exLabel.Font      = $FontMonoSm
 $exLabel.ForeColor = $ColorTextHi
-$exLabel.Text      = "Waiting…"
+$exLabel.Text      = "Waiting$([char]0x2026)"
 $exLabel.TextAlign = "MiddleRight"
 $exLabel.UseCompatibleTextRendering = $false
 $form.Controls.Add($exLabel)
@@ -1105,7 +1153,7 @@ $overallStatusDot           = New-Object System.Windows.Forms.Label
 $overallStatusDot.AutoSize  = $true
 $overallStatusDot.Font      = $FontStatusDot
 $overallStatusDot.ForeColor = $ColorMuted
-$overallStatusDot.Text      = "●"
+$overallStatusDot.Text      = "$([char]0x25CF)"
 $overallStatusDot.Location  = New-Object System.Drawing.Point(28, 430)
 $overallStatusDot.UseCompatibleTextRendering = $false
 $form.Controls.Add($overallStatusDot)
@@ -3586,7 +3634,102 @@ function Find-DellCameraCompanionPackages {
             $found[$name] = [PSCustomObject]@{ Path = $path; Name = $name; Date = $date }
         }
     }
-    return ,@($found.Values)
+    # v1.24.0 - was "return ,@($found.Values)": the leading comma made the
+    # pipeline emit the array as ONE object, so the callers' @(...) wrapper
+    # always counted exactly 1 - zero companions still entered the "found"
+    # branch with an empty-path entry, and 2+ companions collapsed into a
+    # single garbage item. Only the 1-companion field case worked. Emitting
+    # the values plainly lets @() at the call sites count correctly.
+    return @($found.Values)
+}
+
+# v1.24.0 - Scan the parsed CatalogPC for driver entries matching one device's
+# PCI VEN/DEV list. Extracted from the inline loop in
+# Start-DellIndividualDriverInstall so the caller can run it twice: once with
+# the SystemSKU model filter, then - when that yields nothing - relaxed to
+# silicon-only matching. Field case (Latitude 7430 / SKU 0B0B, run
+# 20260709_105131): Dell tags 59 CatalogPC components with this SKU but NOT ONE
+# of the 26 packages listing the missing AX211 Wi-Fi silicon (8086:51F0) names
+# it - Dell's model index for networking DUPs is simply incomplete - so the
+# strict pass matched nothing and the run fell back to the full 1.4GB driver
+# pack for ONE missing Wi-Fi driver.
+# Returns entries decorated with SubsysMatch/IsBtPackage for the caller's
+# ranking pass. NOTE: CatalogPC stores the subsystem halves swapped relative to
+# the PCI SUBSYS_ddddvvvv convention (the AX211's SUBSYS_40908086 is listed as
+# subVendorID=4090 subDeviceID=8086), so pairs are compared unordered.
+function Find-DellCatalogDeviceMatches {
+    param(
+        [xml]$Catalog,
+        [object[]]$DevVenDev,        # @{VEN;DEV} pairs parsed from the device
+        [string[]]$DevSubsysPairs,   # sorted "xxxx|yyyy" pair keys from SUBSYS_ IDs (may be empty)
+        [string]$SystemSKU,
+        [bool]$IsWin11,
+        [bool]$ApplySkuFilter,
+        [string[]]$Win11Codes,
+        [string[]]$Win10Codes
+    )
+    $found = [System.Collections.Generic.List[object]]::new()
+    foreach ($component in $Catalog.SelectNodes("//*[local-name()='SoftwareComponent']")) {
+
+        # Must be a driver (DRVR), not firmware
+        $typeNode = $component.SelectSingleNode("*[local-name()='ComponentType']")
+        if ($typeNode -and $typeNode.GetAttribute("value") -ne "DRVR") { continue }
+
+        # Check OS compatibility via osCode attribute
+        $osMatch = $false
+        $targetCodes = if ($IsWin11) { $Win11Codes } else { $Win10Codes }
+        foreach ($osNode in $component.SelectNodes(".//*[local-name()='OperatingSystem']")) {
+            if ($targetCodes -contains $osNode.GetAttribute("osCode")) { $osMatch = $true; break }
+        }
+        if (-not $osMatch) { continue }
+
+        # Check model compatibility via systemID (matches SystemSKUNumber)
+        if ($SystemSKU -and $ApplySkuFilter) {
+            $modelMatch = $false
+            foreach ($modelNode in $component.SelectNodes(".//*[local-name()='Model']")) {
+                if ($modelNode.GetAttribute("systemID").ToUpper() -eq $SystemSKU) { $modelMatch = $true; break }
+            }
+            if (-not $modelMatch) { continue }
+        }
+
+        # Match hardware ID via PCIInfo deviceID + vendorID attributes; also
+        # note whether any matching PCIInfo agrees on the subsystem pair.
+        $hwMatch = $false
+        $subsysMatch = $false
+        foreach ($pciNode in $component.SelectNodes(".//*[local-name()='PCIInfo']")) {
+            $catVen = $pciNode.GetAttribute("vendorID").ToUpper()
+            $catDev = $pciNode.GetAttribute("deviceID").ToUpper()
+            $pairHit = $false
+            foreach ($vd in $DevVenDev) {
+                if ($vd.VEN -eq $catVen -and $vd.DEV -eq $catDev) { $pairHit = $true; break }
+            }
+            if (-not $pairHit) { continue }
+            $hwMatch = $true
+            if ($DevSubsysPairs.Count -eq 0) { break }
+            $catPair = (@($pciNode.GetAttribute("subVendorID").ToUpper(),
+                          $pciNode.GetAttribute("subDeviceID").ToUpper()) | Sort-Object) -join '|'
+            if ($DevSubsysPairs -contains $catPair) { $subsysMatch = $true; break }
+        }
+        if (-not $hwMatch) { continue }
+
+        $driverPath = $component.GetAttribute("path")
+        if (-not $driverPath) { continue }
+        $driverName = ""
+        try { $driverName = $component.SelectSingleNode("*[local-name()='Name']/*[local-name()='Display']").InnerText } catch {}
+        $driverDate = [datetime]::MinValue
+        try { $driverDate = [datetime]::Parse($component.GetAttribute("dateTime")) } catch {}
+        $found.Add([PSCustomObject]@{
+            Path        = $driverPath
+            Name        = $driverName
+            Date        = $driverDate
+            Version     = $component.GetAttribute("vendorVersion")   # v1.21.0 - for the already-installed pre-check
+            SubsysMatch = $subsysMatch
+            IsBtPackage = [bool]($driverName -match '(?i)bluetooth')
+        }) | Out-Null
+    }
+    # Emit items plainly (no leading comma) - callers wrap with @() so an
+    # empty result counts 0 and triggers the SKU-relaxed retry / pack fallback.
+    return $found
 }
 
 function Start-DellIndividualDriverInstall {
@@ -3735,58 +3878,46 @@ function Start-DellIndividualDriverInstall {
             break
         }
 
-        # Collect every catalog driver whose PCIInfo matches this device's VEN/DEV,
-        # then pick the NEWEST by catalog dateTime (v1.14.0). With -IgnoreSkuFilter
-        # the SystemSKU model index is skipped so consumer/gaming models - which Dell
-        # does not list under their SKU - still match by silicon.
-        $deviceMatches = [System.Collections.Generic.List[object]]::new()
-        foreach ($component in $cat.SelectNodes("//*[local-name()='SoftwareComponent']")) {
-
-            # Must be a driver (DRVR), not firmware
-            $typeNode = $component.SelectSingleNode("*[local-name()='ComponentType']")
-            if ($typeNode -and $typeNode.GetAttribute("value") -ne "DRVR") { continue }
-
-            # Check OS compatibility via osCode attribute
-            $osMatch = $false
-            $targetCodes = if ($IsWin11) { $win11Codes } else { $win10Codes }
-            foreach ($osNode in $component.SelectNodes(".//*[local-name()='OperatingSystem']")) {
-                if ($targetCodes -contains $osNode.GetAttribute("osCode")) { $osMatch = $true; break }
+        # v1.24.0 - Parse the device's SUBSYS pairs so silicon matches can be
+        # ranked (and, in the relaxed retry, gated) by exact-subsystem
+        # agreement. Pairs are stored order-insensitively because CatalogPC
+        # swaps the halves relative to the SUBSYS_ddddvvvv convention.
+        $devSubsysPairs = @()
+        foreach ($hwId in @($dev.HardwareIDs) | Where-Object { $_ }) {
+            if ($hwId -match 'SUBSYS_([0-9A-Fa-f]{4})([0-9A-Fa-f]{4})') {
+                $pair = (@($Matches[1].ToUpper(), $Matches[2].ToUpper()) | Sort-Object) -join '|'
+                if ($devSubsysPairs -notcontains $pair) { $devSubsysPairs += $pair }
             }
-            if (-not $osMatch) { continue }
+        }
+        $devIsBluetooth = [bool]($dev.Name -match '(?i)bluetooth')
 
-            # Check model compatibility via systemID (matches SystemSKUNumber)
-            if ($systemSKU -and -not $IgnoreSkuFilter) {
-                $modelMatch = $false
-                foreach ($modelNode in $component.SelectNodes(".//*[local-name()='Model']")) {
-                    if ($modelNode.GetAttribute("systemID").ToUpper() -eq $systemSKU) { $modelMatch = $true; break }
-                }
-                if (-not $modelMatch) { continue }
+        # Collect every catalog driver whose PCIInfo matches this device's VEN/DEV.
+        # With -IgnoreSkuFilter the SystemSKU model index is skipped so consumer/
+        # gaming models - which Dell does not list under their SKU - still match
+        # by silicon.
+        $skuFilterActive = [bool]($systemSKU -and -not $IgnoreSkuFilter)
+        $deviceMatches = @(Find-DellCatalogDeviceMatches -Catalog $cat -DevVenDev $devVenDev `
+            -DevSubsysPairs $devSubsysPairs -SystemSKU $systemSKU -IsWin11 $IsWin11 `
+            -ApplySkuFilter $skuFilterActive -Win11Codes $win11Codes -Win10Codes $win10Codes)
+
+        # v1.24.0 - SKU-relaxed retry. Dell's per-model index is incomplete for
+        # networking DUPs (Latitude 7430 / SKU 0B0B: zero of the 26 AX211
+        # packages list the SKU), which used to force the full driver pack for
+        # a single missing Wi-Fi driver. Retry by silicon only; when the device
+        # exposes a SUBSYS and any entry agrees on it exactly, trust only those
+        # entries so we can't pick a package Dell ships solely for OTHER OEM
+        # variants of the same chip (e.g. Killer-branded AX1675 = same 8086:51F0).
+        if ($deviceMatches.Count -eq 0 -and $skuFilterActive) {
+            Log "  No SKU-filtered CatalogPC match for '$($dev.Name)' - Dell's model index"
+            Log "  omits many networking DUPs; retrying match by silicon (VEN/DEV) only..."
+            $deviceMatches = @(Find-DellCatalogDeviceMatches -Catalog $cat -DevVenDev $devVenDev `
+                -DevSubsysPairs $devSubsysPairs -SystemSKU $systemSKU -IsWin11 $IsWin11 `
+                -ApplySkuFilter $false -Win11Codes $win11Codes -Win10Codes $win10Codes)
+            $exact = @($deviceMatches | Where-Object { $_.SubsysMatch })
+            if ($devSubsysPairs.Count -gt 0 -and $exact.Count -gt 0) { $deviceMatches = $exact }
+            if ($deviceMatches.Count -gt 0) {
+                Log "    Silicon-only retry matched $($deviceMatches.Count) package(s)."
             }
-
-            # Match hardware ID via PCIInfo deviceID + vendorID attributes
-            $hwMatch = $false
-            foreach ($pciNode in $component.SelectNodes(".//*[local-name()='PCIInfo']")) {
-                $catVen = $pciNode.GetAttribute("vendorID").ToUpper()
-                $catDev = $pciNode.GetAttribute("deviceID").ToUpper()
-                foreach ($vd in $devVenDev) {
-                    if ($vd.VEN -eq $catVen -and $vd.DEV -eq $catDev) { $hwMatch = $true; break }
-                }
-                if ($hwMatch) { break }
-            }
-            if (-not $hwMatch) { continue }
-
-            $driverPath = $component.GetAttribute("path")
-            if (-not $driverPath) { continue }
-            $driverName = ""
-            try { $driverName = $component.SelectSingleNode("*[local-name()='Name']/*[local-name()='Display']").InnerText } catch {}
-            $driverDate = [datetime]::MinValue
-            try { $driverDate = [datetime]::Parse($component.GetAttribute("dateTime")) } catch {}
-            $deviceMatches.Add([PSCustomObject]@{
-                Path    = $driverPath
-                Name    = $driverName
-                Date    = $driverDate
-                Version = $component.GetAttribute("vendorVersion")   # v1.21.0 - for the already-installed pre-check
-            }) | Out-Null
         }
 
         if ($deviceMatches.Count -eq 0) {
@@ -3795,12 +3926,23 @@ function Start-DellIndividualDriverInstall {
                 $allMatched = $false
                 continue
             }
-            Log "  No CatalogPC match for '$($dev.Name)' - will fall back to full pack."
+            Log "  No CatalogPC match for '$($dev.Name)' (even silicon-only) - will fall back to full pack."
             $allMatched = $false
             break
         }
 
-        $best = $deviceMatches | Sort-Object Date -Descending | Select-Object -First 1
+        # v1.24.0 - Rank matches instead of blindly taking the newest: Dell
+        # lists Bluetooth packages under the same Wi-Fi PCI function (the BT
+        # radio rides the WLAN card), and the BT DUP can be published minutes
+        # AFTER the Wi-Fi DUP (24.40.0.3 BT at 08:56 vs 24.40.0.4 Wi-Fi at
+        # 07:48, both 2026-04-08) - a date-only sort would hand a missing
+        # Network Controller the Bluetooth driver. Prefer packages whose
+        # BT-ness matches the device's, then exact subsystem hits, then date.
+        $best = $deviceMatches | Sort-Object `
+            @{ E = { [int]($_.IsBtPackage -eq $devIsBluetooth) }; Descending = $true },
+            @{ E = { [int]$_.SubsysMatch };                       Descending = $true },
+            @{ E = { $_.Date };                                   Descending = $true } |
+            Select-Object -First 1
         Log "  Matched '$($dev.Name)'"
         Log "    Driver : $($best.Name)"
         Log "    Path   : $($best.Path)"
@@ -7487,7 +7629,7 @@ function Start-Install {
         try { [System.Windows.Forms.Clipboard]::SetText($model) } catch {}
         # v1.11.0 - title stays static; the detected model lives in the subtitle row
         # for a cleaner header hierarchy. The window title bar matches the subtitle.
-        Set-UiTitle "$manufacturer  ·  $model"
+        Set-UiTitle "$manufacturer  $([char]0xB7)  $model"
     }
 
     $overrideNote = if ($Manufacturer -or $Model) { "  [OVERRIDDEN via param]" } else { "  (from WMI)" }
@@ -7639,7 +7781,7 @@ function Start-Install {
             # Update analytics model to the picked Surface model
             $script:AnalyticsManufacturer = "Microsoft"
             $script:AnalyticsModel        = $pickedModel
-            Set-UiTitle "Microsoft  ·  $pickedModel"
+            Set-UiTitle "Microsoft  $([char]0xB7)  $pickedModel"
             Set-ButtonRunning
             if (-not (Assert-Curl)) { Send-AnalyticsEvent -Result "failure"; Set-ButtonIdle; return }
             $success = Start-MicrosoftSurfaceDriverInstall -DriverRoot $driverRoot -ModelName $pickedModel
