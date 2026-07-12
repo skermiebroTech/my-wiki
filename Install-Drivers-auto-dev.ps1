@@ -1,6 +1,6 @@
 ﻿# =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.24.1 (keep in sync with $SCRIPT_VERSION below)
+# Version: 1.25.0 (keep in sync with $SCRIPT_VERSION below)
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -59,6 +59,26 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.25.0 - Windows Update driver method exposed in the UI. The WUA driver
+#           search (Install-DriversViaWindowsUpdate) already ran automatically
+#           as an end-of-run fallback; this surfaces it as an operator-driven
+#           action too.
+#           (1) New "Run Windows Update" button on the main window (full-width
+#               secondary action below Install/Cancel). It launches the WUA
+#               driver search on the same background STA runspace the install
+#               uses - progress bars, Cancel, and the missing-device link all
+#               work - then reports what it installed and offers a reboot if
+#               anything landed. Disabled while any run is in flight; Cancel
+#               kills it within one poll (same child-process kill path).
+#           (2) The end-of-run "drivers still missing" dialogs now RUN the
+#               Windows Update method instead of only launching the Settings
+#               app. Success dialog: No = run Windows Update to fetch the rest;
+#               Failure dialog: Yes = run Windows Update. Both re-scan and
+#               refresh the missing-device count afterward.
+#           (3) Shared plumbing: Start-WorkerInstall/Start-WorkerWindowsUpdate
+#               now delegate to a generic Start-Worker; the WU run/report/
+#               reboot-offer logic lives in Invoke-WindowsUpdateDriverRun(
+#               Interactive), reused by both the button and the dialogs.
 # v1.24.1 - Fixes from the first full on-hardware test pass (Latitude
 #           7410 / SKU 09BE test box, plus live-CatalogPC unit tests of the
 #           v1.24.0 matcher helpers):
@@ -853,7 +873,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.24.1"
+$SCRIPT_VERSION = "1.25.0"
 
 # =============================================================
 $SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
@@ -991,7 +1011,7 @@ $ToneConsoleColors = @{
 # =========================
 $form                 = New-Object System.Windows.Forms.Form
 $form.Text            = "Driver Installer  v$SCRIPT_VERSION"
-$form.Size            = New-Object System.Drawing.Size(612, 628)
+$form.Size            = New-Object System.Drawing.Size(612, 680)
 $form.StartPosition   = "CenterScreen"
 $form.FormBorderStyle = "FixedSingle"
 $form.MaximizeBox     = $false
@@ -1306,6 +1326,24 @@ $cancelButton.FlatAppearance.MouseDownBackColor = $ColorDangerDk
 $cancelButton.Enabled    = $false
 $form.Controls.Add($cancelButton)
 
+# v1.25.0 - Secondary full-width action: run the Windows Update driver method
+# (Install-DriversViaWindowsUpdate) on demand, independent of a full install.
+# Same background STA runspace as Install, so progress/Cancel/link all work.
+# Sits on its own row beneath the Install/Cancel pair.
+$wuButton            = New-Object System.Windows.Forms.Button
+$wuButton.Text       = "Run Windows Update  (search for missing drivers)"
+$wuButton.Size       = New-Object System.Drawing.Size(556, 34)
+$wuButton.Location   = New-Object System.Drawing.Point(28, 578)
+$wuButton.Font       = $FontButton
+$wuButton.BackColor  = $ColorAccent                            # indigo-500: distinct from the blue primary
+$wuButton.ForeColor  = [System.Drawing.Color]::White
+$wuButton.FlatStyle  = "Flat"
+$wuButton.FlatAppearance.BorderSize         = 0
+$wuButton.FlatAppearance.MouseOverBackColor = [System.Drawing.Color]::FromArgb(79, 70, 229)   # indigo-600 (hover)
+$wuButton.FlatAppearance.MouseDownBackColor = [System.Drawing.Color]::FromArgb(67, 56, 202)   # indigo-700 (pressed)
+$wuButton.Cursor     = "Hand"
+$form.Controls.Add($wuButton)
+
 # =========================
 # SOUND HELPER
 # =========================
@@ -1592,6 +1630,107 @@ Out-Line "RESULT:$installedCount"
 
     Log "  Windows Update installed $installedCount driver(s)."
     return $installedCount
+}
+
+# =========================
+# v1.25.0 - MANUAL WINDOWS UPDATE DRIVER RUN (button + dialog option)
+#
+# Install-DriversViaWindowsUpdate is the raw WUA method. The helpers below wrap
+# it for operator-initiated use: they run it, re-scan the machine, refresh the
+# analytics count + missing-device link, and (in GUI mode) report the outcome.
+# All of this runs on the worker runspace - either the standalone WU worker
+# (the new button) or inline in an end-of-run dialog handler (already on the
+# worker thread). None of it touches WinForms controls directly; UI updates go
+# through the enqueue helpers, exactly like the install path.
+# =========================
+function Invoke-WindowsUpdateDriverRun {
+    # Core: run the WUA driver method once, re-scan, refresh UI/analytics.
+    # Returns the installed-driver count. No dialogs (see -Interactive wrapper).
+    $before = Get-MissingDriverCount
+    Log "=== WINDOWS UPDATE: operator-requested driver search ==="
+    if ($before -ge 0) { Log "  Devices missing drivers before: $before" }
+
+    $installed = [int](Install-DriversViaWindowsUpdate)
+
+    if (Test-CancelFlag) {
+        Log "  Windows Update driver search cancelled by user." -Level "cancel"
+    }
+
+    # Re-scan so the footer link and analytics reflect what WU just changed.
+    $after = Get-MissingDriverCount
+    if ($after -ge 0) { $script:AnalyticsMissingAfter = $after }
+    $names = Get-MissingDriverNames
+    Update-MissingDeviceLink -Names $names -Phase "after Windows Update"
+    Log "  Devices missing drivers after:  $after  (Windows Update installed $installed driver(s))"
+    if ($installed -gt 0) {
+        Log "  NOTE: some Windows Update drivers may only bind after a reboot." -Level "info"
+    }
+    return $installed
+}
+
+function Invoke-WindowsUpdateDriverRunInteractive {
+    # Runs the method, then (GUI, non-cancelled) reports the outcome and offers
+    # a reboot if anything installed. Worker-runspace only. Returns the count.
+    $installed = [int](Invoke-WindowsUpdateDriverRun)
+
+    if (-not $script:Headless -and -not (Test-CancelFlag)) {
+        $after = if ($script:AnalyticsMissingAfter -ge 0) { $script:AnalyticsMissingAfter } else { -1 }
+        if ($installed -gt 0) {
+            $msg = "Windows Update installed $installed driver(s)."
+            if ($after -gt 0) { $msg += "`n$after device(s) still need drivers." }
+            $msg += "`n`nSome drivers may only take effect after a reboot.`nReboot now?"
+            $r = Show-TopMostMessageBox $msg "Windows Update Complete" "YesNo" "Information"
+            if ($r -eq [System.Windows.Forms.DialogResult]::Yes) { Restart-Computer -Force }
+        } else {
+            $msg = "Windows Update found no additional drivers to install."
+            if ($after -gt 0) {
+                $msg += "`n`n$after device(s) still need drivers.`n" +
+                        "You can also open Windows Update in Settings to check for optional driver updates."
+            }
+            Show-TopMostMessageBox $msg "Windows Update" "OK" "Information" | Out-Null
+        }
+    }
+    return $installed
+}
+
+function Start-WindowsUpdateOnly {
+    # Worker-runspace entry point behind the "Run Windows Update" button.
+    Set-ButtonRunning
+    try {
+        Play-Sound -Event "Start"
+        $installed = [int](Invoke-WindowsUpdateDriverRunInteractive)
+        if (Test-CancelFlag)     { Play-Sound -Event "Cancel" }
+        elseif ($installed -gt 0){ Play-Sound -Event "Success" }
+        else                     { Play-Sound -Event "DownloadComplete" }
+    } finally {
+        Set-ButtonIdle
+    }
+}
+
+function Invoke-WindowsUpdateOnlySafe {
+    # v1.25.0 - crash-safe wrapper mirroring Invoke-StartInstallSafe, scoped to
+    # the standalone WU run so a WUA hiccup can't leave the UI greyed out.
+    try {
+        Start-WindowsUpdateOnly
+    } catch {
+        $ex = $_
+        try {
+            Log "FATAL (Windows Update run): unhandled exception." -Level "error" -Event "crash" -Context @{
+                message = $ex.Exception.Message
+                type    = $ex.Exception.GetType().FullName
+            }
+            Log "  $($ex.Exception.Message)" -Level "error"
+        } catch {}
+        try { Set-ButtonIdle } catch {}
+        try { Play-Sound -Event "Failure" } catch {}
+        if (-not $script:Headless) {
+            try {
+                Show-TopMostMessageBox `
+                    "The Windows Update run hit an unexpected error and stopped:`n`n$($ex.Exception.Message)" `
+                    "Windows Update" "OK" "Error" | Out-Null
+            } catch {}
+        }
+    }
 }
 
 # =========================
@@ -7988,16 +8127,20 @@ function Start-Install {
             # v1.12.0 - Add Windows Update prompt if drivers still missing
             if ($PromptWindowsUpdate -and $stillMissing -gt 0) {
                 # v1.16.1 - Framed around the reboot question. Cancel (and Esc) is the
-                # safe no-op. Yes = reboot now, No = open Windows Update, Cancel = nothing.
+                # safe no-op. Yes = reboot now, Cancel = nothing.
+                # v1.25.0 - "No" now RUNS the Windows Update driver method
+                # (Install-DriversViaWindowsUpdate) instead of just opening the
+                # Settings app. We're on the worker thread here, so the call is
+                # inline with full progress/Cancel support.
                 $msgText += "`n`n$stillMissing driver(s) still missing. Would you like to reboot?`n`n" +
                             "  - Yes:     reboot now to finish installing drivers`n" +
-                            "  - No:      open Windows Update to search for the rest`n" +
+                            "  - No:      run Windows Update to fetch the remaining drivers`n" +
                             "  - Cancel:  do nothing"
                 $result = Show-TopMostMessageBox $msgText "Installation Complete" "YesNoCancel" "Information"
                 if ($result -eq [System.Windows.Forms.DialogResult]::Yes) {
                     Restart-Computer -Force
                 } elseif ($result -eq [System.Windows.Forms.DialogResult]::No) {
-                    Open-WindowsUpdate
+                    Invoke-WindowsUpdateDriverRunInteractive | Out-Null
                     Set-ButtonIdle
                 } else {
                     Set-ButtonIdle
@@ -8049,10 +8192,12 @@ function Start-Install {
             $msgText = "Driver installation failed or no pack was found.`nCheck the log:`n`n$LogFile`n`nReport: $ReportFile"
             # v1.12.0 - Add Windows Update prompt if drivers still missing
             if ($PromptWindowsUpdate -and $stillMissing -gt 0) {
-                $msgText += "`n`n$stillMissing drivers still missing.`nWould you like to open Windows Update to search for additional drivers?"
+                # v1.25.0 - "Yes" runs the Windows Update driver method inline
+                # (worker thread) rather than only launching the Settings app.
+                $msgText += "`n`n$stillMissing drivers still missing.`nWould you like to run Windows Update to search for the remaining drivers?"
                 $result = Show-TopMostMessageBox $msgText "Installation Failed" "YesNo" "Warning"
                 if ($result -eq [System.Windows.Forms.DialogResult]::Yes) {
-                    Open-WindowsUpdate
+                    Invoke-WindowsUpdateDriverRunInteractive | Out-Null
                     Set-ButtonIdle
                 } else {
                     Set-ButtonIdle
@@ -8198,6 +8343,11 @@ function Invoke-UiOp {
             $cancelButton.Enabled   = $true
             $cancelButton.BackColor = $ColorDanger
             $cancelButton.ForeColor = [System.Drawing.Color]::White
+            # v1.25.0 - the WU button shares the single worker runspace, so it
+            # must grey out for the duration of any run (install or WU).
+            $wuButton.Enabled       = $false
+            $wuButton.BackColor     = $ColorMutedBg
+            $wuButton.ForeColor     = $ColorDisabledFg
             # Reset section dots back to muted - they light up as spinners fire
             $dlStatusDot.ForeColor      = $ColorMuted
             $exStatusDot.ForeColor      = $ColorMuted
@@ -8210,6 +8360,10 @@ function Invoke-UiOp {
             $cancelButton.Enabled   = $false
             $cancelButton.BackColor = $ColorMutedBg
             $cancelButton.ForeColor = $ColorDisabledFg
+            # v1.25.0 - re-arm the Windows Update button alongside Install.
+            $wuButton.Enabled       = $true
+            $wuButton.BackColor     = $ColorAccent
+            $wuButton.ForeColor     = [System.Drawing.Color]::White
         }
         'missing' {
             # Stored UI-side: Show-MissingDevicesWindow (link click) reads these
@@ -8229,14 +8383,18 @@ function Invoke-UiOp {
     }
 }
 
-function Start-WorkerInstall {
-    # Launch the install in a background STA runspace. The snapshot approach:
+function Start-Worker {
+    # v1.25.0 - Launch $Entry in a background STA runspace. The snapshot approach:
     # every function and (nearly) every variable currently visible is copied
     # into an InitialSessionState, so the worker sees the same world the main
     # runspace would have - including param overrides, catalogs, log paths,
     # and the shared $UiQueue/$UiSync objects (same instances, thread-safe).
     # Control references ride along too, but the worker-side helpers never
     # touch them (all UI mutation is enqueued back to this thread).
+    # $Entry is the name of the worker-side entry function to invoke
+    # ('Invoke-StartInstallSafe' for a full run, 'Invoke-WindowsUpdateOnlySafe'
+    # for the Windows-Update-only run behind the new button).
+    param([string]$Entry = 'Invoke-StartInstallSafe')
     if ($script:WorkerPS) { return }   # a run is already in flight
     $script:UiSync['CancelRequested'] = $false
     $script:CancelRequested           = $false
@@ -8249,7 +8407,7 @@ function Start-WorkerInstall {
     }
     $skipVars = @(
         # worker bookkeeping + this function's locals
-        'WorkerPS','WorkerHandle','WorkerRunspace','UiTimer','iss','fn','skipVars','v',
+        'WorkerPS','WorkerHandle','WorkerRunspace','UiTimer','iss','fn','skipVars','v','Entry',
         # automatics / readonly / host plumbing that must not be overridden
         '_','null','true','false','input','args','foreach','switch','PSItem','Matches',
         'MyInvocation','PSBoundParameters','PSCommandPath','PSScriptRoot','StackTrace',
@@ -8276,9 +8434,14 @@ function Start-WorkerInstall {
     $script:WorkerRunspace = $rs
     $script:WorkerPS       = [PowerShell]::Create()
     $script:WorkerPS.Runspace = $rs
-    $null = $script:WorkerPS.AddScript('Invoke-StartInstallSafe')
+    $null = $script:WorkerPS.AddScript($Entry)
     $script:WorkerHandle = $script:WorkerPS.BeginInvoke()
 }
+
+# v1.25.0 - thin wrappers so existing call sites read the same and the button
+# handlers stay declarative. Both funnel through Start-Worker's single-run guard.
+function Start-WorkerInstall       { Start-Worker -Entry 'Invoke-StartInstallSafe' }
+function Start-WorkerWindowsUpdate { Start-Worker -Entry 'Invoke-WindowsUpdateOnlySafe' }
 
 # =========================
 # WIRE UP + LAUNCH
@@ -8327,6 +8490,9 @@ if ($Headless) {
     })
 
     $button.Add_Click({ Start-WorkerInstall })
+
+    # v1.25.0 - run the Windows Update driver method on its own worker.
+    $wuButton.Add_Click({ Start-WorkerWindowsUpdate })
 
     $cancelButton.Add_Click({
         if ($cancelButton.Enabled) {
