@@ -1,4 +1,4 @@
-﻿# =============================================================
+# =============================================================
 # Install-Drivers-auto.ps1
 # Version: 1.25.0 (keep in sync with $SCRIPT_VERSION below)
 # Author:  skermiebroTech
@@ -62,7 +62,8 @@
 # v1.25.0 - Windows Update driver method exposed in the UI. The WUA driver
 #           search (Install-DriversViaWindowsUpdate) already ran automatically
 #           as an end-of-run fallback; this surfaces it as an operator-driven
-#           action too.
+#           action too. (Built on v1.24.2 - all new controls/text are pure
+#           ASCII; see the KEEP THIS FILE PURE ASCII note below.)
 #           (1) New "Run Windows Update" button on the main window (full-width
 #               secondary action below Install/Cancel). It launches the WUA
 #               driver search on the same background STA runspace the install
@@ -79,6 +80,18 @@
 #               now delegate to a generic Start-Worker; the WU run/report/
 #               reboot-offer logic lives in Invoke-WindowsUpdateDriverRun(
 #               Interactive), reused by both the button and the dialogs.
+# v1.24.2 - ASCII-only source file; replaces the v1.24.1 BOM fix (item 5 below).
+#           The BOM broke the irm|iex one-liner on Windows PowerShell 5.1: irm
+#           returns the UTF-8 BOM as a literal U+FEFF char, and 5.1's tokenizer
+#           does NOT treat it as whitespace (PS7 does). Line 1 then isn't a
+#           comment, so param() is no longer the first statement and every
+#           parameter default fails with InvalidLeftHandSide. Fix: file saved
+#           UTF-8 WITHOUT BOM, and every non-ASCII GUI glyph (braille spinner
+#           frames, status dots, ellipses, middle-dot title separator) is built
+#           at runtime via [char]. Pure-ASCII bytes decode identically under
+#           every host and encoding, so irm|iex, -File on a clone, and the
+#           elevated -File relaunch all render correctly.
+#           KEEP THIS FILE PURE ASCII - do not paste literal glyphs into it.
 # v1.24.1 - Fixes from the first full on-hardware test pass (Latitude
 #           7410 / SKU 09BE test box, plus live-CatalogPC unit tests of the
 #           v1.24.0 matcher helpers):
@@ -115,14 +128,15 @@
 #               short retry to ride out transient open-collisions.
 #           (5) Saved the file with a UTF-8 BOM. Without one, Windows
 #               PowerShell 5.1 reads "-File" runs as ANSI, so every non-ASCII
-#               glyph was mojibake: GUI title "Dell Inc. Â· Latitude 7410"
+#               glyph was mojibake: GUI title "Dell Inc. <garbled dot> Latitude 7410"
 #               (seen in the on-hardware GUI smoke test), spinner braille
-#               frames, the "●" status dots and "…" labels. The irm|iex
+#               frames, the status dots and "Waiting..." labels. The irm|iex
 #               Win+R path decodes UTF-8 and was always correct - but the
 #               v1.17.0 elevation relaunch uses -File on the local copy, so
 #               every elevated GUI session had the garbled variants. A
 #               leading BOM is treated as whitespace by the tokenizer, so
-#               the irm|iex path is unaffected.
+#               the irm|iex path is unaffected. (WRONG: that whitespace rule is
+#               PS7-only; on PS 5.1 the BOM broke irm|iex - see v1.24.2.)
 # v1.24.0 - Dell individual mode: SKU-relaxed catalog retry (field report:
 #           Latitude 7430 / SKU 0B0B, run 20260709_105131 - ONE missing device,
 #           the AX211 Wi-Fi at PCI\VEN_8086&DEV_51F0, triggered the full 1.4GB
@@ -876,7 +890,7 @@ if ($Silent) { $Headless = $true }
 $SCRIPT_VERSION = "1.25.0"
 
 # =============================================================
-$SpinnerFrames   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
+$SpinnerFrames   = @(0x280B,0x2819,0x2839,0x2838,0x283C,0x2834,0x2826,0x2827,0x2807,0x280F | ForEach-Object { [string][char]$_ })  # braille spinner frames via [char] - source must stay pure ASCII (v1.24.2)
 $SpinnerIndex    = 0
 $CancelRequested = $false
 
@@ -1045,7 +1059,7 @@ $subtitle.AutoSize  = $true
 $subtitle.Font      = $FontSubtitle
 $subtitle.ForeColor = $ColorTextMid
 $subtitle.Location  = New-Object System.Drawing.Point(16, 56)
-$subtitle.Text      = "Detecting hardware…"
+$subtitle.Text      = "Detecting hardware$([char]0x2026)"
 $subtitle.UseCompatibleTextRendering = $false
 $form.Controls.Add($subtitle)
 
@@ -1062,7 +1076,7 @@ $form.Controls.Add($versionLabel)
 # =========================
 # CONSOLE / STATUS CARD
 # Dark console box wrapped in a faint border so it reads as a "card".
-# The status box is a CHILD of the border panel, not a sibling on the form —
+# The status box is a CHILD of the border panel, not a sibling on the form -
 # v1.11.0 fix: siblings on $form fight over Z-order (first-added wins in
 # WinForms), which made the border panel render OVER the textbox and the
 # whole console appeared as a grey rectangle.
@@ -1095,7 +1109,7 @@ $statusCardBorder.Controls.Add($statusBox)        # CHILD of the panel - no Z-or
 # Variable names are preserved from the pre-v1.11.0 layout so the helpers
 # (SetDownload, SetExtract, Step-*Spinner, Stop-*Spinner, Test-Cancelled)
 # work without modification. New variables introduced for the redesign:
-#   $dlStatusDot / $exStatusDot / $overallStatusDot   - small "●" labels
+#   $dlStatusDot / $exStatusDot / $overallStatusDot   - small status-dot ([char]0x25CF) labels
 #   $dlHeaderLabel / $exHeaderLabel / $overallHeaderLabel
 #     (replaces $dlGroupBox.Text / $exGroupBox.Text / $overallGroupBox.Text;
 #      five external call sites that wrote to $exGroupBox.Text have been
@@ -1107,7 +1121,7 @@ $dlStatusDot           = New-Object System.Windows.Forms.Label
 $dlStatusDot.AutoSize  = $true
 $dlStatusDot.Font      = $FontStatusDot
 $dlStatusDot.ForeColor = $ColorMuted
-$dlStatusDot.Text      = "●"
+$dlStatusDot.Text      = "$([char]0x25CF)"
 $dlStatusDot.Location  = New-Object System.Drawing.Point(28, 322)
 $dlStatusDot.UseCompatibleTextRendering = $false
 $form.Controls.Add($dlStatusDot)
@@ -1136,7 +1150,7 @@ $dlLabel.Size      = New-Object System.Drawing.Size(396, 18)
 $dlLabel.Location  = New-Object System.Drawing.Point(188, 326)
 $dlLabel.Font      = $FontMonoSm
 $dlLabel.ForeColor = $ColorTextHi
-$dlLabel.Text      = "Waiting…"
+$dlLabel.Text      = "Waiting$([char]0x2026)"
 $dlLabel.TextAlign = "MiddleRight"
 $dlLabel.UseCompatibleTextRendering = $false
 $form.Controls.Add($dlLabel)
@@ -1155,7 +1169,7 @@ $exStatusDot           = New-Object System.Windows.Forms.Label
 $exStatusDot.AutoSize  = $true
 $exStatusDot.Font      = $FontStatusDot
 $exStatusDot.ForeColor = $ColorMuted
-$exStatusDot.Text      = "●"
+$exStatusDot.Text      = "$([char]0x25CF)"
 $exStatusDot.Location  = New-Object System.Drawing.Point(28, 376)
 $exStatusDot.UseCompatibleTextRendering = $false
 $form.Controls.Add($exStatusDot)
@@ -1184,7 +1198,7 @@ $exLabel.Size      = New-Object System.Drawing.Size(396, 18)
 $exLabel.Location  = New-Object System.Drawing.Point(188, 380)
 $exLabel.Font      = $FontMonoSm
 $exLabel.ForeColor = $ColorTextHi
-$exLabel.Text      = "Waiting…"
+$exLabel.Text      = "Waiting$([char]0x2026)"
 $exLabel.TextAlign = "MiddleRight"
 $exLabel.UseCompatibleTextRendering = $false
 $form.Controls.Add($exLabel)
@@ -1203,7 +1217,7 @@ $overallStatusDot           = New-Object System.Windows.Forms.Label
 $overallStatusDot.AutoSize  = $true
 $overallStatusDot.Font      = $FontStatusDot
 $overallStatusDot.ForeColor = $ColorMuted
-$overallStatusDot.Text      = "●"
+$overallStatusDot.Text      = "$([char]0x25CF)"
 $overallStatusDot.Location  = New-Object System.Drawing.Point(28, 430)
 $overallStatusDot.UseCompatibleTextRendering = $false
 $form.Controls.Add($overallStatusDot)
@@ -7839,7 +7853,7 @@ function Start-Install {
         try { [System.Windows.Forms.Clipboard]::SetText($model) } catch {}
         # v1.11.0 - title stays static; the detected model lives in the subtitle row
         # for a cleaner header hierarchy. The window title bar matches the subtitle.
-        Set-UiTitle "$manufacturer  ·  $model"
+        Set-UiTitle "$manufacturer  $([char]0xB7)  $model"
     }
 
     $overrideNote = if ($mfgOverridden -or $modelOverridden) { "  [OVERRIDDEN via param]" } else { "  (from WMI)" }
@@ -7991,7 +8005,7 @@ function Start-Install {
             # Update analytics model to the picked Surface model
             $script:AnalyticsManufacturer = "Microsoft"
             $script:AnalyticsModel        = $pickedModel
-            Set-UiTitle "Microsoft  ·  $pickedModel"
+            Set-UiTitle "Microsoft  $([char]0xB7)  $pickedModel"
             Set-ButtonRunning
             if (-not (Assert-Curl)) { Send-AnalyticsEvent -Result "failure"; Set-ButtonIdle; return }
             $success = Start-MicrosoftSurfaceDriverInstall -DriverRoot $driverRoot -ModelName $pickedModel
