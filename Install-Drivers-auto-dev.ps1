@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.25.0 (keep in sync with $SCRIPT_VERSION below)
+# Version: 1.26.0 (keep in sync with $SCRIPT_VERSION below)
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -59,6 +59,23 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.26.0 - HP known-device rescue: a targeted last tier in the HP flow that
+#           installs a specific small SoftPaq for stubborn devices the catalog
+#           and full-pack paths can miss - and that Windows Update has no driver
+#           for. Field trigger: HP ProBook 635 Aero G7 (run 20260713_090835),
+#           Synaptics FS7605 fingerprint sensor (USB\VID_06CB&PID_00DF, error 43)
+#           left unresolved. The auto run was cancelled early and the operator's
+#           two follow-up Windows Update searches then returned nothing (the
+#           FS76xx fingerprint driver is not on WU). The HPIA reference catalog
+#           for this model (SystemID 8830) maps that hardware ID to sp144777
+#           (Synaptics FS7600 WBF Touch Fingerprint Driver v6.0.117.1110, 2.5 MB);
+#           the rescue downloads and SHA256-verifies just that SoftPaq.
+#           (1) New Invoke-HpKnownDeviceRescue + $script:HpKnownDeviceSoftpaqs
+#               table (HardwareID substring -> curated SoftPaq w/ URL + SHA256).
+#           (2) Runs after the full-pack tier in Start-HpDriverInstall (the
+#               matrix body is now Start-HpFullPackInstall). Idempotent: it acts
+#               only on devices still in a problem state, so it is a no-op once
+#               the normal path has already bound the driver. Honours cancel.
 # v1.25.0 - Windows Update driver method exposed in the UI. The WUA driver
 #           search (Install-DriversViaWindowsUpdate) already ran automatically
 #           as an end-of-run fallback; this surfaces it as an operator-driven
@@ -887,7 +904,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.25.0"
+$SCRIPT_VERSION = "1.26.0"
 
 # =============================================================
 $SpinnerFrames   = @(0x280B,0x2819,0x2839,0x2838,0x283C,0x2834,0x2826,0x2827,0x2807,0x280F | ForEach-Object { [string][char]$_ })  # braille spinner frames via [char] - source must stay pure ASCII (v1.24.2)
@@ -4732,6 +4749,36 @@ function Start-DellDriverInstall {
 $script:HpCatalogBudgetMB = 800   # tuning knob - over this, prefer full pack
 $script:HpHpUpSuccessCodes = @(0, 1, 1641, 3010)  # HPUP/HpFirmwareUpdRec exit-OK set
 
+# v1.26.0 - Curated "known-stubborn HP device -> specific SoftPaq" table used by
+# Invoke-HpKnownDeviceRescue. These are devices that the catalog/full-pack paths
+# can leave unresolved (cancelled or failed pack download) AND that Windows
+# Update has no driver for, so a re-run alone does not reliably fix them.
+#   Match  : uppercase HardwareID/CompatibleID substring to test each still-
+#            missing device against (contains match).
+#   SpId   : HP SoftPaq id (also the download filename stem).
+#   Url    : direct HP FTP url. SHA256 is verified before install, so a silently
+#            re-released SoftPaq fails safe (mismatch -> skip) rather than
+#            installing something unexpected.
+# Values below were taken from the HPIA reference catalog for SystemID 8830 and
+# verified byte-for-byte against the live SoftPaq on ftp.hp.com (2026-07-13).
+# The FS76xx sensor family (PIDs 00C0/00C4/00D8/00DF/00E9/00F0/0103/0104) all map
+# to sp144777 in that catalog; we key on the observed FS7605 id and add siblings
+# here only as they are confirmed in the field.
+$script:HpKnownDeviceSoftpaqs = @(
+    @{
+        Match         = 'USB\VID_06CB&PID_00DF'
+        SpId          = 'sp144777'
+        Name          = 'Synaptics FS7600 WBF Touch Fingerprint Driver'
+        Version       = '6.0.117.1110'
+        Category      = 'Driver - Keyboard, Mouse and Input Devices'
+        Url           = 'https://ftp.hp.com/pub/softpaq/sp144501-145000/sp144777.exe'
+        SHA256        = 'F009CC64AE92EBD6F32CE6348E5E5171E2E0EB1E4A628BC96913A5C792C0071A'
+        Size          = 2583392
+        SilentInstall = '"InstallCmdWrapper.exe"'
+        Why           = 'Synaptics FS7605 fingerprint sensor (HP ProBook 6xx Aero G7); not on Windows Update'
+    }
+)
+
 function Get-HpSystemId {
     # The 4-char hex platform ID is in Win32_BaseBoard.Product per HPIA docs.
     try {
@@ -5356,6 +5403,97 @@ function Start-HpReferenceCatalogInstall {
 # =========================
 # HP
 # =========================
+function Invoke-HpKnownDeviceRescue {
+    # v1.26.0 - Targeted last tier for the HP flow. For every device still in a
+    # problem state that matches $script:HpKnownDeviceSoftpaqs, download and
+    # install that one small SoftPaq, then kick the device so it re-binds. This
+    # exists because the catalog/full-pack paths can be skipped, cancelled, or
+    # fail their download, and Windows Update has no driver for these devices
+    # (e.g. the Synaptics FS76xx fingerprint sensor). Reuses Install-HpSoftpaq
+    # (download -> SHA256 verify -> extract -> SilentInstall) so behaviour and
+    # analytics recording match the catalog path exactly.
+    #
+    # Returns $true if at least one SoftPaq installed OK, else $false.
+    param([string]$DriverRoot)
+
+    if (Test-CancelFlag) { return $false }
+    if (-not $script:HpKnownDeviceSoftpaqs -or @($script:HpKnownDeviceSoftpaqs).Count -eq 0) { return $false }
+
+    $missing = Get-HpMissingDevicesWithHwIds
+    if ($missing.Count -eq 0) { return $false }
+
+    # Match each still-missing device against the curated table. A SoftPaq is
+    # queued once even if several devices map to it; keep one device per SoftPaq
+    # so we can restart it after the install.
+    $queue = [ordered]@{}   # SpId -> @{ Entry = <table row>; Device = <missing dev> }
+    foreach ($dev in $missing) {
+        $ids = @()
+        if ($dev.HardwareIDs)   { $ids += @($dev.HardwareIDs) }
+        if ($dev.CompatibleIDs) { $ids += @($dev.CompatibleIDs) }
+        if ($dev.DeviceID)      { $ids += $dev.DeviceID }
+        $idsUpper = @($ids | Where-Object { $_ } | ForEach-Object { $_.ToUpper() })
+
+        foreach ($row in $script:HpKnownDeviceSoftpaqs) {
+            $needle = ([string]$row.Match).ToUpper()
+            if (-not $needle) { continue }
+            # Match is a literal substring - \, & and _ are not -like wildcards,
+            # and no curated Match contains * ? or [.
+            $hit = $false
+            foreach ($idU in $idsUpper) { if ($idU -like "*$needle*") { $hit = $true; break } }
+            if ($hit -and -not $queue.Contains($row.SpId)) {
+                $queue[$row.SpId] = @{ Entry = $row; Device = $dev }
+            }
+        }
+    }
+    if ($queue.Count -eq 0) { return $false }
+
+    Log ""
+    Log "=== HP KNOWN-DEVICE RESCUE: $($queue.Count) targeted SoftPaq(s) for stubborn device(s) ===" -Level "info"
+    if (-not (Test-Path $DriverRoot)) { New-Item -Path $DriverRoot -ItemType Directory -Force | Out-Null }
+
+    $installed = 0
+    $i = 0
+    foreach ($spId in @($queue.Keys)) {
+        $i++
+        if (Test-CancelFlag) { Log "  Cancelled."; break }
+        $entry = $queue[$spId].Entry
+        $dev   = $queue[$spId].Device
+        Log "  Rescue [$i/$($queue.Count)]: $($dev.Name)"
+        Log "    -> $spId  $($entry.Name)  ($($entry.Why))"
+
+        # Build the SoftPaq hashtable Install-HpSoftpaq expects - same shape the
+        # catalog indexer produces (Build-HpSolutionIndex + Id).
+        $sp = @{
+            Id            = $spId
+            Name          = $entry.Name
+            Version       = $entry.Version
+            Category      = $entry.Category
+            Url           = $entry.Url
+            SHA256        = $entry.SHA256
+            Size          = $entry.Size
+            SilentInstall = $entry.SilentInstall
+        }
+        if (Install-HpSoftpaq -Sp $sp -DriverRoot $DriverRoot -Index $i -Total $queue.Count) {
+            $installed++
+            # Kick the device so it re-enumerates and binds the fresh driver
+            # without waiting for the end-of-run rescan or a reboot.
+            try {
+                $null = pnputil /restart-device "$($dev.DeviceID)" 2>&1
+                Start-Sleep -Seconds 2
+                if ([int](Get-PnpDevice -InstanceId $dev.DeviceID -EA Stop).ConfigManagerErrorCode -eq 0) {
+                    Log "    '$($dev.Name)' cleared - rescue succeeded."
+                } else {
+                    Log "    Driver installed; device still settling (end-of-run rescan or reboot may finish it)."
+                }
+            } catch {
+                Log "    Driver installed; device not enumerable right now (may re-appear on the rescan)."
+            }
+        }
+    }
+    Log "  Known-device rescue: installed $installed of $($queue.Count) targeted SoftPaq(s)."
+    return ($installed -gt 0)
+}
+
 function Start-HpDriverInstall {
     param([string]$DriverRoot, [string]$ModelName)
 
@@ -5372,6 +5510,24 @@ function Start-HpDriverInstall {
     if ($catalogResult -eq $true)  { return $true }
     if ($catalogResult -eq $false) { return $false }
     Log "Falling back to full-pack driver matrix..."
+    $packResult = Start-HpFullPackInstall -DriverRoot $DriverRoot -ModelName $ModelName
+
+    # v1.26.0 - After the full-pack tier, run the targeted known-device rescue so
+    # stubborn devices (e.g. the Synaptics fingerprint sensor) that the pack path
+    # missed - or that a failed/absent pack left unaddressed - still get their
+    # specific SoftPaq. No-op when nothing in the curated table is still missing.
+    # Skipped on an in-flight cancel so we don't start a fresh download after the
+    # operator asked to stop.
+    if (Test-CancelFlag) { return $packResult }
+    $rescued = Invoke-HpKnownDeviceRescue -DriverRoot $DriverRoot
+    return ($packResult -or $rescued)
+}
+
+function Start-HpFullPackInstall {
+    # v1.26.0 - the HP Driver Pack Matrix scrape + full-pack install, extracted
+    # verbatim from Start-HpDriverInstall so the known-device rescue tier can run
+    # after it. Returns $true on install success, $false on failure/cancel.
+    param([string]$DriverRoot, [string]$ModelName)
 
     $osBuild = $null; $isWin11 = $false
     try {
