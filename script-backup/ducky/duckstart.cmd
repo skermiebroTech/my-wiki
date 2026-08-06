@@ -39,6 +39,12 @@ exit /b
 # Set the default audio render (output) device whose name contains "speaker".
 # Uses the built-in Windows IPolicyConfig COM interface - no extra tools and no
 # administrator rights required.
+#
+# The coclass -> interface cast is done inside a compiled C# helper on purpose.
+# Windows PowerShell 5.1 cannot cast the strongly-typed RCW of a [ComImport]
+# coclass to an unrelated COM interface - "[IPolicyConfig](New-Object
+# CPolicyConfigClient)" throws "Cannot convert ... to type IPolicyConfig".
+# Performing the cast in C# does a proper COM QueryInterface, which works.
 # ---------------------------------------------------------------------------
 Add-Type -TypeDefinition @'
 using System;
@@ -63,6 +69,23 @@ public interface IPolicyConfig
 
 [ComImport, Guid("870af99c-171d-4f9e-af0d-e63df40c2bc9")]
 public class CPolicyConfigClient { }
+
+public static class AudioSwitcher
+{
+    // Sets deviceId as the default endpoint for Console(0), Multimedia(1) and
+    // Communications(2). Returns 0 on full success, else the last HRESULT.
+    public static int SetDefault(string deviceId)
+    {
+        IPolicyConfig cfg = (IPolicyConfig)(new CPolicyConfigClient());
+        int last = 0;
+        for (int role = 0; role < 3; role++)
+        {
+            int hr = cfg.SetDefaultEndpoint(deviceId, role);
+            if (hr != 0) last = hr;
+        }
+        return last;
+    }
+}
 '@
 
 $base  = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Render'
@@ -86,9 +109,27 @@ foreach ($dev in Get-ChildItem $base -ErrorAction SilentlyContinue) {
 }
 
 if ($target) {
-    $cfg = [IPolicyConfig](New-Object CPolicyConfigClient)
-    foreach ($role in 0, 1, 2) { [void]$cfg.SetDefaultEndpoint($target.Id, $role) }  # Console, Multimedia, Communications
-    Write-Host "Default audio output set to: $($target.Name)"
+    $hr = [AudioSwitcher]::SetDefault($target.Id)   # Console, Multimedia, Communications
+    if ($hr -eq 0) {
+        Write-Host "Default audio output set to: $($target.Name)"
+        # Play a short confirmation chime out of the newly selected speakers.
+        # Brief pause lets the endpoint switch settle so the sound routes there.
+        # PlaySync keeps this (hidden) process alive until the clip finishes.
+        Start-Sleep -Milliseconds 400
+        try {
+            $wav = Join-Path $env:WINDIR 'Media\tada.wav'
+            if (Test-Path -LiteralPath $wav) {
+                (New-Object System.Media.SoundPlayer $wav).PlaySync()
+            } else {
+                [System.Media.SystemSounds]::Asterisk.Play()
+                Start-Sleep -Milliseconds 700
+            }
+        } catch {
+            try { [console]::Beep(880, 300) } catch { }
+        }
+    } else {
+        Write-Host ("Failed to set default audio output (HRESULT 0x{0})." -f $hr.ToString('X8'))
+    }
 } else {
     Write-Host "No active output device with 'speaker' in the name was found."
 }
