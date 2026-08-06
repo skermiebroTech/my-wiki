@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.24.2 (keep in sync with $SCRIPT_VERSION below)
+# Version: 1.27.0 (keep in sync with $SCRIPT_VERSION below)
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -16,6 +16,9 @@
 #   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -Silent -NoAnalytics
 #   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -MaxParallelDownloads 5
 #   powershell -ExecutionPolicy Bypass -File Install-Drivers-auto.ps1 -PromptWindowsUpdate:$false
+#
+# Run from Win+R with the Auto-reboot toggle pre-checked (reboots on success):
+#   powershell -WindowStyle Hidden -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto.ps1))) -AutoReboot"
 #
 # Parameters:
 #   -Manufacturer  Override WMI manufacturer detection (Dell, HP, Lenovo, Microsoft, Dynabook)
@@ -45,6 +48,15 @@
 #                  driver pack downloads.
 #   -SkipInstall   Download and extract only, skip pnputil driver installation
 #   -SkipCleanup   Keep C:\DRIVERS after run for inspection
+#   -AutoReboot    v1.27.0 - pre-check the GUI "Auto-reboot" toggle (off by
+#                  default). While the toggle is checked, a SUCCESSFUL run skips
+#                  the completion dialog and schedules a restart instead
+#                  (shutdown /r /t 15 - abort with shutdown /a). The operator
+#                  can flip the toggle any time before the run finishes. In
+#                  headless/silent mode there is no UI, so the switch alone
+#                  decides. Failed, cancelled, and -TestMode runs never
+#                  auto-reboot. Does NOT force headless mode - the GUI stays
+#                  visible so the operator can watch progress.
 #   -PromptWindowsUpdate  v1.12.1 - ENABLED BY DEFAULT. When drivers remain missing
 #                  at end of install, offer to open Windows Update to search for
 #                  additional drivers. In GUI mode, shows a Yes/No/Cancel dialog.
@@ -59,6 +71,24 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.27.0 - Auto-reboot toggle. New "Auto-reboot" checkbox on the GUI button
+#           row, OFF by default; while checked, a SUCCESSFUL run skips both
+#           completion dialogs (the plain Yes/No reboot prompt and the v1.16.1
+#           Yes/No/Cancel Windows Update variant) and schedules a restart via
+#           shutdown /r /t 15 (abort with shutdown /a). New -AutoReboot switch
+#           pre-checks the toggle; it is deliberately EXCLUDED from the
+#           auto-headless heuristic so the Win+R one-liner keeps its GUI.
+#           Headless runs have no checkbox - the switch alone decides - and
+#           it replaces the "Reboot when ready" console note and skips the
+#           Open-WindowsUpdate call (pointless when the box is going down).
+#           Checkbox state reaches the worker runspace via $UiSync['AutoReboot']
+#           (same pattern as the v1.18.0 sound toggle - the worker must never
+#           read controls directly). Failure, cancel, and -TestMode paths
+#           never reboot - a broken run keeps the machine up for triage.
+#           Layout: Auto-scroll checkbox nudged 126->112 and Install button
+#           slimmed 146->132 @ x=300 to fit the third checkbox at x=202.
+#           Version jumps 1.24.2 -> 1.27.0 to stay clear of the dev copy's
+#           1.25.0/1.26.0, keeping script_version unambiguous in analytics.
 # v1.24.2 - ASCII-only source file; replaces the v1.24.1 BOM fix. The BOM broke
 #           the irm|iex one-liner on Windows PowerShell 5.1: irm returns the
 #           UTF-8 BOM as a literal U+FEFF char, and 5.1's tokenizer does NOT
@@ -804,11 +834,14 @@ param(
     [int]$MaxParallelDownloads = 3,  # v1.11.0 - cap for parallel downloads in HP catalog / Dell individual paths.
     [switch]$SkipInstall,
     [switch]$SkipCleanup,
+    [switch]$AutoReboot,    # v1.27.0 - pre-check the GUI Auto-reboot toggle (headless: reboot on success). Never fires on failure/cancel/-TestMode.
     [bool]$PromptWindowsUpdate = $true  # v1.12.1 - enabled by default: offer Windows Update if drivers still missing
 )
 
 # Auto-enable headless when any override param is passed.
 # Silent always implies Headless (no GUI is even more "headless" than -Headless alone).
+# v1.27.0 - -AutoReboot is deliberately NOT in this list: it only changes the
+# end-of-run behavior, so the GUI should stay visible for the typical bench run.
 if ($Manufacturer -or $Model -or $MachineType -or $DriverRoot -ne "C:\DRIVERS" `
     -or $SkipInstall -or $SkipCleanup -or $Silent -or $TestMode -or $Diagnostic -or $NoAnalytics -or $PromptWindowsUpdate -eq $false) {
     $Headless = $true
@@ -823,7 +856,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.24.2"
+$SCRIPT_VERSION = "1.27.0"
 
 # =============================================================
 $SpinnerFrames   = @(0x280B,0x2819,0x2839,0x2838,0x283C,0x2834,0x2826,0x2827,0x2807,0x280F | ForEach-Object { [string][char]$_ })  # braille spinner frames via [char] - source must stay pure ASCII (v1.24.2)
@@ -839,7 +872,7 @@ $CancelRequested = $false
 #             worker runspace; the elevation relaunch needs the real file path.
 $script:ScriptFilePath = $PSCommandPath
 $script:UiQueue = New-Object 'System.Collections.Concurrent.ConcurrentQueue[hashtable]'
-$script:UiSync  = [hashtable]::Synchronized(@{ CancelRequested = $false; SoundEnabled = $true })
+$script:UiSync  = [hashtable]::Synchronized(@{ CancelRequested = $false; SoundEnabled = $true; AutoReboot = [bool]$AutoReboot })  # v1.27.0 - AutoReboot mirrors the GUI toggle (headless: fixed at the switch value)
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -1235,7 +1268,7 @@ $autoScrollCheckbox.Checked           = $true
 $autoScrollCheckbox.Font              = $FontUI
 $autoScrollCheckbox.ForeColor         = $ColorTextHi
 $autoScrollCheckbox.AutoSize          = $true
-$autoScrollCheckbox.Location          = New-Object System.Drawing.Point(126, 538)
+$autoScrollCheckbox.Location          = New-Object System.Drawing.Point(112, 538)   # v1.27.0 - was 126; nudged left to fit the Auto-reboot toggle
 $autoScrollCheckbox.UseCompatibleTextRendering = $false
 $autoScrollCheckbox.Add_CheckedChanged({
     # Sync the script-scope flag with the checkbox state. Set-AutoScroll
@@ -1247,10 +1280,28 @@ $autoScrollCheckbox.Add_CheckedChanged({
 })
 $form.Controls.Add($autoScrollCheckbox)
 
+# v1.27.0 - Auto-reboot toggle. Off by default; the -AutoReboot switch
+# pre-checks it. While checked, a successful run skips the completion dialog
+# and schedules a 15-second restart (shutdown /a to abort).
+$autoRebootCheckbox                   = New-Object System.Windows.Forms.CheckBox
+$autoRebootCheckbox.Text              = "Auto-reboot"
+$autoRebootCheckbox.Checked           = [bool]$AutoReboot
+$autoRebootCheckbox.Font              = $FontUI
+$autoRebootCheckbox.ForeColor         = $ColorTextHi
+$autoRebootCheckbox.AutoSize          = $true
+$autoRebootCheckbox.Location          = New-Object System.Drawing.Point(202, 538)
+$autoRebootCheckbox.UseCompatibleTextRendering = $false
+$autoRebootCheckbox.Add_CheckedChanged({
+    # Mirror into the sync table - the completion path runs on the worker
+    # runspace and must not read the checkbox control directly (see Play-Sound).
+    $script:UiSync['AutoReboot'] = $autoRebootCheckbox.Checked
+})
+$form.Controls.Add($autoRebootCheckbox)
+
 $button            = New-Object System.Windows.Forms.Button
 $button.Text       = "Install Drivers"
-$button.Size       = New-Object System.Drawing.Size(146, 36)
-$button.Location   = New-Object System.Drawing.Point(290, 530)
+$button.Size       = New-Object System.Drawing.Size(132, 36)   # v1.27.0 - was 146x36 @ 290; slimmed + shifted right for the Auto-reboot toggle
+$button.Location   = New-Object System.Drawing.Point(300, 530)
 $button.Font       = $FontButton
 $button.BackColor  = $ColorPrimary
 $button.ForeColor  = [System.Drawing.Color]::White
@@ -7568,9 +7619,17 @@ function Start-Install {
         # v1.18.0 - $PSCommandPath is empty inside the worker runspace; use the
         # value captured at top-of-script instead. Form close goes through the
         # UI queue (this code runs on the worker thread).
+        # v1.27.0 - forward the auto-reboot toggle state so the elevated copy
+        # starts with it pre-checked. Read via UiSync (worker-safe); the irm|iex
+        # fallback needs the scriptblock form because iex can't take parameters.
+        $fwdAutoReboot = [bool]$script:UiSync['AutoReboot']
         if ($script:ScriptFilePath) {
             Start-Process powershell `
-                "-ExecutionPolicy Bypass -File `"$($script:ScriptFilePath)`"" `
+                "-ExecutionPolicy Bypass -File `"$($script:ScriptFilePath)`"$(if ($fwdAutoReboot) { ' -AutoReboot' })" `
+                -Verb RunAs
+        } elseif ($fwdAutoReboot) {
+            Start-Process powershell `
+                "-WindowStyle Hidden -ExecutionPolicy Bypass -Command `"& ([scriptblock]::Create((irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto.ps1))) -AutoReboot`"" `
                 -Verb RunAs
         } else {
             Start-Process powershell `
@@ -7904,14 +7963,31 @@ function Start-Install {
         if ($script:Headless) {
             if (-not $script:Silent) {
                 Write-Host "SUCCESS: Drivers installed for $model.$missingLine"
-                Write-Host "Run complete. Reboot when ready."
+                if ($script:UiSync['AutoReboot']) {
+                    Write-Host "Run complete. Auto-reboot in 15 seconds (shutdown /a to abort)."
+                } else {
+                    Write-Host "Run complete. Reboot when ready."
+                }
                 Write-Host "Report: $ReportFile"
             }
-            # v1.12.0 - In headless mode with PromptWindowsUpdate, open Windows Update if drivers still missing
-            if ($PromptWindowsUpdate -and $stillMissing -gt 0 -and -not $script:Silent) {
+            # v1.27.0 - AutoReboot wins over the WU-open: no point launching
+            # Windows Update on a machine that is about to restart.
+            if ($script:UiSync['AutoReboot']) {
+                Log "Auto-reboot enabled - restarting in 15 seconds (shutdown /a to abort)."
+                shutdown.exe /r /t 15 /c "Driver installation complete - automatic restart. Run 'shutdown /a' to abort."
+            } elseif ($PromptWindowsUpdate -and $stillMissing -gt 0 -and -not $script:Silent) {
+                # v1.12.0 - In headless mode with PromptWindowsUpdate, open Windows Update if drivers still missing
                 Start-Sleep -Milliseconds 500
                 Open-WindowsUpdate
             }
+        } elseif ($script:UiSync['AutoReboot']) {
+            # v1.27.0 - Auto-reboot toggle checked: skip both completion dialogs
+            # and schedule the restart. Read the sync mirror, not the checkbox -
+            # this runs on the worker runspace (see Play-Sound). Set-ButtonIdle
+            # re-arms the UI in case the operator aborts via shutdown /a.
+            Log "Auto-reboot enabled - restarting in 15 seconds (shutdown /a to abort)."
+            Set-ButtonIdle
+            shutdown.exe /r /t 15 /c "Driver installation complete - automatic restart. Run 'shutdown /a' to abort."
         } else {
             $msgText = "Drivers installed successfully for:`n$model$missingLine`n`nReport saved to:`n$ReportFile"
             # v1.12.0 - Add Windows Update prompt if drivers still missing

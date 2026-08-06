@@ -16,6 +16,19 @@ powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.c
 !!! tip ""
     This command works without any prior software installation. `irm` (Invoke-RestMethod) fetches the script directly from GitHub and `iex` runs it in memory — no file is saved to disk.
 
+### Auto reboot
+
+The GUI has an **Auto-reboot** checkbox (off by default) next to *Sound FX* and *Auto-scroll*. While it is ticked, a **successful** run skips the "Reboot now?" completion dialog and schedules a restart via `shutdown /r /t 15` — a 15-second countdown you can abort with `shutdown /a`. Failed, cancelled, and test-mode runs never auto-reboot.
+
+To start with the toggle already ON, pass `-AutoReboot` (v1.27.0+). Because `iex` can't take parameters, the one-liner uses a script block instead:
+
+```powershell
+powershell -WindowStyle Hidden -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto.ps1))) -AutoReboot"
+```
+
+!!! note ""
+    `-AutoReboot` only pre-checks the toggle — the GUI still opens and you can untick it any time before the run finishes. In headless/silent runs (no GUI) the switch alone decides.
+
 ---
 
 ## How It Works
@@ -183,4 +196,4 @@ The log file is deleted automatically when the device is syspreped
 
 ---
 
-Author: Joel Skerman | Date: 07 May 2026 | Modified: 11 May 2026
+Author: Joel Skerman | Date: 07 May 2026 | Modified: 06 Aug 2026

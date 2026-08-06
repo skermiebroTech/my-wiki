@@ -4,6 +4,12 @@
 powershell -WindowStyle Hidden -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto.ps1 | iex"
 ```
 
+## Automatic one liner + auto reboot:
+Same as above but the **Auto-reboot** toggle starts ON — 15 seconds after a successful install the machine restarts itself (`shutdown /a` to abort). The toggle can still be unticked in the app before the run finishes. Failed or cancelled runs never reboot.
+```
+powershell -WindowStyle Hidden -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto.ps1))) -AutoReboot"
+```
+
 ## DEV Version (could be unstable)
 ```
 powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto-dev.ps1 | iex"
@@ -42,4 +48,4 @@ pnputil /add-driver "C:\SWSetup\*.inf" /subdirs /install
 ```
 
 ---
-Author: Joel Skerman | Date: 23 Apr 2026 | updated: 06 May 2026
+Author: Joel Skerman | Date: 23 Apr 2026 | updated: 06 Aug 2026
