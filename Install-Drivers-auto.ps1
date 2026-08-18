@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.27.0 (keep in sync with $SCRIPT_VERSION below)
+# Version: 1.28.0 (keep in sync with $SCRIPT_VERSION below)
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -71,6 +71,17 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.28.0 - TEMP RULE: Windows Update method runs FIRST. The WUA driver pass
+#           (Install-DriversViaWindowsUpdate) is hoisted ahead of the vendor
+#           driver-pack phase: it now runs right after the BEFORE snapshot, and
+#           the vendor phase only handles whatever WU leaves unresolved (skipped
+#           entirely when WU clears every missing device). When the first-pass
+#           completed, the end-of-run fallback chain drops its now-redundant WU
+#           tier and goes straight to the Microsoft Update Catalog scrape.
+#           Gated on -PromptWindowsUpdate (default on) and skipped under
+#           -SkipInstall / -TestMode / zero-missing-device runs. TO REVERT:
+#           set $script:TempRuleWuFirst = $false next to $SCRIPT_VERSION (or
+#           delete the blocks marked "TEMP RULE (v1.28.0)").
 # v1.27.0 - Auto-reboot toggle. New "Auto-reboot" checkbox on the GUI button
 #           row, OFF by default; while checked, a SUCCESSFUL run skips both
 #           completion dialogs (the plain Yes/No reboot prompt and the v1.16.1
@@ -856,7 +867,15 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.27.0"
+$SCRIPT_VERSION = "1.28.0"
+
+# =============================================================
+# TEMP RULE (v1.28.0): try the WINDOWS UPDATE method FIRST, before the vendor
+# driver-pack phase. Set to $false to restore the vendor-first order (WU then
+# reverts to its usual end-of-run fallback slot). Remove this variable and the
+# "TEMP RULE (v1.28.0)" blocks in Start-Install to retire the experiment.
+# =============================================================
+$script:TempRuleWuFirst = $true
 
 # =============================================================
 $SpinnerFrames   = @(0x280B,0x2819,0x2839,0x2838,0x283C,0x2834,0x2826,0x2827,0x2807,0x280F | ForEach-Object { [string][char]$_ })  # braille spinner frames via [char] - source must stay pure ASCII (v1.24.2)
@@ -7779,8 +7798,37 @@ function Start-Install {
         return
     }
 
+    # ------------------------------------------------------------------
+    # TEMP RULE (v1.28.0): WINDOWS UPDATE FIRST
+    # Run the Windows Update Agent driver pass BEFORE the vendor driver pack.
+    # If WU resolves every missing device the vendor phase below is skipped
+    # (no pack download at all); otherwise the normal vendor flow continues
+    # and picks up whatever WU left behind. Skipped when there is nothing
+    # missing (a zero-missing "run anyway" is a vendor-pack refresh request),
+    # under -SkipInstall (WU would install drivers on a download-only run),
+    # or with -PromptWindowsUpdate:$false.
+    # ------------------------------------------------------------------
+    $script:WuFirstPassCompleted = $false
+    $wuFirstResolvedAll          = $false
+    if ($script:TempRuleWuFirst -and $PromptWindowsUpdate -and -not $SkipInstall `
+        -and -not (Test-CancelFlag) -and $script:AnalyticsMissingBefore -gt 0) {
+        Log "TEMP RULE: trying the Windows Update method FIRST (before the vendor driver pack)."
+        $wuFirstFixed = [int](Install-DriversViaWindowsUpdate)
+        if (-not (Test-CancelFlag)) {
+            $script:WuFirstPassCompleted = $true
+            $remainingAfterWu = Get-MissingDriverCount
+            Log "TEMP RULE: WU-first pass installed $wuFirstFixed driver(s); $remainingAfterWu device(s) still missing."
+            if ($remainingAfterWu -eq 0) {
+                $wuFirstResolvedAll = $true
+                Log "TEMP RULE: Windows Update resolved every missing device - skipping the vendor driver-pack phase."
+            }
+        }
+    } elseif ($script:TempRuleWuFirst -and $script:AnalyticsMissingBefore -gt 0) {
+        Log "TEMP RULE: WU-first pass skipped ($(if (-not $PromptWindowsUpdate) {'-PromptWindowsUpdate:$false'} elseif ($SkipInstall) {'-SkipInstall set'} else {'cancel requested'}))."
+    }
+
     # Install 7-Zip for Dell and HP extraction (not needed for Lenovo or Surface)
-    if ($manufacturer -match "Dell|HP|Hewlett") {
+    if (-not $wuFirstResolvedAll -and $manufacturer -match "Dell|HP|Hewlett") {
         Log "Installing 7-Zip for fast extraction..."
         if (-not (Install-7Zip)) {
             Log "WARNING: 7-Zip unavailable - will fall back to vendor extractor."
@@ -7790,7 +7838,12 @@ function Start-Install {
     $driverRoot = $DriverRoot
     $success    = $false
 
-    if ($manufacturer -match "Dell") {
+    if ($wuFirstResolvedAll) {
+        # TEMP RULE (v1.28.0): nothing left for the vendor pack to fix.
+        SetDownload -Pct 100 -Label "Windows Update - complete"
+        SetExtract  -Pct 100 -Label "Skipped - not needed"
+        $success = $true
+    } elseif ($manufacturer -match "Dell") {
         if (-not (Assert-Curl)) { Send-AnalyticsEvent -Result "failure"; Set-ButtonIdle; return }
         $success = Start-DellDriverInstall -DriverRoot $driverRoot -ModelName $model
     } elseif ($manufacturer -match "HP|Hewlett") {
@@ -7885,7 +7938,13 @@ function Start-Install {
     if ($PromptWindowsUpdate -and -not (Test-CancelFlag) -and -not $script:TestMode `
         -and $script:AnalyticsMissingAfter -gt 0) {
         $fallbackFixed = 0
-        $fallbackFixed += [int](Install-DriversViaWindowsUpdate)
+        # TEMP RULE (v1.28.0): the WU tier already ran at the START of this run -
+        # skip the redundant re-search and go straight to the catalog scrape.
+        if ($script:WuFirstPassCompleted) {
+            Log "TEMP RULE: Windows Update tier already ran first - going straight to the Microsoft Update Catalog."
+        } else {
+            $fallbackFixed += [int](Install-DriversViaWindowsUpdate)
+        }
 
         # Only escalate to the catalog scrape if WU didn't already clear everything.
         if (-not (Test-CancelFlag) -and (Get-MissingDriverCount) -gt 0) {
