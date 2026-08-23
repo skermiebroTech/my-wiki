@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.28.0 (keep in sync with $SCRIPT_VERSION below)
+# Version: 1.28.1 (keep in sync with $SCRIPT_VERSION below)
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -71,7 +71,15 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
-# v1.28.0 - TEMP RULE: Windows Update method runs FIRST. The WUA driver pass
+# v1.28.1 - TEMP RULE OFF: back to VENDOR DRIVER PACK FIRST, Windows Update
+#           last. $script:TempRuleWuFirst is now $false, so the WU-first pass
+#           in Start-Install is skipped entirely and Windows Update returns to
+#           its usual end-of-run fallback slot (WU tier, then the Microsoft
+#           Update Catalog scrape) for whatever the vendor pack leaves missing.
+#           The v1.28.0 code is left in place behind the toggle - flip it back
+#           to $true to re-run the WU-first experiment.
+# v1.28.0 - TEMP RULE (now OFF, see v1.28.1): Windows Update method runs
+#           FIRST. The WUA driver pass
 #           (Install-DriversViaWindowsUpdate) is hoisted ahead of the vendor
 #           driver-pack phase: it now runs right after the BEFORE snapshot, and
 #           the vendor phase only handles whatever WU leaves unresolved (skipped
@@ -867,15 +875,16 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.28.0"
+$SCRIPT_VERSION = "1.28.1"
 
 # =============================================================
-# TEMP RULE (v1.28.0): try the WINDOWS UPDATE method FIRST, before the vendor
-# driver-pack phase. Set to $false to restore the vendor-first order (WU then
-# reverts to its usual end-of-run fallback slot). Remove this variable and the
+# TEMP RULE (v1.28.0) - CURRENTLY OFF (v1.28.1): when $true, the WINDOWS
+# UPDATE method runs FIRST, before the vendor driver-pack phase. $false (the
+# current setting) is the normal order: vendor driver pack first, Windows
+# Update last as the end-of-run fallback. Remove this variable and the
 # "TEMP RULE (v1.28.0)" blocks in Start-Install to retire the experiment.
 # =============================================================
-$script:TempRuleWuFirst = $true
+$script:TempRuleWuFirst = $false
 
 # =============================================================
 $SpinnerFrames   = @(0x280B,0x2819,0x2839,0x2838,0x283C,0x2834,0x2826,0x2827,0x2807,0x280F | ForEach-Object { [string][char]$_ })  # braille spinner frames via [char] - source must stay pure ASCII (v1.24.2)
