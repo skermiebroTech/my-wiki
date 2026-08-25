@@ -315,6 +315,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="DEV Version (could be unstable)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#print-battery-health-label" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Print battery health label
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -686,6 +703,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="DEV Version (could be unstable)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#print-battery-health-label" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Print battery health label
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -755,6 +789,9 @@
 </code></pre></div>
 <h2 id="dev-version-could-be-unstable">DEV Version (could be unstable)<a class="headerlink" href="#dev-version-could-be-unstable" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>powershell -ExecutionPolicy Bypass -Command &quot;irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto-dev.ps1 | iex&quot;
+</code></pre></div>
+<h3 id="print-battery-health-label">Print battery health label<a class="headerlink" href="#print-battery-health-label" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>powershell -Command &quot;$f=(Get-CimInstance -Namespace root\wmi -ClassName BatteryFullChargedCapacity).FullChargedCapacity;$d=(Get-CimInstance -Namespace root\wmi -ClassName BatteryStaticData).DesignedCapacity;$h=[math]::Round($f/$d*100);$z=\&quot;^XA^PW400^LL200^FO20,60^A0N,70,70^FDBattery: $h%^FS^XZ\&quot;;$c=New-Object Net.Sockets.TcpClient(&#39;172.17.21.186&#39;,9100);$s=$c.GetStream();$b=[Text.Encoding]::ASCII.GetBytes($z);$s.Write($b,0,$b.Length);$c.Close()&quot;
 </code></pre></div>
 <h2 id="links">Links<a class="headerlink" href="#links" title="Permanent link">&para;</a></h2>
 <ul>
