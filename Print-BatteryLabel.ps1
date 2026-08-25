@@ -1,0 +1,47 @@
+# Print-BatteryLabel.ps1
+# Prints battery health percent to a Zebra printer (ZPL over TCP 9100).
+# Run from Win+R:
+#   powershell -NoProfile -Command "irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Print-BatteryLabel.ps1|iex"
+
+$PrinterIp = '172.17.21.186'
+$PrinterPort = 9100
+
+$fcc = (Get-CimInstance -Namespace root\wmi -ClassName BatteryFullChargedCapacity |
+    Measure-Object -Property FullChargedCapacity -Sum).Sum
+
+# Design capacity: try BatteryStaticData (needs admin on some boxes), fall back to Win32_PortableBattery
+$design = $null
+try {
+    $design = (Get-CimInstance -Namespace root\wmi -ClassName BatteryStaticData -ErrorAction Stop |
+        Measure-Object -Property DesignedCapacity -Sum).Sum
+} catch {}
+if (-not $design) {
+    $batt = Get-CimInstance Win32_PortableBattery
+    $design = ($batt | Measure-Object -Property DesignCapacity -Sum).Sum
+    # Some firmware reports mAh here while FCC is mWh; convert if it looks that way
+    if ($design -and $batt[0].DesignVoltage -and ($fcc / $design) -gt 3) {
+        $design = $design * $batt[0].DesignVoltage / 1000
+    }
+}
+
+if (-not $fcc -or -not $design) {
+    Write-Host "Could not read battery capacities (FCC=$fcc Design=$design). No battery, or WMI blocked."
+    Read-Host 'Press Enter to exit'
+    return
+}
+
+$health = [math]::Round($fcc / $design * 100)
+Write-Host "FullCharged: $fcc mWh  Design: $design mWh  Health: $health%"
+
+$zpl = '^XA^PW400^LL200^FO20,60^A0N,70,70^FDBattery: ' + $health + '%^FS^XZ'
+try {
+    $client = New-Object Net.Sockets.TcpClient($PrinterIp, $PrinterPort)
+    $stream = $client.GetStream()
+    $bytes = [Text.Encoding]::ASCII.GetBytes($zpl)
+    $stream.Write($bytes, 0, $bytes.Length)
+    $client.Close()
+    Write-Host 'Label sent.'
+} catch {
+    Write-Host "Failed to reach printer ${PrinterIp}:${PrinterPort} - $_"
+    Read-Host 'Press Enter to exit'
+}
