@@ -9,7 +9,7 @@ Edit the fields, check the preview, then copy the print command and paste it int
 #le-zpl { width: 100%; height: 260px; font-family: monospace; font-size: 0.75rem; border: 1px solid #8884; border-radius: 4px; background: var(--md-default-bg-color); color: var(--md-default-fg-color); }
 #le-preview { max-width: 100%; border: 1px solid #8884; border-radius: 4px; margin-top: 8px; background: #fff; }
 .le-btn { padding: 6px 14px; margin: 6px 6px 6px 0; border: none; border-radius: 4px; background: var(--md-primary-fg-color); color: #fff; cursor: pointer; font-size: 0.8rem; }
-#le-cmd { width: 100%; height: 90px; font-family: monospace; font-size: 0.7rem; }
+#le-cmd, #le-cmd-mac { width: 100%; height: 90px; font-family: monospace; font-size: 0.7rem; }
 </style>
 
 ## Fields
@@ -45,17 +45,26 @@ Edit the fields, check the preview, then copy the print command and paste it int
 
 ## Print command
 
-Paste into a PowerShell window (not Win+R, not cmd):
+Windows — paste into a PowerShell window (not Win+R, not cmd):
 
 <textarea id="le-cmd" readonly spellcheck="false"></textarea>
+
+macOS — paste into Terminal:
+
+<textarea id="le-cmd-mac" readonly spellcheck="false"></textarea>
 
 <script>
 (function () {
   function v(id) { return document.getElementById(id).value; }
-  function buildZpl() {
+  function buildZpl(skuH, skuW) {
+    // SKU runs vertically (rotated B). Font size is fitted iteratively against the
+    // rendered preview (autoFitSku). Uses scalable font 0 (not the original bitmap
+    // font R) so the size can be tuned continuously to span the target exactly.
+    var skuY = 10;
+    var skuX = 10 + Math.max(0, Math.round((150 - skuH) / 2));
     return '^XA\n\n^LS2\n^SZ2\n^PW816\n^PON\n^PR14,14\n^PMN\n^MNY\n^LS0\n^MTD\n^MD30\n\n' +
       '\n^FX String that says SKU\n^FS\n^FO25,340\n^ARI,12,70\n^FDSKU\n' +
-      '\n^FX String that says SKU\n^FS\n^FO10,10\n^ARB,150,180\n^FD' + v('f-sku') + '\n' +
+      '\n^FX String that says SKU\n^FS\n^FO' + skuX + ',' + skuY + '\n^A0B,' + skuH + ',' + skuW + '\n^FD' + v('f-sku') + '\n' +
       '\n^FX String that says the grade\n^FS\n^FO172,0\n^ARN,175,225\n^FD' + v('f-grade') + '\n' +
       '\n^FX String that says the battery percentage\n^FS\n^FO200,155\n^ARN,25,12\n^FD' + v('f-batt') + '\n' +
       '\n^FX The QR Code\n^FS\n^FO150,190\n^BQN,2,8\n^FDMA,' + v('f-g1') + '\n' +
@@ -77,28 +86,78 @@ Paste into a PowerShell window (not Win+R, not cmd):
       "$c=New-Object Net.Sockets.TcpClient('" + v('f-ip') + "',9100);" +
       "$s=$c.GetStream();$s.Write($b,0,$b.Length);$c.Close()";
     document.getElementById('le-cmd').value = cmd;
+    document.getElementById('le-cmd-mac').value =
+      "echo '" + b64 + "' | base64 -d | nc -w 3 " + v('f-ip') + ' 9100';
     return cmd;
   }
-  function updatePreview() {
-    var zpl = document.getElementById('le-zpl').value;
-    fetch('https://api.labelary.com/v1/printers/8dpmm/labels/4x2/0/', {
+  function renderZpl(zpl) {
+    return fetch('https://api.labelary.com/v1/printers/8dpmm/labels/4x3/0/', {
       method: 'POST',
       headers: { 'Accept': 'image/png', 'Content-Type': 'application/x-www-form-urlencoded' },
       body: zpl
     }).then(function (r) {
       if (!r.ok) throw new Error('Labelary HTTP ' + r.status);
       return r.blob();
-    }).then(function (b) {
-      document.getElementById('le-preview').src = URL.createObjectURL(b);
-      document.getElementById('le-msg').textContent = '';
-    }).catch(function (e) {
+    });
+  }
+  function showBlob(b) {
+    document.getElementById('le-preview').src = URL.createObjectURL(b);
+    document.getElementById('le-msg').textContent = '';
+  }
+  function updatePreview() {
+    renderZpl(document.getElementById('le-zpl').value).then(showBlob).catch(function (e) {
       document.getElementById('le-msg').textContent = 'Preview failed: ' + e.message;
     });
   }
+  // Measure the vertical pixel extent of the SKU column (x < 160) in a rendered label
+  function measureSku(blob) {
+    return createImageBitmap(blob).then(function (img) {
+      var cv = document.createElement('canvas');
+      cv.width = img.width; cv.height = img.height;
+      var cx = cv.getContext('2d');
+      cx.drawImage(img, 0, 0);
+      var px = cx.getImageData(0, 0, 160, img.height).data;
+      var minY = -1, maxY = -1;
+      for (var y = 0; y < img.height; y++) {
+        for (var x = 0; x < 160; x++) {
+          if (px[(y * 160 + x) * 4] < 128) { if (minY < 0) minY = y; maxY = y; break; }
+        }
+      }
+      return maxY - minY;
+    });
+  }
+  // Iteratively size the SKU font until the rendered text spans from the label edge
+  // (y=10) down to the small SKU caption (which starts at ~y335)
+  function autoFitSku() {
+    var TARGET = 320;
+    var skuLen = Math.max(1, v('f-sku').length);
+    var w = Math.floor(TARGET / (skuLen * 0.55));
+    var attempt = 0;
+    function step() {
+      var h = Math.min(150, Math.round(150 * w / 180));
+      var x = 10 + Math.max(0, Math.round((150 - h) / 2));
+      // measure the SKU field alone so the caption's ink doesn't skew the extent
+      var probe = '^XA^PW816^FO' + x + ',10^A0B,' + h + ',' + w + '^FD' + v('f-sku') + '^FS^XZ';
+      return renderZpl(probe).then(measureSku).then(function (extent) {
+        attempt++;
+        if (extent > 0 && Math.abs(extent - TARGET) > 10 && attempt < 5) {
+          w = Math.max(8, Math.min(600, Math.round(w * TARGET / extent)));
+          return step();
+        }
+        var zpl = buildZpl(h, w);
+        document.getElementById('le-zpl').value = zpl;
+        updateCmd();
+        return renderZpl(zpl).then(showBlob);
+      });
+    }
+    return step();
+  }
   function regen() {
-    document.getElementById('le-zpl').value = buildZpl();
+    document.getElementById('le-zpl').value = buildZpl(150, 180);
     updateCmd();
-    updatePreview();
+    autoFitSku().catch(function (e) {
+      document.getElementById('le-msg').textContent = 'Preview failed: ' + e.message;
+    });
   }
   document.getElementById('le-regen').addEventListener('click', regen);
   document.getElementById('le-prev').addEventListener('click', function () { updateCmd(); updatePreview(); });
