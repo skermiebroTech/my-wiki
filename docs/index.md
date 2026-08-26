@@ -7,7 +7,7 @@ powershell -WindowStyle Hidden -ExecutionPolicy Bypass -Command "irm https://raw
 ```
 powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto-dev.ps1 | iex"
 ```
-# 🔋 Battery Health Label
+# Battery Health Label
 Prints battery health % to the Zebra label printer (172.17.21.186). Run from Win+R:
 ```
 powershell -NoProfile -Command "irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Print-BatteryLabel.ps1|iex"
