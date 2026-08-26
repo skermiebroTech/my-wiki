@@ -57,12 +57,12 @@ macOS — paste into Terminal:
 (function () {
   function v(id) { return document.getElementById(id).value; }
   function buildZpl() {
-    // SKU runs vertically (rotated B): shrink font so long SKUs fit ~440 dots of travel
+    // SKU runs vertically (rotated B): stretch font so the text always spans the full
+    // ~440 dots between the label edge and the small SKU caption
     var skuLen = Math.max(1, v('f-sku').length);
-    var skuW = Math.min(180, Math.floor(440 / (skuLen * 0.6)));
-    var skuH = Math.round(150 * skuW / 180);
-    // keep the SKU centered in its column: along the travel and across the column width
-    var skuY = 10 + Math.max(0, Math.round((440 - skuLen * 0.6 * skuW) / 2));
+    var skuW = Math.floor(440 / (skuLen * 0.6));
+    var skuH = Math.min(150, Math.round(150 * skuW / 180));
+    var skuY = 10;
     var skuX = 10 + Math.max(0, Math.round((150 - skuH) / 2));
     return '^XA\n\n^LS2\n^SZ2\n^PW816\n^PON\n^PR14,14\n^PMN\n^MNY\n^LS0\n^MTD\n^MD30\n\n' +
       '\n^FX String that says SKU\n^FS\n^FO25,340\n^ARI,12,70\n^FDSKU\n' +
