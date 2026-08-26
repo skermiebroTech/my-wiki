@@ -34,6 +34,7 @@ $health = [math]::Round($fcc / $design * 100)
 Write-Host "FullCharged: $fcc mWh  Design: $design mWh  Health: $health%"
 
 $model = (Get-CimInstance Win32_ComputerSystem).Model.Trim()
+$tag = (Get-CimInstance Win32_BIOS).SerialNumber.Trim()
 $cycles = $null
 try {
     $cycles = (Get-CimInstance -Namespace root\wmi -ClassName BatteryCycleCount -ErrorAction Stop |
@@ -44,7 +45,7 @@ if ($cycles) { $line4 += '  Cycles: ' + $cycles }
 
 $zpl = '^XA^PW400^LL200' +
     '^FO10,10^A0N,60,50^FDBattery: ' + $health + '%^FS' +
-    '^FO10,80^A0N,28,28^FD' + $model + '^FS' +
+    '^FO10,80^A0N,28,28^FD' + $model + '  ' + $tag + '^FS' +
     '^FO10,115^A0N,28,28^FD' + [math]::Round($design) + '/' + [math]::Round($fcc) + ' mWh^FS' +
     '^FO10,150^A0N,28,28^FD' + $line4 + '^FS^XZ'
 try {
