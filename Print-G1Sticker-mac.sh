@@ -16,12 +16,12 @@ CPU=$(sysctl -n machdep.cpu.brand_string 2>/dev/null)
 [ -z "$CPU" ] && CPU=$(system_profiler SPHardwareDataType | awk -F': ' '/Chip/{print $2}')
 RAM_GB=$(( $(sysctl -n hw.memsize) / 1073741824 ))
 DRIVE=$(df -H / | awk 'NR==2{print $2}' | sed 's/G/GB/;s/T/TB/')
-DESIGN=$(ioreg -rn AppleSmartBattery | awk -F'= ' '/"DesignCapacity"/{print $2}' | head -1)
-FCC=$(ioreg -rn AppleSmartBattery | awk -F'= ' '/"AppleRawMaxCapacity"/{print $2}' | head -1)
-[ -z "$FCC" ] && FCC=$(ioreg -rn AppleSmartBattery | awk -F'= ' '/"MaxCapacity"/{print $2}' | head -1)
-if [ -n "$DESIGN" ] && [ "$DESIGN" -gt 0 ] 2>/dev/null; then
-  BATT="$(( FCC * 100 / DESIGN ))%"
-  CAP="${FCC}/${DESIGN} mAh"
+POWER=$(system_profiler SPPowerDataType)
+BATT=$(echo "$POWER" | awk -F': ' '/Maximum Capacity/{gsub(/[ \t]/,"",$2); print $2}')
+CYCLES=$(echo "$POWER" | awk -F': ' '/Cycle Count/{gsub(/[ \t]/,"",$2); print $2}')
+CONDITION=$(echo "$POWER" | awk -F': ' '/Condition/{gsub(/^[ \t]+/,"",$2); print $2}')
+if [ -n "$BATT" ]; then
+  CAP="${CYCLES} cycles, ${CONDITION}"
 else
   BATT="N/A"; CAP="no battery"
 fi
