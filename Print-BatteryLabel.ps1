@@ -33,8 +33,20 @@ if (-not $fcc -or -not $design) {
 $health = [math]::Round($fcc / $design * 100)
 Write-Host "FullCharged: $fcc mWh  Design: $design mWh  Health: $health%"
 
-$zpl = '^XA^PW400^LL200^FO10,45^A0N,65,55^FDBattery: ' + $health + '%^FS' +
-    '^FO20,150^A0N,28,28^FD' + [math]::Round($design) + '/' + [math]::Round($fcc) + ' mWh^FS^XZ'
+$model = (Get-CimInstance Win32_ComputerSystem).Model.Trim()
+$cycles = $null
+try {
+    $cycles = (Get-CimInstance -Namespace root\wmi -ClassName BatteryCycleCount -ErrorAction Stop |
+        Measure-Object -Property CycleCount -Sum).Sum
+} catch {}
+$line4 = Get-Date -Format 'dd/MM/yy'
+if ($cycles) { $line4 += '  Cycles: ' + $cycles }
+
+$zpl = '^XA^PW400^LL200' +
+    '^FO10,10^A0N,60,50^FDBattery: ' + $health + '%^FS' +
+    '^FO10,80^A0N,28,28^FD' + $model + '^FS' +
+    '^FO10,115^A0N,28,28^FD' + [math]::Round($design) + '/' + [math]::Round($fcc) + ' mWh^FS' +
+    '^FO10,150^A0N,28,28^FD' + $line4 + '^FS^XZ'
 try {
     $client = New-Object Net.Sockets.TcpClient($PrinterIp, $PrinterPort)
     $stream = $client.GetStream()
