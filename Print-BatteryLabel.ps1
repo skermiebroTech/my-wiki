@@ -45,14 +45,14 @@ if ($cycles) { $line4 += '  Cycles: ' + $cycles }
 
 # Build one ZPL text line, shrinking font width (and height to match) so text fits the label
 function Get-ZplLine([int]$y, [int]$height, [int]$width, [string]$text) {
-    $maxDots = 380  # printable width at x=10 on a 400-dot label
+    $maxDots = 340  # printable width at x=30 on a 400-dot label
     # ZPL font 0 average char advance is ~0.6 x the width parameter
     $fitWidth = [math]::Floor($maxDots / ($text.Length * 0.6))
     if ($fitWidth -lt $width) {
         $height = [math]::Max(14, [math]::Round($height * $fitWidth / $width))
         $width = [math]::Max(14, $fitWidth)
     }
-    return '^FO10,' + $y + '^A0N,' + $height + ',' + $width + '^FD' + $text + '^FS'
+    return '^FO30,' + $y + '^A0N,' + $height + ',' + $width + '^FD' + $text + '^FS'
 }
 
 $zpl = '^XA^PW400^LL200' +
