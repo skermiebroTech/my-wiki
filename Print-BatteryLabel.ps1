@@ -33,7 +33,7 @@ if (-not $fcc -or -not $design) {
 $health = [math]::Round($fcc / $design * 100)
 Write-Host "FullCharged: $fcc mWh  Design: $design mWh  Health: $health%"
 
-$zpl = '^XA^PW400^LL200^FO20,40^A0N,70,70^FDBattery: ' + $health + '%^FS' +
+$zpl = '^XA^PW400^LL200^FO10,45^A0N,65,55^FDBattery: ' + $health + '%^FS' +
     '^FO20,150^A0N,28,28^FD' + [math]::Round($design) + '/' + [math]::Round($fcc) + ' mWh^FS^XZ'
 try {
     $client = New-Object Net.Sockets.TcpClient($PrinterIp, $PrinterPort)
