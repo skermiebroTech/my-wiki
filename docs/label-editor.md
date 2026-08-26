@@ -126,26 +126,28 @@ macOS — paste into Terminal:
       return maxY - minY;
     });
   }
-  // Iteratively size the SKU font until the rendered text spans edge-to-caption (~420 dots)
+  // Iteratively size the SKU font until the rendered text spans from the label edge
+  // (y=10) down to the small SKU caption (which starts at ~y335)
   function autoFitSku() {
-    var TARGET = 420;
+    var TARGET = 320;
     var skuLen = Math.max(1, v('f-sku').length);
     var w = Math.floor(TARGET / (skuLen * 0.55));
     var attempt = 0;
     function step() {
       var h = Math.min(150, Math.round(150 * w / 180));
-      var zpl = buildZpl(h, w);
-      return renderZpl(zpl).then(function (blob) {
-        return measureSku(blob).then(function (extent) {
-          attempt++;
-          if (extent > 0 && Math.abs(extent - TARGET) > 12 && attempt < 5) {
-            w = Math.max(8, Math.min(600, Math.round(w * TARGET / extent)));
-            return step();
-          }
-          document.getElementById('le-zpl').value = zpl;
-          updateCmd();
-          showBlob(blob);
-        });
+      var x = 10 + Math.max(0, Math.round((150 - h) / 2));
+      // measure the SKU field alone so the caption's ink doesn't skew the extent
+      var probe = '^XA^PW816^FO' + x + ',10^A0B,' + h + ',' + w + '^FD' + v('f-sku') + '^FS^XZ';
+      return renderZpl(probe).then(measureSku).then(function (extent) {
+        attempt++;
+        if (extent > 0 && Math.abs(extent - TARGET) > 10 && attempt < 5) {
+          w = Math.max(8, Math.min(600, Math.round(w * TARGET / extent)));
+          return step();
+        }
+        var zpl = buildZpl(h, w);
+        document.getElementById('le-zpl').value = zpl;
+        updateCmd();
+        return renderZpl(zpl).then(showBlob);
       });
     }
     return step();
