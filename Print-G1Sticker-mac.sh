@@ -3,7 +3,7 @@
 # Usage: zsh Print-G1Sticker-mac.sh [SKU] [GRADE] [G1ID]
 # Or run via: curl -s https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Print-G1Sticker-mac.sh | zsh -s -- MYSKU B 5742320
 
-PRINTER_IP="172.17.21.186"
+PRINTER_IP="172.17.31.195"
 PRINTER_PORT=9100
 
 SKU="${1:-}"
