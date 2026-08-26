@@ -34,6 +34,7 @@ nav:
   - Manual Driver Installation Docs: driver-installation.md
   - Installing CAB file drivers: cab-file-driver-installation.md
   - Useful Links: Useful-Links.md
+  - Label Editor: label-editor.md
   - Panasonic:
       - FZ-G1 Guide: Panasonic/panasonic-fzg1.md
   - ToDo: todo.md
