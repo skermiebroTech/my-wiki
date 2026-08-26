@@ -56,10 +56,10 @@ function Get-ZplLine([int]$y, [int]$height, [int]$width, [string]$text) {
 }
 
 $zpl = '^XA^PW400^LL200' +
-    (Get-ZplLine 13 60 50 ('Battery: ' + $health + '%')) +
-    (Get-ZplLine 80 28 28 ($model + '  ' + $tag)) +
-    (Get-ZplLine 115 28 28 ([math]::Round($design).ToString() + '/' + [math]::Round($fcc) + ' mWh')) +
-    (Get-ZplLine 150 28 28 $line4) + '^XZ'
+    (Get-ZplLine 17 60 50 ('Battery: ' + $health + '%')) +
+    (Get-ZplLine 84 28 28 ($model + '  ' + $tag)) +
+    (Get-ZplLine 119 28 28 ([math]::Round($design).ToString() + '/' + [math]::Round($fcc) + ' mWh')) +
+    (Get-ZplLine 154 28 28 $line4) + '^XZ'
 try {
     $client = New-Object Net.Sockets.TcpClient($PrinterIp, $PrinterPort)
     $stream = $client.GetStream()
