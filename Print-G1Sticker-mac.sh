@@ -29,7 +29,7 @@ DATE="$(date +%d/%m/%Y) JS"
 
 # SKU font: scalable font 0 sized so the text spans ~320 dots (label edge to SKU caption)
 SKULEN=${#SKU}
-SKUW=$(( 3200 / (SKULEN * 55 / 10) / 10 ))
+SKUW=$(( 31000 / (SKULEN * 55) ))
 SKUH=$(( 150 * SKUW / 180 )); [ $SKUH -gt 150 ] && SKUH=150
 SKUX=$(( 10 + (150 - SKUH) / 2 ))
 
