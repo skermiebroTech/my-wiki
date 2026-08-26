@@ -43,11 +43,23 @@ try {
 $line4 = Get-Date -Format 'dd/MM/yy'
 if ($cycles) { $line4 += '  Cycles: ' + $cycles }
 
+# Build one ZPL text line, shrinking font width (and height to match) so text fits the label
+function Get-ZplLine([int]$y, [int]$height, [int]$width, [string]$text) {
+    $maxDots = 380  # printable width at x=10 on a 400-dot label
+    # ZPL font 0 average char advance is ~0.6 x the width parameter
+    $fitWidth = [math]::Floor($maxDots / ($text.Length * 0.6))
+    if ($fitWidth -lt $width) {
+        $height = [math]::Max(14, [math]::Round($height * $fitWidth / $width))
+        $width = [math]::Max(14, $fitWidth)
+    }
+    return '^FO10,' + $y + '^A0N,' + $height + ',' + $width + '^FD' + $text + '^FS'
+}
+
 $zpl = '^XA^PW400^LL200' +
-    '^FO10,10^A0N,60,50^FDBattery: ' + $health + '%^FS' +
-    '^FO10,80^A0N,28,28^FD' + $model + '  ' + $tag + '^FS' +
-    '^FO10,115^A0N,28,28^FD' + [math]::Round($design) + '/' + [math]::Round($fcc) + ' mWh^FS' +
-    '^FO10,150^A0N,28,28^FD' + $line4 + '^FS^XZ'
+    (Get-ZplLine 10 60 50 ('Battery: ' + $health + '%')) +
+    (Get-ZplLine 80 28 28 ($model + '  ' + $tag)) +
+    (Get-ZplLine 115 28 28 ([math]::Round($design).ToString() + '/' + [math]::Round($fcc) + ' mWh')) +
+    (Get-ZplLine 150 28 28 $line4) + '^XZ'
 try {
     $client = New-Object Net.Sockets.TcpClient($PrinterIp, $PrinterPort)
     $stream = $client.GetStream()
