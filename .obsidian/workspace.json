@@ -41,12 +41,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "docs/index.md",
+                "file": "docs/label-editor.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "index"
+              "title": "label-editor"
             }
           }
         ],
@@ -227,9 +227,9 @@
     "site/label-editor",
     "site/fp-test/index.html",
     "site/fp-test",
+    "docs/index.md",
     "docs/label-editor.md",
     "README.md",
-    "docs/index.md",
     "docs/Useful-Links.md",
     "docs/cab-file-driver-installation.md",
     "docs/fp-test.md",
