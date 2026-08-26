@@ -60,7 +60,8 @@ $zpl = '^XA^PW400^LL200' +
     (Get-ZplLine 84 28 28 ($model + '  ' + $tag)) +
     (Get-ZplLine 119 28 28 ([math]::Round($design).ToString() + '/' + [math]::Round($fcc) + ' mWh')) +
     (Get-ZplLine 154 28 28 $line4) +
-    '^FO305,95^A0N,70,60^FD' + $(if ($health -ge 70) { ':)' } elseif ($health -ge 50) { ':|' } else { ':(' }) + '^FS^XZ'
+    '^FO305,95^A0N,70,60^FD' + $(if ($health -ge 70) { ':)' } elseif ($health -ge 50) { ':|' } else { ':(' }) + '^FS' +
+    '^FO378,8^A0R,18,18^FDbattery is ' + $(if ($health -ge 70) { 'happy' } elseif ($health -ge 50) { 'average' } else { 'sad' }) + '^FS^XZ'
 try {
     $client = New-Object Net.Sockets.TcpClient($PrinterIp, $PrinterPort)
     $stream = $client.GetStream()
