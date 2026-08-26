@@ -56,17 +56,15 @@ macOS — paste into Terminal:
 <script>
 (function () {
   function v(id) { return document.getElementById(id).value; }
-  function buildZpl() {
-    // SKU runs vertically (rotated B): stretch font so the text always spans the full
-    // ~440 dots between the label edge and the small SKU caption
-    var skuLen = Math.max(1, v('f-sku').length);
-    var skuW = Math.floor(440 / (skuLen * 0.6));
-    var skuH = Math.min(150, Math.round(150 * skuW / 180));
+  function buildZpl(skuH, skuW) {
+    // SKU runs vertically (rotated B). Font size is fitted iteratively against the
+    // rendered preview (autoFitSku). Uses scalable font 0 (not the original bitmap
+    // font R) so the size can be tuned continuously to span the target exactly.
     var skuY = 10;
     var skuX = 10 + Math.max(0, Math.round((150 - skuH) / 2));
     return '^XA\n\n^LS2\n^SZ2\n^PW816\n^PON\n^PR14,14\n^PMN\n^MNY\n^LS0\n^MTD\n^MD30\n\n' +
       '\n^FX String that says SKU\n^FS\n^FO25,340\n^ARI,12,70\n^FDSKU\n' +
-      '\n^FX String that says SKU\n^FS\n^FO' + skuX + ',' + skuY + '\n^ARB,' + skuH + ',' + skuW + '\n^FD' + v('f-sku') + '\n' +
+      '\n^FX String that says SKU\n^FS\n^FO' + skuX + ',' + skuY + '\n^A0B,' + skuH + ',' + skuW + '\n^FD' + v('f-sku') + '\n' +
       '\n^FX String that says the grade\n^FS\n^FO172,0\n^ARN,175,225\n^FD' + v('f-grade') + '\n' +
       '\n^FX String that says the battery percentage\n^FS\n^FO200,155\n^ARN,25,12\n^FD' + v('f-batt') + '\n' +
       '\n^FX The QR Code\n^FS\n^FO150,190\n^BQN,2,8\n^FDMA,' + v('f-g1') + '\n' +
@@ -92,26 +90,72 @@ macOS — paste into Terminal:
       "echo '" + b64 + "' | base64 -d | nc -w 3 " + v('f-ip') + ' 9100';
     return cmd;
   }
-  function updatePreview() {
-    var zpl = document.getElementById('le-zpl').value;
-    fetch('https://api.labelary.com/v1/printers/8dpmm/labels/4x2/0/', {
+  function renderZpl(zpl) {
+    return fetch('https://api.labelary.com/v1/printers/8dpmm/labels/4x3/0/', {
       method: 'POST',
       headers: { 'Accept': 'image/png', 'Content-Type': 'application/x-www-form-urlencoded' },
       body: zpl
     }).then(function (r) {
       if (!r.ok) throw new Error('Labelary HTTP ' + r.status);
       return r.blob();
-    }).then(function (b) {
-      document.getElementById('le-preview').src = URL.createObjectURL(b);
-      document.getElementById('le-msg').textContent = '';
-    }).catch(function (e) {
+    });
+  }
+  function showBlob(b) {
+    document.getElementById('le-preview').src = URL.createObjectURL(b);
+    document.getElementById('le-msg').textContent = '';
+  }
+  function updatePreview() {
+    renderZpl(document.getElementById('le-zpl').value).then(showBlob).catch(function (e) {
       document.getElementById('le-msg').textContent = 'Preview failed: ' + e.message;
     });
   }
+  // Measure the vertical pixel extent of the SKU column (x < 160) in a rendered label
+  function measureSku(blob) {
+    return createImageBitmap(blob).then(function (img) {
+      var cv = document.createElement('canvas');
+      cv.width = img.width; cv.height = img.height;
+      var cx = cv.getContext('2d');
+      cx.drawImage(img, 0, 0);
+      var px = cx.getImageData(0, 0, 160, img.height).data;
+      var minY = -1, maxY = -1;
+      for (var y = 0; y < img.height; y++) {
+        for (var x = 0; x < 160; x++) {
+          if (px[(y * 160 + x) * 4] < 128) { if (minY < 0) minY = y; maxY = y; break; }
+        }
+      }
+      return maxY - minY;
+    });
+  }
+  // Iteratively size the SKU font until the rendered text spans edge-to-caption (~420 dots)
+  function autoFitSku() {
+    var TARGET = 420;
+    var skuLen = Math.max(1, v('f-sku').length);
+    var w = Math.floor(TARGET / (skuLen * 0.55));
+    var attempt = 0;
+    function step() {
+      var h = Math.min(150, Math.round(150 * w / 180));
+      var zpl = buildZpl(h, w);
+      return renderZpl(zpl).then(function (blob) {
+        return measureSku(blob).then(function (extent) {
+          attempt++;
+          if (extent > 0 && Math.abs(extent - TARGET) > 12 && attempt < 5) {
+            w = Math.max(8, Math.min(600, Math.round(w * TARGET / extent)));
+            return step();
+          }
+          document.getElementById('le-zpl').value = zpl;
+          updateCmd();
+          showBlob(blob);
+        });
+      });
+    }
+    return step();
+  }
   function regen() {
-    document.getElementById('le-zpl').value = buildZpl();
+    document.getElementById('le-zpl').value = buildZpl(150, 180);
     updateCmd();
-    updatePreview();
+    autoFitSku().catch(function (e) {
+      document.getElementById('le-msg').textContent = 'Preview failed: ' + e.message;
+    });
   }
   document.getElementById('le-regen').addEventListener('click', regen);
   document.getElementById('le-prev').addEventListener('click', function () { updateCmd(); updatePreview(); });
