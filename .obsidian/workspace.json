@@ -216,6 +216,8 @@
   },
   "active": "b98051cbc092f948",
   "lastOpenFiles": [
+    "Print-G1Sticker-mac.sh",
+    "g1-template-mac.sh",
     "site/search/search_index.json",
     "site/search",
     "site/Panasonic/panasonic-fzg1/index.html",
@@ -225,8 +227,6 @@
     "site/todo",
     "site/label-editor/index.html",
     "site/label-editor",
-    "site/fp-test/index.html",
-    "site/fp-test",
     "docs/index.md",
     "docs/label-editor.md",
     "README.md",
