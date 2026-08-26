@@ -61,9 +61,12 @@ macOS — paste into Terminal:
     var skuLen = Math.max(1, v('f-sku').length);
     var skuW = Math.min(180, Math.floor(440 / (skuLen * 0.6)));
     var skuH = Math.round(150 * skuW / 180);
+    // keep the SKU centered in its column: along the travel and across the column width
+    var skuY = 10 + Math.max(0, Math.round((440 - skuLen * 0.6 * skuW) / 2));
+    var skuX = 10 + Math.max(0, Math.round((150 - skuH) / 2));
     return '^XA\n\n^LS2\n^SZ2\n^PW816\n^PON\n^PR14,14\n^PMN\n^MNY\n^LS0\n^MTD\n^MD30\n\n' +
       '\n^FX String that says SKU\n^FS\n^FO25,340\n^ARI,12,70\n^FDSKU\n' +
-      '\n^FX String that says SKU\n^FS\n^FO10,10\n^ARB,' + skuH + ',' + skuW + '\n^FD' + v('f-sku') + '\n' +
+      '\n^FX String that says SKU\n^FS\n^FO' + skuX + ',' + skuY + '\n^ARB,' + skuH + ',' + skuW + '\n^FD' + v('f-sku') + '\n' +
       '\n^FX String that says the grade\n^FS\n^FO172,0\n^ARN,175,225\n^FD' + v('f-grade') + '\n' +
       '\n^FX String that says the battery percentage\n^FS\n^FO200,155\n^ARN,25,12\n^FD' + v('f-batt') + '\n' +
       '\n^FX The QR Code\n^FS\n^FO150,190\n^BQN,2,8\n^FDMA,' + v('f-g1') + '\n' +
