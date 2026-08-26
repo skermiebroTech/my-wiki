@@ -6,8 +6,8 @@
 PRINTER_IP="172.17.21.186"
 PRINTER_PORT=9100
 
-SKU="${1:-DEMO}"
-GRADE="${2:-B}"
+SKU="${1:-}"
+GRADE="${2:-}"
 G1ID="${3:-1234567}"
 
 MODEL=$(system_profiler SPHardwareDataType | awk -F': ' '/Model Name/{print $2}')
@@ -29,9 +29,13 @@ DATE="$(date +%d/%m/%Y) JS"
 
 # SKU font: scalable font 0 sized so the text spans ~320 dots (label edge to SKU caption)
 SKULEN=${#SKU}
-SKUW=$(( 31000 / (SKULEN * 55) ))
-SKUH=$(( 150 * SKUW / 180 )); [ $SKUH -gt 150 ] && SKUH=150
-SKUX=$(( 10 + (150 - SKUH) / 2 ))
+if [ $SKULEN -gt 0 ]; then
+  SKUW=$(( 31000 / (SKULEN * 55) ))
+  SKUH=$(( 150 * SKUW / 180 )); [ $SKUH -gt 150 ] && SKUH=150
+  SKUX=$(( 10 + (150 - SKUH) / 2 ))
+else
+  SKUW=150; SKUH=127; SKUX=21
+fi
 
 ZPL="^XA
 ^LS2^SZ2^PW816^PON^PR14,14^PMN^MNY^LS0^MTD^MD30
