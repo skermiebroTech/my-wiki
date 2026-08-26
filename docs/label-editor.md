@@ -15,15 +15,15 @@ Edit the fields, check the preview, then copy the print command and paste it int
 ## Fields
 
 <div class="le-grid">
-<label>SKU <input id="f-sku" value="dono"></label>
+<label>SKU <input id="f-sku" value="DEMO"></label>
 <label>Grade <input id="f-grade" value="B"></label>
-<label>Battery % <input id="f-batt" value="68%"></label>
-<label>G1 ID (also QR) <input id="f-g1" value="5742320"></label>
-<label>Model <input id="f-model" value="HP EliteBook x360 1040 G6"></label>
-<label>Serial <input id="f-serial" value="5CG01773N4"></label>
-<label>Full charge mWh <input id="f-fcc" value="38207"></label>
-<label>Design mWh <input id="f-design" value="56210"></label>
-<label>CPU <input id="f-cpu" value="i5-8365U"></label>
+<label>Battery % <input id="f-batt" value="80%"></label>
+<label>G1 ID (also QR) <input id="f-g1" value="1234567"></label>
+<label>Model <input id="f-model" value="Example Laptop 9000"></label>
+<label>Serial <input id="f-serial" value="SN12345678"></label>
+<label>Full charge mWh <input id="f-fcc" value="40000"></label>
+<label>Design mWh <input id="f-design" value="50000"></label>
+<label>CPU <input id="f-cpu" value="i5-1234X"></label>
 <label>RAM (GB) <input id="f-ram" value="16"></label>
 <label>Drive <input id="f-drive" value="256GB"></label>
 <label>Date + initials <input id="f-date" value=""></label>
