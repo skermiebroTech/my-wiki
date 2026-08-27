@@ -17,6 +17,19 @@ printf 'SKU: ' > /dev/tty; read SKU < "$TTY"
 printf 'Grade: ' > /dev/tty; read GRADE < "$TTY"
 printf 'Initials: ' > /dev/tty; read INITIALS < "$TTY"
 printf 'Asset tag: ' > /dev/tty; read G1ID < "$TTY"
+printf 'Reset? (y/n): ' > /dev/tty; read RESET_ANS < "$TTY"
+
+GRADE=$(printf '%s' "$GRADE" | tr '[:lower:]' '[:upper:]')
+INITIALS=$(printf '%s' "$INITIALS" | tr '[:lower:]' '[:upper:]')
+
+case "$RESET_ANS" in
+  y|Y|yes|YES|Yes)
+    RESET_LABEL="RESET"
+    open "/System/Library/CoreServices/Erase Assistant.app" 2>/dev/null \
+      || open "x-apple.systempreferences:com.apple.Transfer-Reset-Settings.extension" 2>/dev/null
+    ;;
+  *) RESET_LABEL="NOT RESET" ;;
+esac
 
 [ -z "$G1ID" ] && G1ID="1234567"
 
@@ -62,7 +75,7 @@ ZPL="^XA
 ^FS^FO345,260^ARN,60,50^FB350,6,5,L,0^FD${RAM_GB} GB RAM
 ^FS^FO350,320^ARN,60,50^FB350,6,5,L,0^FD${DRIVE}
 ^FS^FO760,130^ARB,40,40^FD${DATE}
-^FS^FO730,130^ARB,40,40^FDSYSPREPPED
+^FS^FO730,130^ARB,40,40^FD${RESET_LABEL}
 ^XZ"
 
 echo "SKU=$SKU GRADE=$GRADE G1=$G1ID | $MODEL $SERIAL | $CPU ${RAM_GB}GB $DRIVE | $BATT $CAP"
