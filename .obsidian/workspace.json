@@ -41,12 +41,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "docs/label-editor.md",
+                "file": "docs/index.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "label-editor"
+              "title": "index"
             }
           }
         ],
@@ -216,8 +216,6 @@
   },
   "active": "b98051cbc092f948",
   "lastOpenFiles": [
-    "Print-G1Sticker-mac.sh",
-    "g1-template-mac.sh",
     "site/search/search_index.json",
     "site/search",
     "site/Panasonic/panasonic-fzg1/index.html",
@@ -227,8 +225,11 @@
     "site/todo",
     "site/label-editor/index.html",
     "site/label-editor",
-    "docs/index.md",
+    "site/fp-test/index.html",
+    "site/fp-test",
+    "docs/auto-driver-installer.md.old.md",
     "docs/label-editor.md",
+    "docs/index.md",
     "README.md",
     "docs/Useful-Links.md",
     "docs/cab-file-driver-installation.md",
@@ -237,7 +238,6 @@
     "Intel RST.md",
     "docs/Auto-Installer-Docs.md",
     "docs/driver-installation.md",
-    "docs/auto-driver-installer.md.old.md",
     "docs/auto-driver-installer.md",
     "docs/Panasonic/panasonic-fzg1.md",
     "docs/quick-start.md.old.md",

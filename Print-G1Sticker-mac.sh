@@ -1,14 +1,24 @@
 #!/bin/zsh
 # Print a G1-style sticker to the Zebra label printer, autofilled from this Mac's hardware.
-# Usage: zsh Print-G1Sticker-mac.sh [SKU] [GRADE] [G1ID]
-# Or run via: curl -s https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Print-G1Sticker-mac.sh | zsh -s -- MYSKU B 5742320
+# Usage: zsh Print-G1Sticker-mac.sh
+# Or run via: curl -s https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Print-G1Sticker-mac.sh | zsh
 
 PRINTER_IP="172.17.31.195"
 PRINTER_PORT=9100
 
-SKU="${1:-}"
-GRADE="${2:-}"
-G1ID="${3:-1234567}"
+# Read prompts from the terminal so this works when piped from curl.
+if [ -r /dev/tty ]; then
+  TTY=/dev/tty
+else
+  TTY=/dev/stdin
+fi
+
+printf 'SKU: ' > /dev/tty; read SKU < "$TTY"
+printf 'Grade: ' > /dev/tty; read GRADE < "$TTY"
+printf 'Initials: ' > /dev/tty; read INITIALS < "$TTY"
+printf 'Asset tag: ' > /dev/tty; read G1ID < "$TTY"
+
+[ -z "$G1ID" ] && G1ID="1234567"
 
 MODEL=$(system_profiler SPHardwareDataType | awk -F': ' '/Model Name/{print $2}')
 SERIAL=$(system_profiler SPHardwareDataType | awk -F': ' '/Serial Number/{print $2}')
@@ -25,7 +35,7 @@ if [ -n "$BATT" ]; then
 else
   BATT="N/A"; CAP="no battery"
 fi
-DATE="$(date +%d/%m/%Y) JS"
+DATE="$(date +%d/%m/%Y) ${INITIALS:-JS}"
 
 # SKU font: scalable font 0 sized so the text spans ~320 dots (label edge to SKU caption)
 SKULEN=${#SKU}
