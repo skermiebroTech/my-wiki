@@ -37,14 +37,40 @@ MODEL=$(system_profiler SPHardwareDataType | awk -F': ' '/Model Name/{print $2}'
 SERIAL=$(system_profiler SPHardwareDataType | awk -F': ' '/Serial Number/{print $2}')
 CPU=$(sysctl -n machdep.cpu.brand_string 2>/dev/null)
 [ -z "$CPU" ] && CPU=$(system_profiler SPHardwareDataType | awk -F': ' '/Chip/{print $2}')
+# Shorten long Intel strings: "Intel(R) Core(TM) i9-9880H CPU @ 2.30GHz" -> "i9-9880H"
+CPU=$(printf '%s' "$CPU" \
+  | sed -E 's/Intel\(R\) //; s/Core\(TM\) //; s/ CPU / /; s/ @ [0-9.]+ ?GHz//; s/  +/ /g' \
+  | sed -E 's/^ +//; s/ +$//')
 RAM_GB=$(( $(sysctl -n hw.memsize) / 1073741824 ))
 DRIVE=$(df -H / | awk 'NR==2{print $2}' | sed 's/G/GB/;s/T/TB/')
 POWER=$(system_profiler SPPowerDataType)
 BATT=$(echo "$POWER" | awk -F': ' '/Maximum Capacity/{gsub(/[ \t]/,"",$2); print $2}')
 CYCLES=$(echo "$POWER" | awk -F': ' '/Cycle Count/{gsub(/[ \t]/,"",$2); print $2}')
 CONDITION=$(echo "$POWER" | awk -F': ' '/Condition/{gsub(/^[ \t]+/,"",$2); print $2}')
+
+# Intel Macs on older macOS do not report "Maximum Capacity" as a percentage.
+# Fall back to computing it from ioreg's design vs full-charge capacity.
+if [ -z "$BATT" ]; then
+  BATT_INFO=$(ioreg -rn AppleSmartBattery 2>/dev/null)
+  if [ -n "$BATT_INFO" ]; then
+    # Match only top-level ioreg property lines (`  "Key" = value`), skip JSON blobs.
+    DESIGN=$(printf '%s' "$BATT_INFO" | awk '/^[[:space:]]*"DesignCapacity" = [0-9]+/{print $3; exit}')
+    MAXCAP=$(printf '%s' "$BATT_INFO" | awk '/^[[:space:]]*"AppleRawMaxCapacity" = [0-9]+/{print $3; exit}')
+    [ -z "$MAXCAP" ] && MAXCAP=$(printf '%s' "$BATT_INFO" | awk '/^[[:space:]]*"MaxCapacity" = [0-9]+/{print $3; exit}')
+    if [ -n "$DESIGN" ] && [ "$DESIGN" -gt 0 ] && [ -n "$MAXCAP" ]; then
+      PCT=$(( MAXCAP * 100 / DESIGN ))
+      BATT="${PCT}%"
+    fi
+    [ -z "$CYCLES" ] && CYCLES=$(printf '%s' "$BATT_INFO" | awk '/^[[:space:]]*"CycleCount" = [0-9]+/{print $3; exit}')
+  fi
+fi
+
 if [ -n "$BATT" ]; then
-  CAP="${CYCLES} cycles, ${CONDITION}"
+  if [ -n "$CONDITION" ]; then
+    CAP="${CYCLES} cycles, ${CONDITION}"
+  else
+    CAP="${CYCLES} cycles"
+  fi
 else
   BATT="N/A"; CAP="no battery"
 fi
