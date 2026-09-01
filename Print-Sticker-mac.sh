@@ -1,7 +1,7 @@
 #!/bin/zsh
 # Print a G1-style sticker to the Zebra label printer, autofilled from this Mac's hardware.
-# Usage: zsh Print-G1Sticker-mac.sh
-# Or run via: curl -s https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Print-G1Sticker-mac.sh | zsh
+# Usage: zsh Print-Sticker-mac.sh
+# Or run via: curl -s https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Print-Sticker-mac.sh | zsh
 
 PRINTER_IP="172.17.31.195"
 PRINTER_PORT=9100
