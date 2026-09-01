@@ -216,6 +216,7 @@
   },
   "active": "b98051cbc092f948",
   "lastOpenFiles": [
+    "Print-Sticker-mac.sh",
     "site/search/search_index.json",
     "site/search",
     "site/Panasonic/panasonic-fzg1/index.html",
@@ -226,7 +227,6 @@
     "site/label-editor/index.html",
     "site/label-editor",
     "site/fp-test/index.html",
-    "site/fp-test",
     "docs/auto-driver-installer.md.old.md",
     "docs/label-editor.md",
     "docs/index.md",

@@ -14,7 +14,7 @@ powershell -NoProfile -Command "irm https://raw.githubusercontent.com/skermiebro
 ```
 ## MacOS sticker printer
 ```
-curl -s https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Print-Sticker-mac.sh | zsh -s -- <SKU> <GRADE> <ASSET>
+curl -s https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Print-Sticker-mac.sh | zsh
 ```
 ## Links
 
