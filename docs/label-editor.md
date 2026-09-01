@@ -18,7 +18,7 @@ Edit the fields, check the preview, then copy the print command and paste it int
 <label>SKU <input id="f-sku" value="DEMO"></label>
 <label>Grade <input id="f-grade" value="B"></label>
 <label>Battery % <input id="f-batt" value="80%"></label>
-<label>G1 ID (also QR) <input id="f-g1" value="1234567"></label>
+<label>Asset ID (also QR) <input id="f-asset" value="1234567"></label>
 <label>Model <input id="f-model" value="Example Laptop 9000"></label>
 <label>Serial <input id="f-serial" value="SN12345678"></label>
 <label>Full charge mWh <input id="f-fcc" value="40000"></label>
@@ -67,8 +67,8 @@ macOS — paste into Terminal:
       '\n^FX String that says SKU\n^FS\n^FO' + skuX + ',' + skuY + '\n^A0B,' + skuH + ',' + skuW + '\n^FD' + v('f-sku') + '\n' +
       '\n^FX String that says the grade\n^FS\n^FO172,0\n^ARN,175,225\n^FD' + v('f-grade') + '\n' +
       '\n^FX String that says the battery percentage\n^FS\n^FO200,155\n^ARN,25,12\n^FD' + v('f-batt') + '\n' +
-      '\n^FX The QR Code\n^FS\n^FO150,190\n^BQN,2,8\n^FDMA,' + v('f-g1') + '\n' +
-      '\n^FX String that says G1 Number\n^FS\n^FO345,5\n^ARN,120,100\n^FD' + v('f-g1') + '\n' +
+      '\n^FX The QR Code\n^FS\n^FO150,190\n^BQN,2,8\n^FDMA,' + v('f-asset') + '\n' +
+      '\n^FX String that says Asset Number\n^FS\n^FO345,5\n^ARN,120,100\n^FD' + v('f-asset') + '\n' +
       '\n^FX String that says the Laptop Model\n^FS\n^FO350,100\n^ARN,10,5\n^FB350,6,5,L,0\n^FD' + v('f-model') + '\n' +
       '\n^FX String that says the Serial Number\n^FS\n^FO350,135\n^ARN,10,5\n^FB350,6,5,L,0\n^FDSN: ' + v('f-serial') + '\n' +
       '\n^FX String that says the Battery Capacity\n^FS\n^FO350,170\n^ARN,10,5\n^FB350,6,5,L,0\n^FD' + v('f-fcc') + '/' + v('f-design') + ' mWh\n' +

@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Print a G1-style sticker to the Zebra label printer, autofilled from this Mac's hardware.
+# Print a sticker to the Zebra label printer, autofilled from this Mac's hardware.
 # Usage: zsh Print-Sticker-mac.sh
 # Or run via: curl -s https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Print-Sticker-mac.sh | zsh
 
@@ -16,7 +16,7 @@ fi
 printf 'SKU: ' > /dev/tty; read SKU < "$TTY"
 printf 'Grade: ' > /dev/tty; read GRADE < "$TTY"
 printf 'Initials: ' > /dev/tty; read INITIALS < "$TTY"
-printf 'Asset tag: ' > /dev/tty; read G1ID < "$TTY"
+printf 'Asset tag: ' > /dev/tty; read ASSETID < "$TTY"
 printf 'Reset? (y/n): ' > /dev/tty; read RESET_ANS < "$TTY"
 
 GRADE=$(printf '%s' "$GRADE" | tr '[:lower:]' '[:upper:]')
@@ -31,7 +31,7 @@ case "$RESET_ANS" in
   *) RESET_LABEL="NOT RESET" ;;
 esac
 
-[ -z "$G1ID" ] && G1ID="1234567"
+[ -z "$ASSETID" ] && ASSETID="1234567"
 
 MODEL=$(system_profiler SPHardwareDataType | awk -F': ' '/Model Name/{print $2}')
 SERIAL=$(system_profiler SPHardwareDataType | awk -F': ' '/Serial Number/{print $2}')
@@ -92,8 +92,8 @@ ZPL="^XA
 ^FS^FO${SKUX},10^A0B,${SKUH},${SKUW}^FD${SKU}
 ^FS^FO172,0^ARN,175,225^FD${GRADE}
 ^FS^FO200,155^ARN,25,12^FD${BATT}
-^FS^FO150,190^BQN,2,8^FDMA,${G1ID}
-^FS^FO345,5^ARN,120,100^FD${G1ID}
+^FS^FO150,190^BQN,2,8^FDMA,${ASSETID}
+^FS^FO345,5^ARN,120,100^FD${ASSETID}
 ^FS^FO350,100^ARN,10,5^FB350,6,5,L,0^FD${MODEL}
 ^FS^FO350,135^ARN,10,5^FB350,6,5,L,0^FDSN: ${SERIAL}
 ^FS^FO350,170^ARN,10,5^FB350,6,5,L,0^FD${CAP}
@@ -104,5 +104,5 @@ ZPL="^XA
 ^FS^FO730,130^ARB,40,40^FD${RESET_LABEL}
 ^XZ"
 
-echo "SKU=$SKU GRADE=$GRADE G1=$G1ID | $MODEL $SERIAL | $CPU ${RAM_GB}GB $DRIVE | $BATT $CAP"
+echo "SKU=$SKU GRADE=$GRADE ASSET=$ASSETID | $MODEL $SERIAL | $CPU ${RAM_GB}GB $DRIVE | $BATT $CAP"
 printf '%s' "$ZPL" | nc -w 3 "$PRINTER_IP" "$PRINTER_PORT" && echo "Label sent." || echo "Failed to reach printer $PRINTER_IP:$PRINTER_PORT"
