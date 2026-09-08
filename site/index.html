@@ -318,6 +318,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#windows-11-oobe-bypass" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Windows 11 OOBE bypass
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#battery-health-label" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -506,6 +517,33 @@
   
   
     <li class="md-nav__item">
+      <a href="oobe-bypass/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Windows 11 OOBE Bypass
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="Useful-Links/" class="md-nav__link">
         
   
@@ -568,10 +606,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
         
           
-          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
             
   
   
@@ -589,8 +627,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_8">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -738,6 +776,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#windows-11-oobe-bypass" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Windows 11 OOBE bypass
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#battery-health-label" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -827,6 +876,11 @@
 <h2 id="dev-version-could-be-unstable">DEV Version (could be unstable)<a class="headerlink" href="#dev-version-could-be-unstable" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>powershell -ExecutionPolicy Bypass -Command &quot;irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto-dev.ps1 | iex&quot;
 </code></pre></div>
+<h2 id="windows-11-oobe-bypass">Windows 11 OOBE bypass<a class="headerlink" href="#windows-11-oobe-bypass" title="Permanent link">&para;</a></h2>
+<p>Creates a local admin <code>user</code> with no password, skips OOBE, and reboots. Press Shift+F10 at any OOBE screen:
+<div class="highlight"><pre><span></span><code>powershell -ep bypass -nop -c &quot;irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Bypass-OOBE.ps1 | iex&quot;
+</code></pre></div>
+No network at OOBE? Put <a href="https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Bypass-OOBE.cmd">Bypass-OOBE.cmd</a> on a USB stick and run <code>X:\Bypass-OOBE.cmd</code>. See the <a href="oobe-bypass/">full guide</a>.</p>
 <h2 id="battery-health-label">Battery Health Label<a class="headerlink" href="#battery-health-label" title="Permanent link">&para;</a></h2>
 <p>Prints battery health % to the Zebra label printer (172.17.21.186). Run from Win+R:
 <div class="highlight"><pre><span></span><code>powershell -NoProfile -Command &quot;irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Print-BatteryLabel.ps1|iex&quot;
