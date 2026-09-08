@@ -7,6 +7,12 @@ powershell -WindowStyle Hidden -ExecutionPolicy Bypass -Command "irm https://raw
 ```
 powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto-dev.ps1 | iex"
 ```
+## Windows 11 OOBE bypass
+Creates a local admin `user` with no password, skips OOBE, and reboots. Press Shift+F10 at any OOBE screen:
+```
+powershell -ep bypass -nop -c "irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Bypass-OOBE.ps1 | iex"
+```
+No network at OOBE? Put [Bypass-OOBE.cmd](https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Bypass-OOBE.cmd) on a USB stick and run `X:\Bypass-OOBE.cmd`. See the [full guide](oobe-bypass.md).
 ## Battery Health Label
 Prints battery health % to the Zebra label printer (172.17.21.186). Run from Win+R:
 ```
