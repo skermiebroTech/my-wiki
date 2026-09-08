@@ -54,7 +54,7 @@ param(
     [switch]$Force
 )
 
-$SCRIPT_VERSION = '1.1.0'
+$SCRIPT_VERSION = '1.2.0'
 $ErrorActionPreference = 'Continue'
 try { $Host.UI.RawUI.WindowTitle = 'OOBE Bypass' } catch {}
 

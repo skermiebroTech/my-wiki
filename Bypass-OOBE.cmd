@@ -1,6 +1,6 @@
 @echo off
 REM ===================================================================
-REM  Bypass-OOBE.cmd  v1.1.0
+REM  Bypass-OOBE.cmd  v1.2.0
 REM  Windows 11 OOBE bypass. No network needed.
 REM
 REM  Put this file on a USB stick. At any Windows 11 OOBE screen press
@@ -10,6 +10,7 @@ REM      X:\Bypass-OOBE.cmd
 REM
 REM  Optional first argument sets the account name (default: user).
 REM  Add /autologon to boot straight to the desktop.
+REM  Add /force to run on a machine that is already set up.
 REM
 REM      X:\Bypass-OOBE.cmd tech /autologon
 REM
@@ -21,21 +22,70 @@ setlocal EnableExtensions
 
 set "ACCT=user"
 set "AUTOLOGON=0"
+set "FORCE=0"
+set "SIGNALS=0"
 
 REM ---- read arguments ----
+REM Read the argument before the shift. A %~1 inside a parenthesised block
+REM freezes at parse time, so the shift must not sit inside the block.
 :parse
 if "%~1"=="" goto parsed
-if /i "%~1"=="/autologon" (set "AUTOLOGON=1") else (set "ACCT=%~1")
+set "ARG=%~1"
 shift
+if /i "%ARG%"=="/autologon" (set "AUTOLOGON=1") else if /i "%ARG%"=="/force" (set "FORCE=1") else (set "ACCT=%ARG%")
 goto parse
 :parsed
 
 echo.
 echo   ===================================================
-echo      Windows 11 OOBE Bypass  v1.1.0
+echo      Windows 11 OOBE Bypass  v1.2.0
 echo   ===================================================
 echo.
 echo   Account: %ACCT%  (no password, local administrator)
+echo.
+
+REM ---- 0. is Windows in OOBE? ----
+REM Windows 11 24H2 and LTSC 26100 clear SystemSetupInProgress and set
+REM ImageState to IMAGE_STATE_COMPLETE BEFORE the OOBE pages appear. Those two
+REM values alone report "already set up" in the middle of OOBE. Count several
+REM signals instead and accept any one of them.
+echo   [0] Checks
+
+if /i "%USERNAME%"=="defaultuser0" call :hit "identity is defaultuser0"
+
+REM Windows deletes defaultuser0 when OOBE finishes, so it is a strong signal.
+net user defaultuser0 >nul 2>&1
+if not errorlevel 1 call :hit "defaultuser0 account exists"
+
+reg query "HKLM\SYSTEM\Setup" /v SystemSetupInProgress 2>nul | find "0x1" >nul
+if not errorlevel 1 call :hit "SystemSetupInProgress = 1"
+
+reg query "HKLM\SYSTEM\Setup" /v OOBEInProgress 2>nul | find "0x1" >nul
+if not errorlevel 1 call :hit "OOBEInProgress = 1"
+
+reg query "HKLM\SYSTEM\Setup" /v CmdLine 2>nul | findstr /i "windeploy oobe" >nul
+if not errorlevel 1 call :hit "Setup CmdLine starts OOBE"
+
+REM ImageState counts only when the value exists and is not COMPLETE.
+set "IMGDONE="
+reg query "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Setup\State" /v ImageState 2>nul | find /i "IMAGE_STATE_COMPLETE" >nul
+if not errorlevel 1 set "IMGDONE=1"
+reg query "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Setup\State" /v ImageState 2>nul | find /i "IMAGE_STATE" >nul
+if errorlevel 1 set "IMGDONE=1"
+if not defined IMGDONE call :hit "ImageState is not complete"
+
+if %SIGNALS% GTR 0 goto oobe_ok
+if "%FORCE%"=="1" (
+    echo   [WARN] Windows is already set up. /force given, so the script continues.
+    goto oobe_ok
+)
+echo   [FAIL] Windows is already set up. OOBE is not running.
+echo          This script creates a passwordless administrator.
+echo          Add /force only if you want that here.
+echo.
+pause
+exit /b 1
+:oobe_ok
 echo.
 
 REM ---- 1. create the local administrator ----
@@ -94,3 +144,10 @@ echo.
 echo   Reboot in 5 seconds. Press Ctrl+C to stop.
 shutdown /r /t 5 /f
 endlocal
+exit /b 0
+
+REM ---- subroutine: record one OOBE signal ----
+:hit
+set /a SIGNALS+=1
+echo   [ OK ] OOBE signal: %~1
+goto :eof
