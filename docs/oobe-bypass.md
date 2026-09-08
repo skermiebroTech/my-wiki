@@ -102,7 +102,11 @@ behind.
 - **Computer name.** Windows keeps the random `DESKTOP-XXXXXXX` name. Rename the
   machine after sign-in.
 - **Guard.** The PowerShell script refuses to run when Windows is already set
-  up. Add `-Force` to override that.
+  up. Add `-Force` to override that. Windows 11 24H2 and LTSC 26100 clear
+  `SystemSetupInProgress` and set `ImageState` to `IMAGE_STATE_COMPLETE` before
+  the OOBE pages appear, so the script does not trust those two values alone. It
+  also looks for the `defaultuser0` account, which exists only during OOBE. The
+  script prints every signal it finds.
 - **Undo the automatic sign-in.** Set
   `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\AutoAdminLogon`
   to `0` and delete `DefaultPassword`.

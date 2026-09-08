@@ -54,7 +54,7 @@ param(
     [switch]$Force
 )
 
-$SCRIPT_VERSION = '1.0.0'
+$SCRIPT_VERSION = '1.1.0'
 $ErrorActionPreference = 'Continue'
 try { $Host.UI.RawUI.WindowTitle = 'OOBE Bypass' } catch {}
 
@@ -92,12 +92,37 @@ if (-not $isAdmin) {
 }
 Pass 'Running with administrator rights.'
 
+# OOBE detection.
+# Windows 11 24H2 and LTSC 26100 clear SystemSetupInProgress and set ImageState
+# to IMAGE_STATE_COMPLETE BEFORE the OOBE pages appear. Those two values alone
+# report "already set up" in the middle of OOBE. Test several signals instead
+# and accept any one of them.
+$setup    = Get-ItemProperty 'HKLM:\SYSTEM\Setup' -ErrorAction SilentlyContinue
 $imgState = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Setup\State' -ErrorAction SilentlyContinue).ImageState
-$setupFlag = (Get-ItemProperty 'HKLM:\SYSTEM\Setup' -ErrorAction SilentlyContinue).SystemSetupInProgress
-$inOobe = ($setupFlag -eq 1) -or ($imgState -and $imgState -ne 'IMAGE_STATE_COMPLETE')
+$who      = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+
+# Windows deletes defaultuser0 when OOBE finishes, so it is a strong signal.
+& net.exe user defaultuser0 2>$null | Out-Null
+$hasDefaultUser0 = ($LASTEXITCODE -eq 0)
+
+$signals = [ordered]@{
+    'identity is defaultuser0'      = ($who -like '*\defaultuser0')
+    'defaultuser0 account exists'   = $hasDefaultUser0
+    'SystemSetupInProgress = 1'     = ($setup.SystemSetupInProgress -eq 1)
+    'OOBEInProgress = 1'            = ($setup.OOBEInProgress -eq 1)
+    'Setup CmdLine starts OOBE'     = ($setup.CmdLine -match 'windeploy|oobe')
+    'ImageState is not complete'    = ([bool]$imgState -and $imgState -ne 'IMAGE_STATE_COMPLETE')
+}
+
+foreach ($k in $signals.Keys) {
+    if ($signals[$k]) { Pass "OOBE signal: $k" }
+}
+Info "ImageState='$imgState' SystemSetupInProgress='$($setup.SystemSetupInProgress)' CmdLine='$($setup.CmdLine)'"
+
+$inOobe = @($signals.Values | Where-Object { $_ }).Count -gt 0
 
 if ($inOobe) {
-    Pass "Windows is in setup. ImageState: $imgState"
+    Pass 'Windows is in OOBE.'
 } elseif ($Force) {
     Warn 'Windows is already set up. -Force given, so the script continues.'
 } else {
