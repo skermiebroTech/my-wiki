@@ -1,6 +1,6 @@
 @echo off
 REM ===================================================================
-REM  Bypass-OOBE.cmd  v1.0.0
+REM  Bypass-OOBE.cmd  v1.1.0
 REM  Windows 11 OOBE bypass. No network needed.
 REM
 REM  Put this file on a USB stick. At any Windows 11 OOBE screen press
@@ -32,7 +32,7 @@ goto parse
 
 echo.
 echo   ===================================================
-echo      Windows 11 OOBE Bypass  v1.0.0
+echo      Windows 11 OOBE Bypass  v1.1.0
 echo   ===================================================
 echo.
 echo   Account: %ACCT%  (no password, local administrator)
