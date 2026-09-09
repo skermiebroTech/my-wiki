@@ -9,6 +9,13 @@ account, no network, no privacy pages, no region or keyboard pages.
     Anyone at the keyboard gets administrator rights. Use this on bench machines
     only. Set a password before the machine leaves the workshop.
 
+!!! danger "This skips a Windows Autopilot enrollment"
+    A company machine can hold an Autopilot registration. This script skips the
+    OOBE page that starts the enrollment, so the machine never joins the company
+    tenant. The registration itself stays, and it comes back on the next clean
+    installation. Read [Windows Autopilot](#windows-autopilot) before you use
+    this on a machine with an unknown history.
+
 ## Run it
 
 Press **Shift+F10** at any Windows 11 OOBE screen. A command prompt opens with
@@ -90,6 +97,50 @@ continues.
 
 The script deletes the `defaultuser0` placeholder account that OOBE leaves
 behind.
+
+## Windows Autopilot
+
+Windows Autopilot enrolls a company machine into Microsoft Intune during OOBE.
+This script skips OOBE, so the enrollment never starts. Know the limits before
+you depend on that.
+
+### The registration stays
+
+The registration is not on the machine. It sits in the company Microsoft tenant,
+and it points to the hardware hash of the machine. This script writes to the
+local registry only, so the registration remains untouched.
+
+That gives you three results:
+
+- The machine starts with a local account and no company management.
+- The next clean installation of Windows brings the enrollment back, as soon as
+  OOBE reaches a network.
+- A Windows reset brings it back as well.
+
+So this is a bypass, not a removal. Only the company that holds the registration
+can remove it. An administrator removes it under **Intune → Devices →
+Enrollment → Windows Autopilot devices**. A hardware partner removes it in
+Partner Center.
+
+### What it does not touch
+
+Autopilot is a cloud service, not a hardware lock. This script does not remove,
+and cannot remove:
+
+- a BIOS or UEFI supervisor password
+- a hard disk password
+- a BitLocker recovery requirement
+
+### Check the machine first
+
+Connect ethernet at the first OOBE page and wait. A machine with a registration
+shows a company name or a company logo on the sign-in page, in place of the
+normal Microsoft account page. That is your signal to stop.
+
+!!! warning "Do not remove management from a machine you do not own"
+    A company machine that still holds a registration is still a company asset.
+    Ask the previous owner to deregister it, and keep the proof. A bypass hides
+    the problem from you, but the buyer still meets it on the next reinstall.
 
 ## Notes
 
