@@ -483,6 +483,56 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#windows-autopilot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Windows Autopilot
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Windows Autopilot">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-registration-stays" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The registration stays
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-it-does-not-touch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it does not touch
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#check-the-machine-first" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Check the machine first
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#notes" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -768,6 +818,56 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#windows-autopilot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Windows Autopilot
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Windows Autopilot">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-registration-stays" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The registration stays
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-it-does-not-touch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it does not touch
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#check-the-machine-first" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Check the machine first
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#notes" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -804,6 +904,14 @@ account, no network, no privacy pages, no region or keyboard pages.</p>
 <p class="admonition-title">The account has no password</p>
 <p>Anyone at the keyboard gets administrator rights. Use this on bench machines
 only. Set a password before the machine leaves the workshop.</p>
+</div>
+<div class="admonition danger">
+<p class="admonition-title">This skips a Windows Autopilot enrollment</p>
+<p>A company machine can hold an Autopilot registration. This script skips the
+OOBE page that starts the enrollment, so the machine never joins the company
+tenant. The registration itself stays, and it comes back on the next clean
+installation. Read <a href="#windows-autopilot">Windows Autopilot</a> before you use
+this on a machine with an unknown history.</p>
 </div>
 <h2 id="run-it">Run it<a class="headerlink" href="#run-it" title="Permanent link">&para;</a></h2>
 <p>Press <strong>Shift+F10</strong> at any Windows 11 OOBE screen. A command prompt opens with
@@ -937,6 +1045,43 @@ continues.</p>
 <p><strong>3. Clean-up</strong></p>
 <p>The script deletes the <code>defaultuser0</code> placeholder account that OOBE leaves
 behind.</p>
+<h2 id="windows-autopilot">Windows Autopilot<a class="headerlink" href="#windows-autopilot" title="Permanent link">&para;</a></h2>
+<p>Windows Autopilot enrolls a company machine into Microsoft Intune during OOBE.
+This script skips OOBE, so the enrollment never starts. Know the limits before
+you depend on that.</p>
+<h3 id="the-registration-stays">The registration stays<a class="headerlink" href="#the-registration-stays" title="Permanent link">&para;</a></h3>
+<p>The registration is not on the machine. It sits in the company Microsoft tenant,
+and it points to the hardware hash of the machine. This script writes to the
+local registry only, so the registration remains untouched.</p>
+<p>That gives you three results:</p>
+<ul>
+<li>The machine starts with a local account and no company management.</li>
+<li>The next clean installation of Windows brings the enrollment back, as soon as
+  OOBE reaches a network.</li>
+<li>A Windows reset brings it back as well.</li>
+</ul>
+<p>So this is a bypass, not a removal. Only the company that holds the registration
+can remove it. An administrator removes it under <strong>Intune → Devices →
+Enrollment → Windows Autopilot devices</strong>. A hardware partner removes it in
+Partner Center.</p>
+<h3 id="what-it-does-not-touch">What it does not touch<a class="headerlink" href="#what-it-does-not-touch" title="Permanent link">&para;</a></h3>
+<p>Autopilot is a cloud service, not a hardware lock. This script does not remove,
+and cannot remove:</p>
+<ul>
+<li>a BIOS or UEFI supervisor password</li>
+<li>a hard disk password</li>
+<li>a BitLocker recovery requirement</li>
+</ul>
+<h3 id="check-the-machine-first">Check the machine first<a class="headerlink" href="#check-the-machine-first" title="Permanent link">&para;</a></h3>
+<p>Connect ethernet at the first OOBE page and wait. A machine with a registration
+shows a company name or a company logo on the sign-in page, in place of the
+normal Microsoft account page. That is your signal to stop.</p>
+<div class="admonition warning">
+<p class="admonition-title">Do not remove management from a machine you do not own</p>
+<p>A company machine that still holds a registration is still a company asset.
+Ask the previous owner to deregister it, and keep the proof. A bypass hides
+the problem from you, but the buyer still meets it on the next reinstall.</p>
+</div>
 <h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Windows 11 24H2 and later.</strong> Microsoft removed the <code>oobe\bypassnro</code> command
@@ -948,7 +1093,11 @@ behind.</p>
 <li><strong>Computer name.</strong> Windows keeps the random <code>DESKTOP-XXXXXXX</code> name. Rename the
   machine after sign-in.</li>
 <li><strong>Guard.</strong> The PowerShell script refuses to run when Windows is already set
-  up. Add <code>-Force</code> to override that.</li>
+  up. Add <code>-Force</code> to override that. Windows 11 24H2 and LTSC 26100 clear
+  <code>SystemSetupInProgress</code> and set <code>ImageState</code> to <code>IMAGE_STATE_COMPLETE</code> before
+  the OOBE pages appear, so the script does not trust those two values alone. It
+  also looks for the <code>defaultuser0</code> account, which exists only during OOBE. The
+  script prints every signal it finds.</li>
 <li><strong>Undo the automatic sign-in.</strong> Set
   <code>HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\AutoAdminLogon</code>
   to <code>0</code> and delete <code>DefaultPassword</code>.</li>
