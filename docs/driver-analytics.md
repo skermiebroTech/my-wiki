@@ -341,14 +341,34 @@
       (rows.length > view.length ? " (table capped at 200 — use the filter)" : "");
   }
 
+  // Time range: keep every fetched row in RAW, show the subset for the selected
+  // range (0 = all time) in ALL. render() and the recent-runs table both read ALL.
+  function setRange(days) {
+    curDays = num(days);
+    if (!curDays) { ALL = RAW.slice(); }
+    else {
+      var cutoff = Date.now() - curDays * 86400000;
+      ALL = RAW.filter(function (r) { var t = new Date(r.timestamp).getTime(); return !isNaN(t) && t >= cutoff; });
+    }
+    var btns = $("dia-range").querySelectorAll("button");
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].classList.toggle("active", num(btns[i].getAttribute("data-days")) === curDays);
+    }
+    render(ALL);
+  }
+  $("dia-range").addEventListener("click", function (ev) {
+    var b = ev.target.closest ? ev.target.closest("button[data-days]") : null;
+    if (b) setRange(b.getAttribute("data-days"));
+  });
+
   function load() {
     $("dia-status").textContent = "Loading analytics…";
     fetch(WEBHOOK, { method: "GET" })
       .then(function (r) { return r.json(); })
       .then(function (d) {
         if (d && d.error) throw new Error(d.error);
-        var rows = (d && d.rows) ? d.rows : [];
-        render(rows);
+        RAW = (d && d.rows) ? d.rows : [];
+        setRange(curDays);
         $("dia-status").textContent = "Live from Google Sheet · updated " + new Date().toLocaleTimeString();
       })
       .catch(function (err) {

@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -31,7 +31,7 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -902,17 +902,17 @@
 <li>Download this file <a href="https://na.panasonic.com/computer/cab/G1F_Mk2_Win10x64_1803_V1.00.cab">Download</a></li>
 <li><strong>After Download Is complete</strong> run the following in powershell as Administrator</li>
 </ul>
-<div class="highlight"><pre><span></span><code><span class="nv">$cab</span><span class="p">=</span><span class="s2">&quot;C:\Users\Administrator\Downloads\G1F_Mk2_Win10x64_1803_V1.00.cab&quot;</span>
-<span class="nv">$out</span><span class="p">=</span><span class="s2">&quot;C:\Drivers\FZ-G1&quot;</span>
+<div class="highlight"><pre><span></span><code><span class="nv">$cab</span><span class="p">=</span><span class="s2">"C:\Users\Administrator\Downloads\G1F_Mk2_Win10x64_1803_V1.00.cab"</span>
+<span class="nv">$out</span><span class="p">=</span><span class="s2">"C:\Drivers\FZ-G1"</span>
 <span class="n">mkdir</span> <span class="nv">$out</span> <span class="n">-Force</span> <span class="p">|</span> <span class="nb">Out-Null</span>
 <span class="n">expand</span> <span class="o">-F</span><span class="p">:*</span> <span class="nv">$cab</span> <span class="nv">$out</span>
-<span class="n">pnputil</span> <span class="p">/</span><span class="nb">add-driver</span> <span class="s2">&quot;$out\*.inf&quot;</span> <span class="p">/</span><span class="n">subdirs</span> <span class="p">/</span><span class="n">install</span>
+<span class="n">pnputil</span> <span class="p">/</span><span class="nb">add-driver</span> <span class="s2">"$out\*.inf"</span> <span class="p">/</span><span class="n">subdirs</span> <span class="p">/</span><span class="n">install</span>
 </code></pre></div>
 <ul>
 <li>⚠️ Reboot after complete</li>
 </ul>
 <p>If you need to rerun use the following:</p>
-<div class="highlight"><pre><span></span><code><span class="n">pnputil</span> <span class="p">/</span><span class="nb">add-driver</span> <span class="s2">&quot;C:\Drivers\FZ-G1\*.inf&quot;</span> <span class="p">/</span><span class="n">subdirs</span> <span class="p">/</span><span class="n">install</span>
+<div class="highlight"><pre><span></span><code><span class="n">pnputil</span> <span class="p">/</span><span class="nb">add-driver</span> <span class="s2">"C:\Drivers\FZ-G1\*.inf"</span> <span class="p">/</span><span class="n">subdirs</span> <span class="p">/</span><span class="n">install</span>
 </code></pre></div>
 <hr />
 <h2 id="step-5">Step 5<a class="headerlink" href="#step-5" title="Permanent link">&para;</a></h2>
@@ -985,7 +985,7 @@
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
       
         <script src="../../js/open_in_new_tab.js"></script>
       
