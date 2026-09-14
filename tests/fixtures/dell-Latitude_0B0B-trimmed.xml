@@ -1,0 +1,1164 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Manifest xmlns="openmanage/cm/dm" baseLocation="downloads.dell.com" dateTime="2026-09-11T08:30:13-05:00" identifier="df0db6b5-29cd-428e-9301-d0fb310eb397" releaseID="D0T8G" version="2026.09.11">
+  <SoftwareComponent schemaVersion="3.0" releaseID="KDGRR" releaseDate="October 20, 2021" vendorVersion="6.3.9600.2299" dellVersion="A20" packageType="LWXP" path="FOLDER07690547M/8/Realtek-USB-Audio-DCH-Driver_KDGRR_WIN_6.3.9600.2299_A20_03.EXE" packageID="KDGRR" dateTime="2021-06-08T02:09:36-05:00" size="24411416" identifier="0c0285d0-480a-4fd8-9548-b3efc0bc4647">
+    <Name>
+      <Display lang="en">Realtek USB Audio DCH Driver</Display>
+    </Name>
+    <ComponentType value="DRVR">
+      <Display lang="en">Driver</Display>
+    </ComponentType>
+    <Category value="DK">
+      <Display lang="en">Docks/Stands</Display>
+    </Category>
+    <SupportedSystems>
+      <Brand key="28" prefix="LAT">
+        <Display lang="en">Latitude</Display>
+        <Model systemID="0B0B">
+          <Display lang="en">Latitude 7430</Display>
+        </Model>
+      </Brand>
+    </SupportedSystems>
+    <SupportedOperatingSystems>
+      <OperatingSystem osCode="W21H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W21P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOTL3" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+    </SupportedOperatingSystems>
+    <Cryptography>
+      <Hash algorithm="MD5">5752751b82c702620b30a2e8fdcc88f8</Hash>
+      <Hash algorithm="SHA256">d104d6cba40ec96385b6cc360072b34baac7daa0fdd7fd2228f9cc227523bede</Hash>
+      <Hash algorithm="SHA1">7cc26120bb3ff1a1c2b9a1867f5dffbb4e5fb9f4</Hash>
+    </Cryptography>
+  </SoftwareComponent>
+  <SoftwareComponent schemaVersion="3.0" releaseID="36N0N" releaseDate="November 07, 2021" vendorVersion="1.0.0.18" dellVersion="A05" packageType="LWXP" path="FOLDER07703012M/6/Dell-Wireless-5829e-and-Qualcomm-Snapdragon-X20-LTE_36N0N_WIN_1.0.0.18_A05_03.EXE" packageID="36N0N" dateTime="2021-06-29T01:16:32-05:00" size="119961688" identifier="547cb59b-a70e-4ec9-a127-ce7c21927738" baseBuildNumber="17134">
+    <Name>
+      <Display lang="en">Dell Wireless 5829e and Qualcomm Snapdragon X20 LTE Firmware and GNSS Driver</Display>
+    </Name>
+    <ComponentType value="DRVR">
+      <Display lang="en">Driver</Display>
+    </ComponentType>
+    <Category value="CM">
+      <Display lang="en">Communications</Display>
+    </Category>
+    <SupportedDCHDevices>
+      <Device componentID="109609" guid="1ee69b71-7407-4a7c-bfa3-a6595cc24f51" infType="base" componentType="DRVR" version="1.0.2.6">
+        <Generic>USB\VID_413C&amp;PID_81E4&amp;MI_03</Generic>
+        <Generic>USB\VID_413C&amp;PID_81E4&amp;MI_04</Generic>
+        <Generic>USB\VID_413C&amp;PID_81E4&amp;MI_05</Generic>
+        <Generic>USB\VID_413C&amp;PID_81E6&amp;MI_03</Generic>
+        <Generic>USB\VID_413C&amp;PID_81E6&amp;MI_04</Generic>
+        <Generic>USB\VID_413C&amp;PID_81E6&amp;MI_05</Generic>
+      </Device>
+      <Device componentID="109609" guid="4919bd36-0f1e-45b1-adf4-9a1d0658c11c" infType="base" componentType="DRVR" version="1.0.2.6">
+        <Generic>USB\VID_413C&amp;PID_81E4&amp;MI_06</Generic>
+        <Generic>USB\VID_413C&amp;PID_81E6&amp;MI_06</Generic>
+      </Device>
+      </SupportedDCHDevices>
+    <SupportedSystems>
+      <Brand key="28" prefix="LAT">
+        <Display lang="en">Latitude</Display>
+        <Model systemID="0B0B">
+          <Display lang="en">Latitude 7430</Display>
+        </Model>
+      </Brand>
+    </SupportedSystems>
+    <SupportedOperatingSystems>
+      <OperatingSystem osCode="W21H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOT01" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W21P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOTL3" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="WEL16" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+    </SupportedOperatingSystems>
+    <Cryptography>
+      <Hash algorithm="MD5">c54afbe35ec624174df3f56db13e0fd3</Hash>
+      <Hash algorithm="SHA256">831388e322ab6ebe58697e783debf40027b1821b2fdc443108b8427724a13f00</Hash>
+      <Hash algorithm="SHA1">e72ce750ec067855f3ccd0a06e49e5ee7d1a41fc</Hash>
+    </Cryptography>
+    </SoftwareComponent>
+  <SoftwareComponent schemaVersion="3.0" releaseID="2FTFR" releaseDate="October 19, 2021" vendorVersion="1.0.0.34" dellVersion="A04" packageType="LWXP" path="FOLDER07822496M/6/Dell-Wireless-5930e-and-Qualcomm-Snapdragon-SDX55_2FTFR_WIN_1.0.0.34_A04_03.EXE" packageID="2FTFR" dateTime="2021-07-27T21:12:00-05:00" size="150517416" identifier="33a66d15-7d26-4aad-8425-9bb35dcf99a1" baseBuildNumber="17134">
+    <Name>
+      <Display lang="en">Dell Wireless 5930e and Qualcomm Snapdragon SDX55 Firmware and GNSS Driver</Display>
+    </Name>
+    <ComponentType value="DRVR">
+      <Display lang="en">Driver</Display>
+    </ComponentType>
+    <Category value="CM">
+      <Display lang="en">Communications</Display>
+    </Category>
+    <SupportedDCHDevices>
+      <Device componentID="109270" guid="0563f293-cad3-4491-8f4a-3e6d1bbc3f0b" infType="base" componentType="DRVR" version="2.0.0.2">
+        <Generic>{3a4d657c-0a42-4501-9627-ba1b76ffc39d}\QcQmux-E0B0105B</Generic>
+        <Generic>{3a4d657c-0a42-4501-9627-ba1b76ffc39d}\QcQmux-E0B1105B</Generic>
+        <Generic>USB\VID_413C&amp;PID_81E2&amp;MI_02</Generic>
+        <Generic>USB\VID_413C&amp;PID_81E8&amp;MI_02</Generic>
+      </Device>
+      <Device componentID="109270" guid="0cd7ca4e-3749-45e2-857a-b16959439fe5" infType="base" componentType="DRVR" version="1.0.2.1">
+        <Generic>USB\VID_413C&amp;PID_81E2&amp;MI_09</Generic>
+        <Generic>USB\VID_413C&amp;PID_81E8&amp;MI_09</Generic>
+      </Device>
+      </SupportedDCHDevices>
+    <SupportedSystems>
+      <Brand key="28" prefix="LAT">
+        <Display lang="en">Latitude</Display>
+        <Model systemID="0B0B">
+          <Display lang="en">Latitude 7430</Display>
+        </Model>
+      </Brand>
+    </SupportedSystems>
+    <SupportedOperatingSystems>
+      <OperatingSystem osCode="W21H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOT01" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W21P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOTL3" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="WEL16" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+    </SupportedOperatingSystems>
+    <Cryptography>
+      <Hash algorithm="MD5">c90783eefbee0488297fd2d1a0f8355d</Hash>
+      <Hash algorithm="SHA256">92cf739d19ad835ed3c1c1709fedf73912795c36603583a113df0031bb46d56c</Hash>
+      <Hash algorithm="SHA1">12de36b53024bc0fc792e4cf9f76be1f56a89340</Hash>
+    </Cryptography>
+    </SoftwareComponent>
+  <SoftwareComponent schemaVersion="3.0" releaseID="T8JR6" releaseDate="September 12, 2023" vendorVersion="3.10.100.4557" dellVersion="A00" packageType="LWXP" path="FOLDER07979583M/7/Intel-Integrated-Sensor-Solution-Driver_T8JR6_WIN_3.10.100.4557_A00_04.EXE" packageID="T8JR6" dateTime="2021-03-16T15:29:11-05:00" size="16325536" identifier="0faefdc4-cb8f-4e05-a0cf-8cacce0c1b73" baseBuildNumber="0">
+    <Name>
+      <Display lang="en">Intel Integrated Sensor Solution Driver</Display>
+    </Name>
+    <ComponentType value="DRVR">
+      <Display lang="en">Driver</Display>
+    </ComponentType>
+    <Category value="CS">
+      <Display lang="en">Chipset</Display>
+    </Category>
+    <SupportedDCHDevices>
+      <Device componentID="103834" guid="2e1827c3-5be1-4dc5-b223-2dc0f1ae1346" infType="base" componentType="DRVR" version="3.1.0.4477">
+        <PCIInfo deviceID="43FC" vendorID="8086" subDeviceID="" subVendorID="" />
+        <PCIInfo deviceID="A0FC" vendorID="8086" subDeviceID="" subVendorID="" />
+      </Device>
+      <Device componentID="103834" guid="5a311a89-f47c-47fc-a4b0-3dd07d576cb2" infType="base" componentType="DRVR" version="3.1.0.4477">
+        <Generic>{DEA5AE2A-D1FD-438A-A091-CBD484788435}\ISH_BUS</Generic>
+      </Device>
+      </SupportedDCHDevices>
+    <SupportedSystems>
+      <Brand key="28" prefix="LAT">
+        <Display lang="en">Latitude</Display>
+        <Model systemID="0B0B">
+          <Display lang="en">Latitude 7430</Display>
+        </Model>
+      </Brand>
+    </SupportedSystems>
+    <SupportedOperatingSystems>
+      <OperatingSystem osCode="W21H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10TM" osVendor="Microsoft" osArch="x64" majorVersion="0" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows Teams Rooms</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOT01" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W21P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="WEL16" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+    </SupportedOperatingSystems>
+    <Cryptography>
+      <Hash algorithm="MD5">581fa5348bb74f99b7386020b7e35fa2</Hash>
+      <Hash algorithm="SHA256">7a8a1299db6c23e02149db43fd9f44141da2a1182c980fda3c4f7d431278ddda</Hash>
+      <Hash algorithm="SHA1">8f5617386d83e196fed7ceb00f8444e39ff6da44</Hash>
+    </Cryptography>
+    </SoftwareComponent>
+  <SoftwareComponent schemaVersion="3.0" releaseID="HTFCM" releaseDate="January 20, 2022" vendorVersion="30.100.2148.1" dellVersion="A01" packageType="LWXP" path="FOLDER08052637M/3/Intel-Serial-IO-Driver_HTFCM_WIN_30.100.2148.1_A01_01.EXE" packageID="HTFCM" dateTime="2021-12-23T21:40:31-06:00" size="11843112" identifier="de029282-94c0-4da1-afad-846294e54938" baseBuildNumber="0">
+    <Name>
+      <Display lang="en">Intel Serial IO Driver</Display>
+    </Name>
+    <ComponentType value="DRVR">
+      <Display lang="en">Driver</Display>
+    </ComponentType>
+    <Category value="CS">
+      <Display lang="en">Chipset</Display>
+    </Category>
+    <SupportedDCHDevices>
+      <Device componentID="103954" guid="43513cea-8e3c-46cb-adff-8caed470dfee" infType="base" componentType="DRVR" version="30.100.2148.1">
+        <PCIInfo deviceID="51EA" vendorID="8086" subDeviceID="" subVendorID="" />
+        <PCIInfo deviceID="51C5" vendorID="8086" subDeviceID="" subVendorID="" />
+        <PCIInfo deviceID="7AFC" vendorID="8086" subDeviceID="" subVendorID="" />
+        <PCIInfo deviceID="51EB" vendorID="8086" subDeviceID="" subVendorID="" />
+        <PCIInfo deviceID="7ACC" vendorID="8086" subDeviceID="" subVendorID="" />
+        </Device>
+      <Device componentID="103954" guid="4b0f0b43-bde2-4695-b5c9-9202febcdf84" infType="base" componentType="DRVR" version="30.100.2148.1">
+        <PCIInfo deviceID="7AA9" vendorID="8086" subDeviceID="" subVendorID="" />
+        <PCIInfo deviceID="7AFE" vendorID="8086" subDeviceID="" subVendorID="" />
+        <PCIInfo deviceID="51DB" vendorID="8086" subDeviceID="" subVendorID="" />
+        <PCIInfo deviceID="7ADC" vendorID="8086" subDeviceID="" subVendorID="" />
+        <PCIInfo deviceID="51A9" vendorID="8086" subDeviceID="" subVendorID="" />
+        </Device>
+      </SupportedDCHDevices>
+    <SupportedSystems>
+      <Brand key="28" prefix="LAT">
+        <Display lang="en">Latitude</Display>
+        <Model systemID="0B0B">
+          <Display lang="en">Latitude 7430</Display>
+        </Model>
+      </Brand>
+    </SupportedSystems>
+    <SupportedOperatingSystems>
+      <OperatingSystem osCode="IOT01" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W21P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="PE1064" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="EXCAL" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-bit- Excalibur</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W21H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="EXNOS" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-bit- Excalibur</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="EXCBC" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-bit- Excalibur</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOTL4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-bit LTSC2021</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOTL3" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="WEL16" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+    </SupportedOperatingSystems>
+    <Cryptography>
+      <Hash algorithm="MD5">fc922d0d8aefa54a924697f83b5b4868</Hash>
+      <Hash algorithm="SHA256">7ba6c93692651481dbaaab433a0b8dd86f3d6f1777a1ddc4df4934f597967241</Hash>
+      <Hash algorithm="SHA1">dc7ad5e186605c4db0a73d9c59e5f859996a6e85</Hash>
+    </Cryptography>
+    </SoftwareComponent>
+  <SoftwareComponent schemaVersion="3.0" releaseID="FT9XY" releaseDate="February 21, 2022" vendorVersion="1.0.0.20" dellVersion="A06" packageType="LWXP" path="FOLDER08069701M/3/Dell-Wireless-5829e-and-Qualcomm-Snapdragon-X20-LTE_FT9XY_WIN_1.0.0.20_A06_02.EXE" packageID="FT9XY" dateTime="2021-11-30T10:03:27-06:00" size="124722624" identifier="05a591f7-e261-4d77-a1dd-0c30620dc503" baseBuildNumber="17134">
+    <Name>
+      <Display lang="en">Dell Wireless 5829e and Qualcomm Snapdragon X20 LTE Firmware and GNSS Driver</Display>
+    </Name>
+    <ComponentType value="DRVR">
+      <Display lang="en">Driver</Display>
+    </ComponentType>
+    <Category value="CM">
+      <Display lang="en">Communications</Display>
+    </Category>
+    <SupportedDCHDevices>
+      <Device componentID="109609" guid="53aaae0f-a9de-45f4-a7e2-da2436284e0b" infType="base" componentType="DRVR" version="1.0.2.7">
+        <Generic>USB\VID_413C&amp;PID_81E4&amp;MI_06</Generic>
+        <Generic>USB\VID_413C&amp;PID_81E6&amp;MI_06</Generic>
+      </Device>
+      <Device componentID="109609" guid="8f6fefe7-af00-4607-a047-4e29841b72e4" infType="base" componentType="DRVR" version="1.0.2.6">
+        <Generic>USB\VID_413C&amp;PID_81E4&amp;MI_03</Generic>
+        <Generic>USB\VID_413C&amp;PID_81E4&amp;MI_04</Generic>
+        <Generic>USB\VID_413C&amp;PID_81E4&amp;MI_05</Generic>
+        <Generic>USB\VID_413C&amp;PID_81E6&amp;MI_03</Generic>
+        <Generic>USB\VID_413C&amp;PID_81E6&amp;MI_04</Generic>
+        <Generic>USB\VID_413C&amp;PID_81E6&amp;MI_05</Generic>
+      </Device>
+      </SupportedDCHDevices>
+    <SupportedSystems>
+      <Brand key="28" prefix="LAT">
+        <Display lang="en">Latitude</Display>
+        <Model systemID="0B0B">
+          <Display lang="en">Latitude 7430</Display>
+        </Model>
+      </Brand>
+    </SupportedSystems>
+    <SupportedOperatingSystems>
+      <OperatingSystem osCode="W21H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOT01" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W21P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOTL3" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="WEL16" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+    </SupportedOperatingSystems>
+    <Cryptography>
+      <Hash algorithm="MD5">2bd482d499be070bad7a09c9b07a5e25</Hash>
+      <Hash algorithm="SHA256">9ca9daf0061164c192e21d87fec3f2adb72120b804e9839c753b302dcb2f2ba8</Hash>
+      <Hash algorithm="SHA1">18e64fa6803d4ffe42be3b5c5c5e45f96f89e1fb</Hash>
+    </Cryptography>
+    </SoftwareComponent>
+  <SoftwareComponent schemaVersion="3.0" releaseID="NFM22" releaseDate="August 16, 2023" vendorVersion="22.110.0.2" dellVersion="A21" packageType="LW64" path="FOLDER08084167M/6/Intel-AX211-AX210-AX200-AX201-9560-9260-9462-8265-3165_NFM22_WIN64_22.110.0.2_A21_03.EXE" packageID="NFM22" dateTime="2022-01-06T06:51:34-06:00" size="35049008" identifier="139baeaf-74f0-427b-b7ae-e8aeb5db418b" baseBuildNumber="0">
+    <Name>
+      <Display lang="en">Intel AX211/AX210/AX200/AX201/9560/9260/9462/8265/3165 Bluetooth UWD Driver</Display>
+    </Name>
+    <ComponentType value="DRVR">
+      <Display lang="en">Driver</Display>
+    </ComponentType>
+    <Category value="NI">
+      <Display lang="en">Network</Display>
+    </Category>
+    <SupportedDCHDevices>
+      <Device componentID="103306" guid="06bb8560-1732-4365-956e-e007b23d28e3" infType="base" componentType="DRVR" version="22.110.0.2">
+        <Generic>USB\VID_8087&amp;PID_0A2B&amp;REV_0001</Generic>
+      </Device>
+      <Device componentID="103306" guid="0824c893-85a5-4331-954d-8d15ad212dd8" infType="base" componentType="DRVR" version="22.110.0.2">
+        <Generic>USB\VID_8087&amp;PID_0033&amp;REV_0000</Generic>
+        <Generic>USB\VID_8087&amp;PID_0033&amp;REV_0001</Generic>
+      </Device>
+      </SupportedDCHDevices>
+    <SupportedSystems>
+      <Brand key="28" prefix="LAT">
+        <Display lang="en">Latitude</Display>
+        <Model systemID="0B0B">
+          <Display lang="en">Latitude 7430</Display>
+        </Model>
+      </Brand>
+    </SupportedSystems>
+    <SupportedOperatingSystems>
+      <OperatingSystem osCode="W21H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOT01" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W21P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOTL3" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="WEL16" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+    </SupportedOperatingSystems>
+    <Cryptography>
+      <Hash algorithm="MD5">913d218a7354f91def71544545a1ad4a</Hash>
+      <Hash algorithm="SHA256">eba6e2943fd46016270d6aa64ef69ef7e75b1aa6699867de99ebc1e31093280f</Hash>
+      <Hash algorithm="SHA1">344e96ce531ef2da9e418c494cf1831f4125f735</Hash>
+    </Cryptography>
+    </SoftwareComponent>
+  <SoftwareComponent schemaVersion="3.0" releaseID="0F5G4" releaseDate="January 19, 2022" vendorVersion="19.2.0.1003" dellVersion="A01" packageType="LW64" path="FOLDER08107340M/6/Intel-Rapid-Storage-Technology-Driver-and-Application_0F5G4_WIN64_19.2.0.1003_A01_05.EXE" packageID="0F5G4" dateTime="2021-11-24T11:37:26-06:00" size="53946472" identifier="32f09fc2-7173-400f-99e7-0709106300ac" baseBuildNumber="15063">
+    <Name>
+      <Display lang="en">Intel Rapid Storage Technology Driver and Application</Display>
+    </Name>
+    <ComponentType value="DRVR">
+      <Display lang="en">Driver</Display>
+    </ComponentType>
+    <Category value="SA">
+      <Display lang="en">Serial ATA</Display>
+    </Category>
+    <SupportedDCHDevices>
+      <Device componentID="100638" guid="1a7425e3-d1d8-42b0-b253-2a455eaf7296" infType="extension" componentType="DRVR" id="{8541b81c-193b-4f91-a86b-53df20c1974b}" version="19.2.0.1003" />
+      <Device componentID="100638" guid="388093dc-8422-4f02-932b-d75a1515df88" infType="component" componentType="DRVR" version="19.2.0.1003">
+        <Generic>SWC\VID8086&amp;SW_RstHSA_19_0</Generic>
+      </Device>
+      </SupportedDCHDevices>
+    <SupportedSystems>
+      <Brand key="28" prefix="LAT">
+        <Display lang="en">Latitude</Display>
+        <Model systemID="0B0B">
+          <Display lang="en">Latitude 7430</Display>
+        </Model>
+      </Brand>
+    </SupportedSystems>
+    <SupportedOperatingSystems>
+      <OperatingSystem osCode="W21H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W21P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOTL4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-bit LTSC2021</Display>
+      </OperatingSystem>
+    </SupportedOperatingSystems>
+    <Cryptography>
+      <Hash algorithm="MD5">ed7865d7f3f0e8d23c41539cc85d6a87</Hash>
+      <Hash algorithm="SHA256">f14c15e49aab4111c13ff9e9253b993f7473720c487c2429f23c43cde59a46e8</Hash>
+      <Hash algorithm="SHA1">99ea687af32c12f04e581a32629917885b54edc2</Hash>
+    </Cryptography>
+    </SoftwareComponent>
+  <SoftwareComponent schemaVersion="3.0" releaseID="RCF88" releaseDate="August 16, 2023" vendorVersion="22.110.1.1" dellVersion="A23" packageType="LWXP" path="FOLDER08121895M/7/Intel-AX211-AX210-AX201-AX200-9560-9260-9462-8265-3165_RCF88_WIN_22.110.1.1_A23_06.EXE" packageID="RCF88" dateTime="2022-01-06T06:43:08-06:00" size="84579432" identifier="616ea858-c9e9-4b89-bb09-2db442d7ca3b" baseBuildNumber="0">
+    <Name>
+      <Display lang="en">Intel AX211/AX210/AX201/AX200/9560/9260/9462/8265/3165 Wi-Fi UWD Driver</Display>
+    </Name>
+    <ComponentType value="DRVR">
+      <Display lang="en">Driver</Display>
+    </ComponentType>
+    <Category value="NI">
+      <Display lang="en">Network</Display>
+    </Category>
+    <SupportedDCHDevices>
+      <Device componentID="103305" guid="6547dd98-2615-4ce6-8638-55b5faa6abd9" infType="base" componentType="DRVR" version="22.110.1.1">
+        <PCIInfo deviceID="3DF0" vendorID="8086" subDeviceID="0034" subVendorID="8086" />
+        <PCIInfo deviceID="43F0" vendorID="8086" subDeviceID="02A0" subVendorID="8086" />
+        <PCIInfo deviceID="30DC" vendorID="8086" subDeviceID="0064" subVendorID="8086" />
+        <PCIInfo deviceID="31DC" vendorID="8086" subDeviceID="4030" subVendorID="8086" />
+        <PCIInfo deviceID="7AF0" vendorID="8086" subDeviceID="4234" subVendorID="8086" />
+        <PCIInfo deviceID="51F0" vendorID="8086" subDeviceID="02A0" subVendorID="8086" />
+        </Device>
+      </SupportedDCHDevices>
+    <SupportedSystems>
+      <Brand key="28" prefix="LAT">
+        <Display lang="en">Latitude</Display>
+        <Model systemID="0B0B">
+          <Display lang="en">Latitude 7430</Display>
+        </Model>
+      </Brand>
+    </SupportedSystems>
+    <SupportedOperatingSystems>
+      <OperatingSystem osCode="W21H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOT01" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W21P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOTL3" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="WEL16" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+    </SupportedOperatingSystems>
+    <Cryptography>
+      <Hash algorithm="MD5">f0dd4e114dfe052ae95a72f001a68d45</Hash>
+      <Hash algorithm="SHA256">ba062916546032ccae02e4096700807c0b6c7b0e4a8e6f23708320bdb32631d9</Hash>
+      <Hash algorithm="SHA1">f4162cb58ee01dd45eae2a100bbe8c30392004de</Hash>
+    </Cryptography>
+    </SoftwareComponent>
+  <SoftwareComponent schemaVersion="3.0" releaseID="Y3YYC" releaseDate="April 12, 2022" vendorVersion="22.130.0.5" dellVersion="A25" packageType="LWXP" path="FOLDER08418197M/9/Intel-AX211-AX210-AX201-AX200-9560-9260-9462-8265-3165_Y3YYC_WIN_22.130.0.5_A25_08.EXE" packageID="Y3YYC" dateTime="2022-03-18T08:47:10-05:00" size="86880064" identifier="d9bfebd6-4168-40f5-85c2-79c24a48cb87" baseBuildNumber="0">
+    <Name>
+      <Display lang="en">Intel AX211/AX210/AX201/AX200/9560/9260/9462/8265/3165 Wi-Fi UWD Driver</Display>
+    </Name>
+    <ComponentType value="DRVR">
+      <Display lang="en">Driver</Display>
+    </ComponentType>
+    <Category value="NI">
+      <Display lang="en">Network</Display>
+    </Category>
+    <SupportedDCHDevices>
+      <Device componentID="103305" guid="1f9ee561-c3d6-43d3-a36e-ad5dcab406be" infType="base" componentType="DRVR" version="22.130.0.5">
+        <PCIInfo deviceID="3DF0" vendorID="8086" subDeviceID="0034" subVendorID="8086" />
+        <PCIInfo deviceID="43F0" vendorID="8086" subDeviceID="02A0" subVendorID="8086" />
+        <PCIInfo deviceID="30DC" vendorID="8086" subDeviceID="0064" subVendorID="8086" />
+        <PCIInfo deviceID="31DC" vendorID="8086" subDeviceID="4030" subVendorID="8086" />
+        <PCIInfo deviceID="7AF0" vendorID="8086" subDeviceID="4234" subVendorID="8086" />
+        <PCIInfo deviceID="51F0" vendorID="8086" subDeviceID="02A0" subVendorID="8086" />
+        </Device>
+      </SupportedDCHDevices>
+    <SupportedSystems>
+      <Brand key="28" prefix="LAT">
+        <Display lang="en">Latitude</Display>
+        <Model systemID="0B0B">
+          <Display lang="en">Latitude 7430</Display>
+        </Model>
+      </Brand>
+    </SupportedSystems>
+    <SupportedOperatingSystems>
+      <OperatingSystem osCode="W21H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10TM" osVendor="Microsoft" osArch="x64" majorVersion="0" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows Teams Rooms</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOT01" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W21P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOTL3" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="WEL16" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+    </SupportedOperatingSystems>
+    <Cryptography>
+      <Hash algorithm="MD5">b5846b89fe7e424ac20ac3fce94f989c</Hash>
+      <Hash algorithm="SHA256">e5f0f6f40504eb73df171305b470a53eb5ba55663d6392273ddc753297d38966</Hash>
+      <Hash algorithm="SHA1">3f39fd5dc9e774da23234d43211e8079b7556b6c</Hash>
+    </Cryptography>
+    </SoftwareComponent>
+  <SoftwareComponent schemaVersion="3.0" releaseID="HGCNG" releaseDate="October 21, 2022" vendorVersion="22.170.2.1" dellVersion="A29" packageType="LWXP" path="FOLDER09036963M/4/Intel-AX2xx-9560-9260-9462-8265-3165-Wi-Fi-UWD-Driver_HGCNG_WIN_22.170.2.1_A29_03.EXE" packageID="HGCNG" dateTime="2022-09-02T06:50:37-05:00" size="66437264" identifier="81ff6101-af2b-4833-8a21-4d3fdc8e1669" baseBuildNumber="0">
+    <Name>
+      <Display lang="en">Intel AX2xx/9560/9260/9462/8265/3165 Wi-Fi UWD Driver</Display>
+    </Name>
+    <ComponentType value="DRVR">
+      <Display lang="en">Driver</Display>
+    </ComponentType>
+    <Category value="NI">
+      <Display lang="en">Network</Display>
+    </Category>
+    <SupportedDCHDevices>
+      <Device componentID="103305" guid="1a92b521-0baa-4b6c-b515-daef6fe9d562" infType="base" componentType="DRVR" version="22.170.2.1">
+        <PCIInfo deviceID="54F0" vendorID="8086" subDeviceID="009C" subVendorID="8086" />
+        <PCIInfo deviceID="7A70" vendorID="8086" subDeviceID="00B4" subVendorID="8086" />
+        <PCIInfo deviceID="7AF0" vendorID="8086" subDeviceID="0098" subVendorID="8086" />
+        <PCIInfo deviceID="7A70" vendorID="8086" subDeviceID="1691" subVendorID="1A56" />
+        <PCIInfo deviceID="54F0" vendorID="8086" subDeviceID="1691" subVendorID="1A56" />
+        <PCIInfo deviceID="51F0" vendorID="8086" subDeviceID="1672" subVendorID="1A56" />
+        </Device>
+      </SupportedDCHDevices>
+    <SupportedSystems>
+      <Brand key="28" prefix="LAT">
+        <Display lang="en">Latitude</Display>
+        <Model systemID="0B0B">
+          <Display lang="en">Latitude 7430</Display>
+        </Model>
+      </Brand>
+    </SupportedSystems>
+    <SupportedOperatingSystems>
+      <OperatingSystem osCode="W21H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10TM" osVendor="Microsoft" osArch="x64" majorVersion="0" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows Teams Rooms</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOT01" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W21P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOTL4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-bit LTSC2021</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOTL3" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="WEL16" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+    </SupportedOperatingSystems>
+    <Cryptography>
+      <Hash algorithm="MD5">ad87b103f6fd14efc81259a113959795</Hash>
+      <Hash algorithm="SHA256">e652a8dba825f62deb348f042779a2f46cbdf9269c570e971c80070940c15f72</Hash>
+      <Hash algorithm="SHA1">21e147c8b174aa5aed9772eea9ce7e29d0ee6cdc</Hash>
+    </Cryptography>
+    </SoftwareComponent>
+  <SoftwareComponent schemaVersion="3.0" releaseID="HK5K8" releaseDate="May 02, 2023" vendorVersion="22.200.2.1" dellVersion="A33" packageType="LWXP" path="FOLDER09802324M/5/Intel-AX411-AX211-AX210-AX201-AX200-9560-9462-9260-8265-8260-7265-3165_HK5K8_WIN_22.200.2.1_A33_03.EXE" packageID="HK5K8" dateTime="2023-03-15T08:27:04-05:00" size="86511784" identifier="a7a288a4-d775-4958-9956-5a92a4c6214f" baseBuildNumber="0">
+    <Name>
+      <Display lang="en">Intel AX411/AX211/AX210/AX201/AX200/9560/9462/9260/8265/8260/7265/3165 Wi-Fi UWD Driver</Display>
+    </Name>
+    <ComponentType value="DRVR">
+      <Display lang="en">Driver</Display>
+    </ComponentType>
+    <Category value="NI">
+      <Display lang="en">Network</Display>
+    </Category>
+    <SupportedDCHDevices>
+      <Device componentID="103305" guid="0a8ff087-f74c-4cd7-91ab-19e08a00b769" infType="base" componentType="DRVR" version="22.200.2.1">
+        <PCIInfo deviceID="3DF0" vendorID="8086" subDeviceID="0034" subVendorID="8086" />
+        <PCIInfo deviceID="43F0" vendorID="8086" subDeviceID="02A0" subVendorID="8086" />
+        <PCIInfo deviceID="3DF0" vendorID="8086" subDeviceID="4274" subVendorID="8086" />
+        <PCIInfo deviceID="30DC" vendorID="8086" subDeviceID="0064" subVendorID="8086" />
+        <PCIInfo deviceID="31DC" vendorID="8086" subDeviceID="4030" subVendorID="8086" />
+        <PCIInfo deviceID="51F0" vendorID="8086" subDeviceID="02A0" subVendorID="8086" />
+        </Device>
+      </SupportedDCHDevices>
+    <SupportedSystems>
+      <Brand key="28" prefix="LAT">
+        <Display lang="en">Latitude</Display>
+        <Model systemID="0B0B">
+          <Display lang="en">Latitude 7430</Display>
+        </Model>
+      </Brand>
+    </SupportedSystems>
+    <SupportedOperatingSystems>
+      <OperatingSystem osCode="W21H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOT01" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W21P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOTL4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-bit LTSC2021</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOTL3" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="WEL16" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+    </SupportedOperatingSystems>
+    <Cryptography>
+      <Hash algorithm="MD5">23e8aef91e9f377022c48f39aa18c686</Hash>
+      <Hash algorithm="SHA256">6fd8b0ec4f2159ae63318543db257ad5a4796624d12b962042e82cfee17d3b97</Hash>
+      <Hash algorithm="SHA1">d5fb834cac28c7513ed2c1f10b4ab44a6076ce75</Hash>
+    </Cryptography>
+    </SoftwareComponent>
+  <SoftwareComponent schemaVersion="3.0" releaseID="7YTV9" releaseDate="December 06, 2023" vendorVersion="22.250.10.1" dellVersion="A36" packageType="LWXP" path="FOLDER10689258M/6/Intel-AX411-AX211-AX210-AX201-AX200-9560-9462-9260-7265-3165_7YTV9_WIN_22.250.10.1_A36_03.EXE" packageID="7YTV9" dateTime="2023-08-03T04:14:29-05:00" size="83827304" identifier="83953289-d21e-4f99-9e5a-3fb886e6a8f3" baseBuildNumber="0">
+    <Name>
+      <Display lang="en">Intel AX411/AX211/AX210/AX201/AX200/9560/9462/9260/7265/3165 Wi-Fi UWD Driver</Display>
+    </Name>
+    <ComponentType value="DRVR">
+      <Display lang="en">Driver</Display>
+    </ComponentType>
+    <Category value="NI">
+      <Display lang="en">Network</Display>
+    </Category>
+    <SupportedDCHDevices>
+      <Device componentID="103305" guid="cb2c9be0-a360-455f-84fc-1c469fc5f5c2" infType="base" componentType="DRVR" version="22.250.10.1">
+        <PCIInfo deviceID="3DF0" vendorID="8086" subDeviceID="0034" subVendorID="8086" />
+        <PCIInfo deviceID="43F0" vendorID="8086" subDeviceID="02A0" subVendorID="8086" />
+        <PCIInfo deviceID="3DF0" vendorID="8086" subDeviceID="4274" subVendorID="8086" />
+        <PCIInfo deviceID="30DC" vendorID="8086" subDeviceID="0064" subVendorID="8086" />
+        <PCIInfo deviceID="31DC" vendorID="8086" subDeviceID="4030" subVendorID="8086" />
+        <PCIInfo deviceID="51F0" vendorID="8086" subDeviceID="02A0" subVendorID="8086" />
+        </Device>
+      </SupportedDCHDevices>
+    <SupportedSystems>
+      <Brand key="28" prefix="LAT">
+        <Display lang="en">Latitude</Display>
+        <Model systemID="0B0B">
+          <Display lang="en">Latitude 7430</Display>
+        </Model>
+      </Brand>
+    </SupportedSystems>
+    <SupportedOperatingSystems>
+      <OperatingSystem osCode="W21H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOT01" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W21P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOTL4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-bit LTSC2021</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOTL3" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="WEL16" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+    </SupportedOperatingSystems>
+    <Cryptography>
+      <Hash algorithm="MD5">86fc2a56431b77d6a45e25c5b171f5bf</Hash>
+      <Hash algorithm="SHA256">e87c0a3d5333b1c45ce66136c3c6d489ee4c502e5b94fed13f4bdbfd002f27f9</Hash>
+      <Hash algorithm="SHA1">751bd3a0adc58564b82dd603c7e7f934f81246a8</Hash>
+    </Cryptography>
+    </SoftwareComponent>
+  <SoftwareComponent schemaVersion="3.0" releaseID="4JDC5" releaseDate="March 15, 2024" vendorVersion="23.20.1.1" dellVersion="A40" packageType="LWXP" path="FOLDER11096850M/10/Intel-BE200-AX411-AX211-AX210-AX201-AX200-9560-9462-9260-7265-3165_4JDC5_WIN_23.20.1.1_A40_04.EXE" packageID="4JDC5" dateTime="2024-01-08T06:33:29-06:00" size="83040576" identifier="a0261261-d95d-42ef-8904-5674464ddfa2" baseBuildNumber="0">
+    <Name>
+      <Display lang="en">Intel BE200/AX411/AX211/AX210/AX201/AX200/9560/9462/9260/7265/3165 Wi-Fi UWD Driver</Display>
+    </Name>
+    <ComponentType value="DRVR">
+      <Display lang="en">Driver</Display>
+    </ComponentType>
+    <Category value="NI">
+      <Display lang="en">Network</Display>
+    </Category>
+    <SupportedDCHDevices>
+      <Device componentID="103305" guid="8c8f0873-f320-4391-bcaf-f8f9ca5ad6fe" infType="base" componentType="DRVR" version="23.20.1.1">
+        <PCIInfo deviceID="54F0" vendorID="8086" subDeviceID="009C" subVendorID="8086" />
+        <PCIInfo deviceID="7A70" vendorID="8086" subDeviceID="00B4" subVendorID="8086" />
+        <PCIInfo deviceID="7AF0" vendorID="8086" subDeviceID="0098" subVendorID="8086" />
+        <PCIInfo deviceID="7E40" vendorID="8086" subDeviceID="0098" subVendorID="8086" />
+        <PCIInfo deviceID="7A70" vendorID="8086" subDeviceID="0094" subVendorID="8086" />
+        <PCIInfo deviceID="51F0" vendorID="8086" subDeviceID="009C" subVendorID="8086" />
+        </Device>
+      </SupportedDCHDevices>
+    <SupportedSystems>
+      <Brand key="28" prefix="LAT">
+        <Display lang="en">Latitude</Display>
+        <Model systemID="0B0B">
+          <Display lang="en">Latitude 7430</Display>
+        </Model>
+      </Brand>
+    </SupportedSystems>
+    <SupportedOperatingSystems>
+      <OperatingSystem osCode="W21H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOT01" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W21P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOTL4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-bit LTSC2021</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOTL3" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="WEL16" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+    </SupportedOperatingSystems>
+    <Cryptography>
+      <Hash algorithm="MD5">7f424faaa1ba140315ed2008b984ca9e</Hash>
+      <Hash algorithm="SHA256">8d6583723b671de808adea375c790f2f7423e82193bc85e8de92f568c58d45a3</Hash>
+      <Hash algorithm="SHA1">171442681814edc5e8720895d6cf78d737ecd656</Hash>
+    </Cryptography>
+    </SoftwareComponent>
+  <SoftwareComponent schemaVersion="3.0" releaseID="38KK7" releaseDate="July 18, 2024" vendorVersion="23.60.1.2" dellVersion="A45" packageType="LWXP" path="FOLDER11737015M/4/Intel-BE200-AX411-AX211-AX210-AX201-AX200-9560-9462-9260_38KK7_WIN_23.60.1.2_A45_01.EXE" packageID="38KK7" dateTime="2024-05-24T04:14:33-05:00" size="92952792" identifier="11dde490-dfc3-4586-8d45-8dd58253556d" baseBuildNumber="0">
+    <Name>
+      <Display lang="en">Intel BE200/AX411/AX211/AX210/AX201/AX200/9560/9462/9260 Wi-Fi UWD Driver</Display>
+    </Name>
+    <ComponentType value="DRVR">
+      <Display lang="en">Driver</Display>
+    </ComponentType>
+    <Category value="NI">
+      <Display lang="en">Network</Display>
+    </Category>
+    <SupportedDCHDevices>
+      <Device componentID="103305" guid="ea45797e-0579-4be8-b53f-f7aced8e3fd3" infType="base" componentType="DRVR" version="23.60.1.2">
+        <PCIInfo deviceID="3DF0" vendorID="8086" subDeviceID="0034" subVendorID="8086" />
+        <PCIInfo deviceID="43F0" vendorID="8086" subDeviceID="02A0" subVendorID="8086" />
+        <PCIInfo deviceID="3DF0" vendorID="8086" subDeviceID="4274" subVendorID="8086" />
+        <PCIInfo deviceID="30DC" vendorID="8086" subDeviceID="0064" subVendorID="8086" />
+        <PCIInfo deviceID="31DC" vendorID="8086" subDeviceID="4030" subVendorID="8086" />
+        <PCIInfo deviceID="51F0" vendorID="8086" subDeviceID="02A0" subVendorID="8086" />
+        </Device>
+      </SupportedDCHDevices>
+    <SupportedSystems>
+      <Brand key="28" prefix="LAT">
+        <Display lang="en">Latitude</Display>
+        <Model systemID="0B0B">
+          <Display lang="en">Latitude 7430</Display>
+        </Model>
+      </Brand>
+    </SupportedSystems>
+    <SupportedOperatingSystems>
+      <OperatingSystem osCode="W21H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOT01" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W21P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOTL5" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11 64-bit LTSC2024</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOTL4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-bit LTSC2021</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOTL3" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="WEL16" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+    </SupportedOperatingSystems>
+    <Cryptography>
+      <Hash algorithm="MD5">5345e8f65f7d42da09661459da82c7cf</Hash>
+      <Hash algorithm="SHA256">bf5fc26ed337f726bacdce8e837c40d776d1b1c16527728d54e1460cccf481e9</Hash>
+      <Hash algorithm="SHA1">b95384394f660370a74d16735a167fe4e216a90d</Hash>
+    </Cryptography>
+    </SoftwareComponent>
+  <SoftwareComponent schemaVersion="3.0" releaseID="3Y6N9" releaseDate="December 11, 2024" vendorVersion="23.90.0.2" dellVersion="A47" packageType="LWXP" path="FOLDER12334736M/4/Intel-Wi-Fi-BE202-BE201-BE200-AX411-AX211-AX210-AX201-AX200-9560-9462-9260_3Y6N9_WIN_23.90.0.2_A47.EXE" packageID="3Y6N9" dateTime="2024-07-30T08:33:33-05:00" size="93948664" identifier="e8bc2eb3-1dcf-4df5-8e41-6203d0916dd0" baseBuildNumber="0">
+    <Name>
+      <Display lang="en">Intel BE202/BE201/BE200/AX411/AX211/AX210/AX201/AX200/9560/9462/9260 Wi-Fi UWD Driver</Display>
+    </Name>
+    <ComponentType value="DRVR">
+      <Display lang="en">Driver</Display>
+    </ComponentType>
+    <Category value="NI">
+      <Display lang="en">Network</Display>
+    </Category>
+    <SupportedDCHDevices>
+      <Device componentID="103305" guid="3979fed8-d4d9-4313-ab1b-c122b6359d12" infType="base" componentType="DRVR" version="23.90.0.2">
+        <PCIInfo deviceID="3DF0" vendorID="8086" subDeviceID="0034" subVendorID="8086" />
+        <PCIInfo deviceID="43F0" vendorID="8086" subDeviceID="02A0" subVendorID="8086" />
+        <PCIInfo deviceID="3DF0" vendorID="8086" subDeviceID="4274" subVendorID="8086" />
+        <PCIInfo deviceID="30DC" vendorID="8086" subDeviceID="0064" subVendorID="8086" />
+        <PCIInfo deviceID="31DC" vendorID="8086" subDeviceID="4030" subVendorID="8086" />
+        <PCIInfo deviceID="51F0" vendorID="8086" subDeviceID="02A0" subVendorID="8086" />
+        </Device>
+      </SupportedDCHDevices>
+    <SupportedSystems>
+      <Brand key="28" prefix="LAT">
+        <Display lang="en">Latitude</Display>
+        <Model systemID="0B0B">
+          <Display lang="en">Latitude 7430</Display>
+        </Model>
+      </Brand>
+    </SupportedSystems>
+    <SupportedOperatingSystems>
+      <OperatingSystem osCode="W21H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOT01" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W21P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOTL5" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11 64-bit LTSC2024</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOTL4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-bit LTSC2021</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOTL3" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="WEL16" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+    </SupportedOperatingSystems>
+    <Cryptography>
+      <Hash algorithm="MD5">3dc7fe5c123122a04bc2b6f47f124854</Hash>
+      <Hash algorithm="SHA256">44827b66513ded1eec49a861a9e98526462216c0aeed7ac6f91a2c7340bb110f</Hash>
+      <Hash algorithm="SHA1">554dd82aca019c12ab5dbcb8cce5bfeb89d789ff</Hash>
+    </Cryptography>
+    </SoftwareComponent>
+  <SoftwareComponent schemaVersion="3.0" releaseID="3GN29" releaseDate="February 11, 2025" vendorVersion="23.110.0.5" dellVersion="A49" packageType="LW64" path="FOLDER12595081M/6/Intel-BE2xx-AX4xx-AX2xx-9xxx-Wi-Fi-Driver_3GN29_WIN64_23.110.0.5_A49_05.EXE" packageID="3GN29" dateTime="2024-10-15T08:40:32-05:00" size="61575120" identifier="d467f64f-a9db-49db-b177-4a294d264f26" baseBuildNumber="0">
+    <Name>
+      <Display lang="en">Intel BE2xx/AX4xx/AX2xx/9xxx Wi-Fi Driver</Display>
+    </Name>
+    <ComponentType value="DRVR">
+      <Display lang="en">Driver</Display>
+    </ComponentType>
+    <Category value="NI">
+      <Display lang="en">Network</Display>
+    </Category>
+    <SupportedDCHDevices>
+      <Device componentID="103305" guid="e7b4277d-4678-4e26-80ef-48971b70b800" infType="base" componentType="DRVR" version="23.110.0.5">
+        <PCIInfo deviceID="54F0" vendorID="8086" subDeviceID="009C" subVendorID="8086" />
+        <PCIInfo deviceID="7A70" vendorID="8086" subDeviceID="00B4" subVendorID="8086" />
+        <PCIInfo deviceID="7AF0" vendorID="8086" subDeviceID="0098" subVendorID="8086" />
+        <PCIInfo deviceID="7E40" vendorID="8086" subDeviceID="0098" subVendorID="8086" />
+        <PCIInfo deviceID="7A70" vendorID="8086" subDeviceID="0094" subVendorID="8086" />
+        <PCIInfo deviceID="51F0" vendorID="8086" subDeviceID="009C" subVendorID="8086" />
+        </Device>
+      </SupportedDCHDevices>
+    <SupportedSystems>
+      <Brand key="28" prefix="LAT">
+        <Display lang="en">Latitude</Display>
+        <Model systemID="0B0B">
+          <Display lang="en">Latitude 7430</Display>
+        </Model>
+      </Brand>
+    </SupportedSystems>
+    <SupportedOperatingSystems>
+      <OperatingSystem osCode="W21H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOT01" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W21P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOTL5" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11 64-bit LTSC2024</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOTL4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-bit LTSC2021</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOTL3" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="WEL16" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+    </SupportedOperatingSystems>
+    <Cryptography>
+      <Hash algorithm="MD5">346aaf435f8952f77a8f87ccbb840100</Hash>
+      <Hash algorithm="SHA256">93d59b89837067595a7aa7dd5f1976526c9a7e8a88260e03fa4ccc931cb8e15e</Hash>
+      <Hash algorithm="SHA1">c3ba1822080ccb936fc6e1133df4e12d1e4b793e</Hash>
+    </Cryptography>
+    </SoftwareComponent>
+  <SoftwareComponent schemaVersion="3.0" releaseID="9P1YM" releaseDate="August 22, 2025" vendorVersion="23.160.0.4" dellVersion="A55" packageType="LW64" path="FOLDER13525006M/2/Intel-BE2xx-AX4xx-AX2xx-9xxx-Wi-Fi-Driver_9P1YM_WIN64_23.160.0.4_A55_01.EXE" packageID="9P1YM" dateTime="2025-08-04T08:01:55-05:00" size="61390336" identifier="164d8d48-2d40-41f2-bc31-bc1c8917bebd" baseBuildNumber="0">
+    <Name>
+      <Display lang="en">Intel BE2xx/AX4xx/AX2xx/9xxx Wi-Fi Driver</Display>
+    </Name>
+    <ComponentType value="DRVR">
+      <Display lang="en">Driver</Display>
+    </ComponentType>
+    <Category value="NI">
+      <Display lang="en">Network</Display>
+    </Category>
+    <SupportedDCHDevices>
+      <Device componentID="103305" guid="617ee73a-cb59-40b7-af65-afd5b09eadf5" infType="base" componentType="DRVR" version="23.160.0.4">
+        <PCIInfo deviceID="3DF0" vendorID="8086" subDeviceID="0034" subVendorID="8086" />
+        <PCIInfo deviceID="43F0" vendorID="8086" subDeviceID="02A0" subVendorID="8086" />
+        <PCIInfo deviceID="3DF0" vendorID="8086" subDeviceID="4274" subVendorID="8086" />
+        <PCIInfo deviceID="30DC" vendorID="8086" subDeviceID="0064" subVendorID="8086" />
+        <PCIInfo deviceID="31DC" vendorID="8086" subDeviceID="4030" subVendorID="8086" />
+        <PCIInfo deviceID="51F0" vendorID="8086" subDeviceID="02A0" subVendorID="8086" />
+        </Device>
+      </SupportedDCHDevices>
+    <SupportedSystems>
+      <Brand key="28" prefix="LAT">
+        <Display lang="en">Latitude</Display>
+        <Model systemID="0B0B">
+          <Display lang="en">Latitude 7430</Display>
+        </Model>
+      </Brand>
+    </SupportedSystems>
+    <SupportedOperatingSystems>
+      <OperatingSystem osCode="W21H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOT01" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W21P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOTL5" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11 64-bit LTSC2024</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W10P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOTL4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-bit LTSC2021</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOTL3" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="WEL16" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 10 64-Bit</Display>
+      </OperatingSystem>
+    </SupportedOperatingSystems>
+    <Cryptography>
+      <Hash algorithm="MD5">191880d411afb01fc84cec458d96c0ba</Hash>
+      <Hash algorithm="SHA256">9ddace2fa35f81a53dcf8a2cff93521938d9561791f9e82ce90f050fffd4caf8</Hash>
+      <Hash algorithm="SHA1">9f0bd3569b626118e2749618306854541c12e3d4</Hash>
+    </Cryptography>
+    </SoftwareComponent>
+  <SoftwareComponent schemaVersion="3.0" releaseID="8YGJM" releaseDate="February 23, 2026" vendorVersion="24.20.0.4" dellVersion="A72" packageType="LW64" path="FOLDER14088957M/2/Intel-BE2xx-AX4xx-AX2xx-9xxx-Wi-Fi-Driver_8YGJM_WIN64_24.20.0.4_A72.EXE" packageID="8YGJM" dateTime="2026-01-12T03:51:02-06:00" size="23543472" identifier="25decd88-c42a-4b0c-a6c4-cde60f1df48f" baseBuildNumber="17735">
+    <Name>
+      <Display lang="en">Intel BE2xx/AX4xx/AX2xx/9xxx Wi-Fi Driver</Display>
+    </Name>
+    <ComponentType value="DRVR">
+      <Display lang="en">Driver</Display>
+    </ComponentType>
+    <Category value="NI">
+      <Display lang="en">Network</Display>
+    </Category>
+    <SupportedDCHDevices>
+      <Device componentID="103305" guid="0616955b-6f36-4fe6-8508-068726036f56" infType="base" componentType="DRVR" version="24.20.0.4">
+        <PCIInfo deviceID="E440" vendorID="8086" subDeviceID="0110" subVendorID="8086" />
+        <PCIInfo deviceID="A840" vendorID="8086" subDeviceID="4110" subVendorID="8086" />
+        <PCIInfo deviceID="54F0" vendorID="8086" subDeviceID="009C" subVendorID="8086" />
+        <PCIInfo deviceID="7A70" vendorID="8086" subDeviceID="00B4" subVendorID="8086" />
+        <PCIInfo deviceID="7AF0" vendorID="8086" subDeviceID="0098" subVendorID="8086" />
+        <PCIInfo deviceID="51F0" vendorID="8086" subDeviceID="1672" subVendorID="1A56" />
+        </Device>
+      </SupportedDCHDevices>
+    <SupportedSystems>
+      <Brand key="28" prefix="LAT">
+        <Display lang="en">Latitude</Display>
+        <Model systemID="0B0B">
+          <Display lang="en">Latitude 7430</Display>
+        </Model>
+      </Brand>
+    </SupportedSystems>
+    <SupportedOperatingSystems>
+      <OperatingSystem osCode="W21H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W21P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOTL5" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11 64-bit LTSC2024</Display>
+      </OperatingSystem>
+    </SupportedOperatingSystems>
+    <Cryptography>
+      <Hash algorithm="MD5">1cacf3cf21f62bd1c10a2423deec01bf</Hash>
+      <Hash algorithm="SHA256">d8fd5cb8186c95f469e151239e730097a2d91277e62d23a61b2d11ac9874d8f6</Hash>
+      <Hash algorithm="SHA1">f604e2cf72ef8c25445b3bd77c38732ca58aa6bb</Hash>
+    </Cryptography>
+    </SoftwareComponent>
+  <SoftwareComponent schemaVersion="3.0" releaseID="KGD8K" releaseDate="April 22, 2026" vendorVersion="24.40.0.4" dellVersion="A74" packageType="LW64" path="FOLDER14461779M/1/Intel-BE2xx-AX4xx-AX2xx-9xxx-Wi-Fi-Driver_KGD8K_WIN64_24.40.0.4_A74.EXE" packageID="KGD8K" dateTime="2026-04-08T02:48:41-05:00" size="23831072" identifier="2ecdbf4b-80bb-4ac7-9901-a58485e00959" baseBuildNumber="17735">
+    <Name>
+      <Display lang="en">Intel BE2xx/AX4xx/AX2xx/9xxx Wi-Fi Driver</Display>
+    </Name>
+    <ComponentType value="DRVR">
+      <Display lang="en">Driver</Display>
+    </ComponentType>
+    <Category value="NI">
+      <Display lang="en">Network</Display>
+    </Category>
+    <SupportedDCHDevices>
+      <Device componentID="103305" guid="26c51b03-727d-4782-a524-33275d068dbe" infType="base" componentType="DRVR" version="24.40.0.4">
+        <PCIInfo deviceID="E440" vendorID="8086" subDeviceID="0110" subVendorID="8086" />
+        <PCIInfo deviceID="A840" vendorID="8086" subDeviceID="4110" subVendorID="8086" />
+        <PCIInfo deviceID="54F0" vendorID="8086" subDeviceID="009C" subVendorID="8086" />
+        <PCIInfo deviceID="4D40" vendorID="8086" subDeviceID="009C" subVendorID="8086" />
+        <PCIInfo deviceID="7A70" vendorID="8086" subDeviceID="00B4" subVendorID="8086" />
+        <PCIInfo deviceID="51F0" vendorID="8086" subDeviceID="009C" subVendorID="8086" />
+        </Device>
+      </SupportedDCHDevices>
+    <SupportedSystems>
+      <Brand key="28" prefix="LAT">
+        <Display lang="en">Latitude</Display>
+        <Model systemID="0B0B">
+          <Display lang="en">Latitude 7430</Display>
+        </Model>
+      </Brand>
+    </SupportedSystems>
+    <SupportedOperatingSystems>
+      <OperatingSystem osCode="W21H4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="W21P4" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11</Display>
+      </OperatingSystem>
+      <OperatingSystem osCode="IOTL5" osVendor="Microsoft" osArch="x64" majorVersion="10" minorVersion="0" spMajorVersion="0" spMinorVersion="0">
+        <Display lang="en">Windows 11 64-bit LTSC2024</Display>
+      </OperatingSystem>
+    </SupportedOperatingSystems>
+    <Cryptography>
+      <Hash algorithm="MD5">6d6fb411e1a9fb2d06dfe6f9b344fd9a</Hash>
+      <Hash algorithm="SHA256">b8299f93de55187894742d315d68eceb746f64da1f9b86241a214a55e6a146a7</Hash>
+      <Hash algorithm="SHA1">1c51f9ba54f55ae67ab25fd9b634f3e32a44d63f</Hash>
+    </Cryptography>
+    </SoftwareComponent>
+  </Manifest>

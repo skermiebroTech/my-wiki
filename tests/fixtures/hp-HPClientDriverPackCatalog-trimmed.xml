@@ -1,0 +1,841 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<NewDataSet>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:ns1="urn:HPClientDriverPackCatalog" targetNamespace="urn:HPClientDriverPackCatalog" elementFormDefault="qualified" version="1.0.0.0" id="HPClientDriverPackCatalog">
+	<xs:annotation>
+		<xs:documentation>
+        Schema file for HPClientDriverPackCatalog.xml file.
+        Update History
+        2014-07-07  0.0.0.1 Initial draft.
+      </xs:documentation>
+	</xs:annotation>
+	<!-- Root Element -->
+	<xs:element name="HPClientDriverPackCatalog" nillable="false">
+		<xs:annotation>
+			<xs:documentation>
+          *********************************************************************
+          * Root Element - Contains data for product driver pack lists.
+          * The tables defined are:
+          * OperatingSystem, Product, Softpaq
+          *********************************************************************
+        </xs:documentation>
+		</xs:annotation>
+		<xs:complexType>
+			<xs:sequence>
+				<xs:element name="OSList" type="OSListType" nillable="false"/>
+				<xs:element name="SoftPaqList" type="SoftPaqListType" nillable="false"/>
+				<!--<xs:element name="ProductList" type="ProductListType" nillable="false"/>-->
+				<xs:element name="ProductOSDriverPackList" type="ProductOSDriverPackListType" nillable="false"/>
+			</xs:sequence>
+			<xs:attribute name="SchemaVersion" type="xs:string" use="required"/>
+			<xs:attribute name="ToolVersion" type="xs:string" use="required"/>
+			<xs:attribute name="DateReleased" type="xs:date" use="required"/>
+		</xs:complexType>
+	</xs:element>
+	<xs:complexType name="SoftPaqType">
+		<xs:sequence>
+			<xs:element name="Id" type="xs:string" nillable="false"/>
+			<xs:element name="Name" type="xs:string" nillable="false"/>
+			<xs:element name="Version" type="xs:string" nillable="false"/>
+			<xs:element name="Category" type="xs:string" nillable="false"/>
+			<xs:element name="DateReleased" type="xs:date" nillable="false"/>
+			<xs:element name="Url" type="xs:string" nillable="false"/>
+			<!-- The size field is 0 if it is unknown -->
+			<xs:element name="Size" type="xs:integer" nillable="false"/>
+			<xs:element name="MD5" type="xs:string" nillable="false"/>
+			<!--
+			<xs:element name="SupportedOS" type="xs:string" nillable="false"/>
+			<xs:element name="SupportedProducts" type="xs:string" nillable="false"/>
+-->
+			<xs:element name="CvaFileUrl" type="xs:string" nillable="false"/>
+			<xs:element name="ReleaseNotesUrl" type="xs:string" nillable="false"/>
+			<xs:element name="CvaTitle" type="xs:string" nillable="false"/>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="OSType">
+		<xs:sequence>
+			<xs:element name="Name" type="xs:string" nillable="false"/>
+			<xs:element name="ShortName" type="xs:string" nillable="false"/>
+			<xs:element name="Bitness" type="xs:string" nillable="false"/>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="SoftPaqListType">
+		<xs:sequence minOccurs="0" maxOccurs="unbounded">
+			<xs:element name="SoftPaq" type="SoftPaqType" nillable="false"/>
+		</xs:sequence>
+	</xs:complexType>
+	<!--
+	<xs:complexType name="ProductType">
+		<xs:sequence>
+			<xs:element name="Name" type="xs:string" nillable="false"/>
+			<xs:element name="Type" type="xs:string" nillable="false"/>
+			<xs:element name="SystemIds" type="xs:string" nillable="false"/>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="ProductListType">
+		<xs:sequence maxOccurs="unbounded">
+			<xs:element name="Product" type="ProductType" nillable="false"/>
+		</xs:sequence>
+	</xs:complexType>
+    -->
+	<xs:complexType name="OSListType">
+		<xs:sequence maxOccurs="unbounded">
+			<xs:element name="OS" type="OSType" nillable="false"/>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="ProductOSDriverPackListType">
+		<xs:sequence maxOccurs="unbounded">
+			<xs:element name="ProductOSDriverPack" type="ProductOSDriverPackType" nillable="false"/>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="ProductOSDriverPackType">
+		<xs:sequence>
+			<xs:element name="SystemId" type="xs:string" nillable="false"/>
+			<xs:element name="SystemName" type="xs:string" nillable="false"/>
+			<xs:element name="OSName" type="xs:string" nillable="false"/>
+			<xs:element name="SoftPaqId" type="xs:string" nillable="false"/>
+		</xs:sequence>
+	</xs:complexType>
+</xs:schema>
+
+<HPClientDriverPackCatalog SchemaVersion="1.0.0.0" ToolVersion="1.2.20.0" DateReleased="2026-09-09" >
+<OSList>
+  <OS>
+    <Name>Windows 11 64-bit, 25H2</Name>
+    <ShortName>Windows 11 64-bit, 25H2</ShortName>
+    <Bitness>64-bit</Bitness>
+    <OSId>4333</OSId>
+  </OS>
+  <OS>
+    <Name>Windows 11 IoT Enterprise 24H2 LTSC, 64-bit</Name>
+    <ShortName>Windows 11 IoT Enterprise 24H2 LTSC, 64-bit</ShortName>
+    <Bitness>64-bit</Bitness>
+    <OSId>4324</OSId>
+  </OS>
+  <OS>
+    <Name>Windows 11 64-bit, 24H2</Name>
+    <ShortName>Windows 11 64-bit, 24H2</ShortName>
+    <Bitness>64-bit</Bitness>
+    <OSId>4323</OSId>
+  </OS>
+  <OS>
+    <Name>Windows 11 64-bit, 23H2</Name>
+    <ShortName>Windows 11 64-bit, 23H2</ShortName>
+    <Bitness>64-bit</Bitness>
+    <OSId>4317</OSId>
+  </OS>
+  <OS>
+    <Name>Windows 11 64-bit, 22H2</Name>
+    <ShortName>Windows 11 64-bit, 22H2</ShortName>
+    <Bitness>64-bit</Bitness>
+    <OSId>4306</OSId>
+  </OS>
+  <OS>
+    <Name>Windows 10 64-bit, 22H2</Name>
+    <ShortName>Windows 10 64-bit, 22H2</ShortName>
+    <Bitness>64-bit</Bitness>
+    <OSId>4308</OSId>
+  </OS>
+  <OS>
+    <Name>Windows 11 64-bit, 21H2</Name>
+    <ShortName>Windows 11 64-bit, 21H2</ShortName>
+    <Bitness>64-bit</Bitness>
+    <OSId>4298</OSId>
+  </OS>
+  <OS>
+    <Name>Windows 10 64-bit, 21H2</Name>
+    <ShortName>Windows 10 64-bit, 21H2</ShortName>
+    <Bitness>64-bit</Bitness>
+    <OSId>4297</OSId>
+  </OS>
+  <OS>
+    <Name>Windows 10 IoT Enterprise 2021 LTSC, 64-bit</Name>
+    <ShortName>Windows 10 IoT Enterprise 2021 LTSC, 64-bit</ShortName>
+    <Bitness>64-bit</Bitness>
+    <OSId>4305</OSId>
+  </OS>
+  <OS>
+    <Name>Windows 10 64-bit, 21H1</Name>
+    <ShortName>Windows 10 64-bit, 21H1</ShortName>
+    <Bitness>64-bit</Bitness>
+    <OSId>4295</OSId>
+  </OS>
+  <OS>
+    <Name>Windows 10 64-bit, 20H2</Name>
+    <ShortName>Windows 10 64-bit, 20H2</ShortName>
+    <Bitness>64-bit</Bitness>
+    <OSId>4288</OSId>
+  </OS>
+  <OS>
+    <Name>Windows 10 64-bit, 2004</Name>
+    <ShortName>Windows 10 64-bit, 2004</ShortName>
+    <Bitness>64-bit</Bitness>
+    <OSId>4285</OSId>
+  </OS>
+  <OS>
+    <Name>Windows 10 64-bit, 1909</Name>
+    <ShortName>Windows 10 64-bit, 1909</ShortName>
+    <Bitness>64-bit</Bitness>
+    <OSId>4283</OSId>
+  </OS>
+  <OS>
+    <Name>Windows 10 64-bit, 1903</Name>
+    <ShortName>Windows 10 64-bit, 1903</ShortName>
+    <Bitness>64-bit</Bitness>
+    <OSId>4279</OSId>
+  </OS>
+  <OS>
+    <Name>Windows 10 IoT Enterprise 2019 LTSC, 64-bit</Name>
+    <ShortName>Windows 10 IoT Enterprise 2019 LTSC, 64-bit</ShortName>
+    <Bitness>64-bit</Bitness>
+    <OSId>4261</OSId>
+  </OS>
+  <OS>
+    <Name>Windows 10 64-bit, 1809</Name>
+    <ShortName>Windows 10 64-bit, 1809</ShortName>
+    <Bitness>64-bit</Bitness>
+    <OSId>4263</OSId>
+  </OS>
+  <OS>
+    <Name>Windows 10 64-bit, 1803</Name>
+    <ShortName>Windows 10 64-bit, 1803</ShortName>
+    <Bitness>64-bit</Bitness>
+    <OSId>4254</OSId>
+  </OS>
+  <OS>
+    <Name>Windows 10 64-bit, 1709</Name>
+    <ShortName>Windows 10 64-bit, 1709</ShortName>
+    <Bitness>64-bit</Bitness>
+    <OSId>4249</OSId>
+  </OS>
+  <OS>
+    <Name>Windows 10 64-bit, 1703</Name>
+    <ShortName>Windows 10 64-bit, 1703</ShortName>
+    <Bitness>64-bit</Bitness>
+    <OSId>4244</OSId>
+  </OS>
+  <OS>
+    <Name>Windows 10 IoT Enterprise 2016 LTSB, 64-bit</Name>
+    <ShortName>Windows 10 IoT Enterprise 2016 LTSB, 64-bit</ShortName>
+    <Bitness>64-bit</Bitness>
+    <OSId>4260</OSId>
+  </OS>
+</OSList><SoftPaqList>
+  <SoftPaq>
+    <Id>sp147159</Id>
+    <Name>HP EB/ZB/x360 8x0/1040/FF G10 Windows 10 x64 Driver Pack</Name>
+    <Version>2.00 A 1</Version>
+    <Category>Manageability - Driver Pack</Category>
+    <DateReleased>5/24/2023 12:00:00 AM</DateReleased>
+    <Url>https://ftp.hp.com/pub/softpaq/sp147001-147500/sp147159.exe</Url>
+    <Size>1809359408</Size>
+    <MD5>7994dd38a25c5afdad805d088b374f96</MD5>
+    <SHA256>2090C9CBFFFFE10BA73189DA485A8060D9BB492D03C59D79099D89E667E896D8</SHA256>
+    <CvaFileUrl>https://ftp.hp.com/pub/softpaq/sp147001-147500/sp147159.cva</CvaFileUrl>
+    <ReleaseNotesUrl>https://ftp.hp.com/pub/softpaq/sp147001-147500/sp147159.html</ReleaseNotesUrl>
+    <CvaTitle>HP EB/ZB/x360 8x0/1040/FF G10 Windows 10 x64 Driver Pack</CvaTitle>
+    <HSACompliant>true</HSACompliant>
+  </SoftPaq>
+<SoftPaq>
+    <Id>sp150833</Id>
+    <Name>HP EB/ZB/x360 8x0/1040/FF G10 Windows 11 Driver Pack</Name>
+    <Version>4.00 A 1</Version>
+    <Category>Manageability - Driver Pack</Category>
+    <DateReleased>1/12/2024 12:00:00 AM</DateReleased>
+    <Url>https://ftp.hp.com/pub/softpaq/sp150501-151000/sp150833.exe</Url>
+    <Size>1635333944</Size>
+    <MD5>70e16f2d80ecda524bdfdfae6fdbbc6d</MD5>
+    <SHA256>66635977AAD6C3C90A1AE5C43BE5D28D888E5F78F5414C788D7D7E559BF6D12D</SHA256>
+    <CvaFileUrl>https://ftp.hp.com/pub/softpaq/sp150501-151000/sp150833.cva</CvaFileUrl>
+    <ReleaseNotesUrl>https://ftp.hp.com/pub/softpaq/sp150501-151000/sp150833.html</ReleaseNotesUrl>
+    <CvaTitle>HP EB/ZB/x360 8x0/1040/FF G10 Windows 11 Driver Pack</CvaTitle>
+    <HSACompliant>true</HSACompliant>
+  </SoftPaq>
+<SoftPaq>
+    <Id>sp160195</Id>
+    <Name>HP EB/ZB/x360 8x0/1040/FF G10 Windows 11 Driver Pack</Name>
+    <Version>8.00 A 1</Version>
+    <Category>Manageability - Driver Pack</Category>
+    <DateReleased>11/27/2025 12:00:00 AM</DateReleased>
+    <Url>https://ftp.hp.com/pub/softpaq/sp160001-160500/sp160195.exe</Url>
+    <Size>2178574672</Size>
+    <MD5>0FFC30E1385FAE0C17732A72E48AC4C4</MD5>
+    <SHA256>C8E1470949590CCC56CB6704F108024E5FA408B9E46AB6004235AD5823B4B43B</SHA256>
+    <CvaFileUrl>https://ftp.hp.com/pub/softpaq/sp160001-160500/sp160195.cva</CvaFileUrl>
+    <ReleaseNotesUrl>https://ftp.hp.com/pub/softpaq/sp160001-160500/sp160195.html</ReleaseNotesUrl>
+    <CvaTitle>HP EB/ZB/x360 8x0/1040/FF G10 Windows 11 Driver Pack</CvaTitle>
+    <HSACompliant>false</HSACompliant>
+  </SoftPaq>
+</SoftPaqList><ProductOSDriverPackList>
+  <ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8b41</SystemId>
+    <SystemName>HP Elite x360 1040 14 inch G10 2-in-1 Notebook PC</SystemName>
+    <OSName>Windows 10 64-bit, 21H2</OSName>
+    <OSId>4297</OSId>
+    <SoftPaqId>sp147159</SoftPaqId>
+    <ProductId>2101555086</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8b41</SystemId>
+    <SystemName>HP Elite x360 830 13 inch G10 2-in-1 Notebook PC</SystemName>
+    <OSName>Windows 10 64-bit, 21H2</OSName>
+    <OSId>4297</OSId>
+    <SoftPaqId>sp147159</SoftPaqId>
+    <ProductId>2101554894</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8B41</SystemId>
+    <SystemName>HP EliteBook 1040 14 inch G10 Notebook PC</SystemName>
+    <OSName>Windows 10 64-bit, 21H2</OSName>
+    <OSId>4297</OSId>
+    <SoftPaqId>sp147159</SoftPaqId>
+    <ProductId>2101555059</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8B41</SystemId>
+    <SystemName>HP EliteBook 830 13 inch G10 Notebook PC</SystemName>
+    <OSName>Windows 10 64-bit, 21H2</OSName>
+    <OSId>4297</OSId>
+    <SoftPaqId>sp147159</SoftPaqId>
+    <ProductId>2101554831</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8B41</SystemId>
+    <SystemName>HP EliteBook 840 14 inch G10 Notebook PC</SystemName>
+    <OSName>Windows 10 64-bit, 21H2</OSName>
+    <OSId>4297</OSId>
+    <SoftPaqId>sp147159</SoftPaqId>
+    <ProductId>2101554995</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8B41</SystemId>
+    <SystemName>HP EliteBook 860 16 inch G10 Notebook PC</SystemName>
+    <OSName>Windows 10 64-bit, 21H2</OSName>
+    <OSId>4297</OSId>
+    <SoftPaqId>sp147159</SoftPaqId>
+    <ProductId>2101555155</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8b41</SystemId>
+    <SystemName>HP ZBook Firefly 14 inch G10 Mobile Workstation PC</SystemName>
+    <OSName>Windows 10 64-bit, 21H2</OSName>
+    <OSId>4297</OSId>
+    <SoftPaqId>sp147159</SoftPaqId>
+    <ProductId>2101497528</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8b41</SystemId>
+    <SystemName>HP ZBook Firefly 16 inch G10 Mobile Workstation PC</SystemName>
+    <OSName>Windows 10 64-bit, 21H2</OSName>
+    <OSId>4297</OSId>
+    <SoftPaqId>sp147159</SoftPaqId>
+    <ProductId>2101497562</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8b41</SystemId>
+    <SystemName>HP Elite x360 1040 14 inch G10 2-in-1 Notebook PC</SystemName>
+    <OSName>Windows 11 64-bit, 21H2</OSName>
+    <OSId>4298</OSId>
+    <SoftPaqId>sp150833</SoftPaqId>
+    <ProductId>2101555086</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8b41</SystemId>
+    <SystemName>HP Elite x360 830 13 inch G10 2-in-1 Notebook PC</SystemName>
+    <OSName>Windows 11 64-bit, 21H2</OSName>
+    <OSId>4298</OSId>
+    <SoftPaqId>sp150833</SoftPaqId>
+    <ProductId>2101554894</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8B41</SystemId>
+    <SystemName>HP EliteBook 1040 14 inch G10 Notebook PC</SystemName>
+    <OSName>Windows 11 64-bit, 21H2</OSName>
+    <OSId>4298</OSId>
+    <SoftPaqId>sp150833</SoftPaqId>
+    <ProductId>2101555059</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8B41</SystemId>
+    <SystemName>HP EliteBook 830 13 inch G10 Notebook PC</SystemName>
+    <OSName>Windows 11 64-bit, 21H2</OSName>
+    <OSId>4298</OSId>
+    <SoftPaqId>sp150833</SoftPaqId>
+    <ProductId>2101554831</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8B41</SystemId>
+    <SystemName>HP EliteBook 840 14 inch G10 Notebook PC</SystemName>
+    <OSName>Windows 11 64-bit, 21H2</OSName>
+    <OSId>4298</OSId>
+    <SoftPaqId>sp150833</SoftPaqId>
+    <ProductId>2101554995</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8B41</SystemId>
+    <SystemName>HP EliteBook 860 16 inch G10 Notebook PC</SystemName>
+    <OSName>Windows 11 64-bit, 21H2</OSName>
+    <OSId>4298</OSId>
+    <SoftPaqId>sp150833</SoftPaqId>
+    <ProductId>2101555155</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8b41</SystemId>
+    <SystemName>HP ZBook Firefly 14 inch G10 Mobile Workstation PC</SystemName>
+    <OSName>Windows 11 64-bit, 21H2</OSName>
+    <OSId>4298</OSId>
+    <SoftPaqId>sp150833</SoftPaqId>
+    <ProductId>2101497528</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8b41</SystemId>
+    <SystemName>HP ZBook Firefly 16 inch G10 Mobile Workstation PC</SystemName>
+    <OSName>Windows 11 64-bit, 21H2</OSName>
+    <OSId>4298</OSId>
+    <SoftPaqId>sp150833</SoftPaqId>
+    <ProductId>2101497562</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8b41</SystemId>
+    <SystemName>HP Elite x360 1040 14 inch G10 2-in-1 Notebook PC</SystemName>
+    <OSName>Windows 11 64-bit, 22H2</OSName>
+    <OSId>4306</OSId>
+    <SoftPaqId>sp160195</SoftPaqId>
+    <ProductId>2101555086</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8b41</SystemId>
+    <SystemName>HP Elite x360 830 13 inch G10 2-in-1 Notebook PC</SystemName>
+    <OSName>Windows 11 64-bit, 22H2</OSName>
+    <OSId>4306</OSId>
+    <SoftPaqId>sp160195</SoftPaqId>
+    <ProductId>2101554894</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8B41</SystemId>
+    <SystemName>HP EliteBook 1040 14 inch G10 Notebook PC</SystemName>
+    <OSName>Windows 11 64-bit, 22H2</OSName>
+    <OSId>4306</OSId>
+    <SoftPaqId>sp160195</SoftPaqId>
+    <ProductId>2101555059</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8B41</SystemId>
+    <SystemName>HP EliteBook 830 13 inch G10 Notebook PC</SystemName>
+    <OSName>Windows 11 64-bit, 22H2</OSName>
+    <OSId>4306</OSId>
+    <SoftPaqId>sp160195</SoftPaqId>
+    <ProductId>2101554831</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8B41</SystemId>
+    <SystemName>HP EliteBook 840 14 inch G10 Notebook PC</SystemName>
+    <OSName>Windows 11 64-bit, 22H2</OSName>
+    <OSId>4306</OSId>
+    <SoftPaqId>sp160195</SoftPaqId>
+    <ProductId>2101554995</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8B41</SystemId>
+    <SystemName>HP EliteBook 860 16 inch G10 Notebook PC</SystemName>
+    <OSName>Windows 11 64-bit, 22H2</OSName>
+    <OSId>4306</OSId>
+    <SoftPaqId>sp160195</SoftPaqId>
+    <ProductId>2101555155</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8b41</SystemId>
+    <SystemName>HP ZBook Firefly 14 inch G10 Mobile Workstation PC</SystemName>
+    <OSName>Windows 11 64-bit, 22H2</OSName>
+    <OSId>4306</OSId>
+    <SoftPaqId>sp160195</SoftPaqId>
+    <ProductId>2101497528</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8b41</SystemId>
+    <SystemName>HP ZBook Firefly 16 inch G10 Mobile Workstation PC</SystemName>
+    <OSName>Windows 11 64-bit, 22H2</OSName>
+    <OSId>4306</OSId>
+    <SoftPaqId>sp160195</SoftPaqId>
+    <ProductId>2101497562</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8b41</SystemId>
+    <SystemName>HP Elite x360 1040 14 inch G10 2-in-1 Notebook PC</SystemName>
+    <OSName>Windows 10 64-bit, 22H2</OSName>
+    <OSId>4308</OSId>
+    <SoftPaqId>sp147159</SoftPaqId>
+    <ProductId>2101555086</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8b41</SystemId>
+    <SystemName>HP Elite x360 830 13 inch G10 2-in-1 Notebook PC</SystemName>
+    <OSName>Windows 10 64-bit, 22H2</OSName>
+    <OSId>4308</OSId>
+    <SoftPaqId>sp147159</SoftPaqId>
+    <ProductId>2101554894</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8B41</SystemId>
+    <SystemName>HP EliteBook 1040 14 inch G10 Notebook PC</SystemName>
+    <OSName>Windows 10 64-bit, 22H2</OSName>
+    <OSId>4308</OSId>
+    <SoftPaqId>sp147159</SoftPaqId>
+    <ProductId>2101555059</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8B41</SystemId>
+    <SystemName>HP EliteBook 830 13 inch G10 Notebook PC</SystemName>
+    <OSName>Windows 10 64-bit, 22H2</OSName>
+    <OSId>4308</OSId>
+    <SoftPaqId>sp147159</SoftPaqId>
+    <ProductId>2101554831</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8B41</SystemId>
+    <SystemName>HP EliteBook 840 14 inch G10 Notebook PC</SystemName>
+    <OSName>Windows 10 64-bit, 22H2</OSName>
+    <OSId>4308</OSId>
+    <SoftPaqId>sp147159</SoftPaqId>
+    <ProductId>2101554995</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8B41</SystemId>
+    <SystemName>HP EliteBook 860 16 inch G10 Notebook PC</SystemName>
+    <OSName>Windows 10 64-bit, 22H2</OSName>
+    <OSId>4308</OSId>
+    <SoftPaqId>sp147159</SoftPaqId>
+    <ProductId>2101555155</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8b41</SystemId>
+    <SystemName>HP ZBook Firefly 14 inch G10 Mobile Workstation PC</SystemName>
+    <OSName>Windows 10 64-bit, 22H2</OSName>
+    <OSId>4308</OSId>
+    <SoftPaqId>sp147159</SoftPaqId>
+    <ProductId>2101497528</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8b41</SystemId>
+    <SystemName>HP ZBook Firefly 16 inch G10 Mobile Workstation PC</SystemName>
+    <OSName>Windows 10 64-bit, 22H2</OSName>
+    <OSId>4308</OSId>
+    <SoftPaqId>sp147159</SoftPaqId>
+    <ProductId>2101497562</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8b41</SystemId>
+    <SystemName>HP Elite x360 1040 14 inch G10 2-in-1 Notebook PC</SystemName>
+    <OSName>Windows 11 64-bit, 23H2</OSName>
+    <OSId>4317</OSId>
+    <SoftPaqId>sp160195</SoftPaqId>
+    <ProductId>2101555086</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8b41</SystemId>
+    <SystemName>HP Elite x360 830 13 inch G10 2-in-1 Notebook PC</SystemName>
+    <OSName>Windows 11 64-bit, 23H2</OSName>
+    <OSId>4317</OSId>
+    <SoftPaqId>sp160195</SoftPaqId>
+    <ProductId>2101554894</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8B41</SystemId>
+    <SystemName>HP EliteBook 1040 14 inch G10 Notebook PC</SystemName>
+    <OSName>Windows 11 64-bit, 23H2</OSName>
+    <OSId>4317</OSId>
+    <SoftPaqId>sp160195</SoftPaqId>
+    <ProductId>2101555059</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8B41</SystemId>
+    <SystemName>HP EliteBook 830 13 inch G10 Notebook PC</SystemName>
+    <OSName>Windows 11 64-bit, 23H2</OSName>
+    <OSId>4317</OSId>
+    <SoftPaqId>sp160195</SoftPaqId>
+    <ProductId>2101554831</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8B41</SystemId>
+    <SystemName>HP EliteBook 840 14 inch G10 Notebook PC</SystemName>
+    <OSName>Windows 11 64-bit, 23H2</OSName>
+    <OSId>4317</OSId>
+    <SoftPaqId>sp160195</SoftPaqId>
+    <ProductId>2101554995</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8B41</SystemId>
+    <SystemName>HP EliteBook 860 16 inch G10 Notebook PC</SystemName>
+    <OSName>Windows 11 64-bit, 23H2</OSName>
+    <OSId>4317</OSId>
+    <SoftPaqId>sp160195</SoftPaqId>
+    <ProductId>2101555155</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8b41</SystemId>
+    <SystemName>HP ZBook Firefly 14 inch G10 Mobile Workstation PC</SystemName>
+    <OSName>Windows 11 64-bit, 23H2</OSName>
+    <OSId>4317</OSId>
+    <SoftPaqId>sp160195</SoftPaqId>
+    <ProductId>2101497528</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8b41</SystemId>
+    <SystemName>HP ZBook Firefly 16 inch G10 Mobile Workstation PC</SystemName>
+    <OSName>Windows 11 64-bit, 23H2</OSName>
+    <OSId>4317</OSId>
+    <SoftPaqId>sp160195</SoftPaqId>
+    <ProductId>2101497562</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8b41</SystemId>
+    <SystemName>HP Elite x360 1040 14 inch G10 2-in-1 Notebook PC</SystemName>
+    <OSName>Windows 11 64-bit, 24H2</OSName>
+    <OSId>4323</OSId>
+    <SoftPaqId>sp160195</SoftPaqId>
+    <ProductId>2101555086</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8b41</SystemId>
+    <SystemName>HP Elite x360 830 13 inch G10 2-in-1 Notebook PC</SystemName>
+    <OSName>Windows 11 64-bit, 24H2</OSName>
+    <OSId>4323</OSId>
+    <SoftPaqId>sp160195</SoftPaqId>
+    <ProductId>2101554894</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8B41</SystemId>
+    <SystemName>HP EliteBook 1040 14 inch G10 Notebook PC</SystemName>
+    <OSName>Windows 11 64-bit, 24H2</OSName>
+    <OSId>4323</OSId>
+    <SoftPaqId>sp160195</SoftPaqId>
+    <ProductId>2101555059</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8B41</SystemId>
+    <SystemName>HP EliteBook 830 13 inch G10 Notebook PC</SystemName>
+    <OSName>Windows 11 64-bit, 24H2</OSName>
+    <OSId>4323</OSId>
+    <SoftPaqId>sp160195</SoftPaqId>
+    <ProductId>2101554831</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8B41</SystemId>
+    <SystemName>HP EliteBook 840 14 inch G10 Notebook PC</SystemName>
+    <OSName>Windows 11 64-bit, 24H2</OSName>
+    <OSId>4323</OSId>
+    <SoftPaqId>sp160195</SoftPaqId>
+    <ProductId>2101554995</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8B41</SystemId>
+    <SystemName>HP EliteBook 860 16 inch G10 Notebook PC</SystemName>
+    <OSName>Windows 11 64-bit, 24H2</OSName>
+    <OSId>4323</OSId>
+    <SoftPaqId>sp160195</SoftPaqId>
+    <ProductId>2101555155</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8b41</SystemId>
+    <SystemName>HP ZBook Firefly 14 inch G10 Mobile Workstation PC</SystemName>
+    <OSName>Windows 11 64-bit, 24H2</OSName>
+    <OSId>4323</OSId>
+    <SoftPaqId>sp160195</SoftPaqId>
+    <ProductId>2101497528</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8b41</SystemId>
+    <SystemName>HP ZBook Firefly 16 inch G10 Mobile Workstation PC</SystemName>
+    <OSName>Windows 11 64-bit, 24H2</OSName>
+    <OSId>4323</OSId>
+    <SoftPaqId>sp160195</SoftPaqId>
+    <ProductId>2101497562</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8b41</SystemId>
+    <SystemName>HP Elite x360 1040 14 inch G10 2-in-1 Notebook PC</SystemName>
+    <OSName>Windows 11 64-bit, 25H2</OSName>
+    <OSId>4333</OSId>
+    <SoftPaqId>sp160195</SoftPaqId>
+    <ProductId>2101555086</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8b41</SystemId>
+    <SystemName>HP Elite x360 830 13 inch G10 2-in-1 Notebook PC</SystemName>
+    <OSName>Windows 11 64-bit, 25H2</OSName>
+    <OSId>4333</OSId>
+    <SoftPaqId>sp160195</SoftPaqId>
+    <ProductId>2101554894</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8B41</SystemId>
+    <SystemName>HP EliteBook 1040 14 inch G10 Notebook PC</SystemName>
+    <OSName>Windows 11 64-bit, 25H2</OSName>
+    <OSId>4333</OSId>
+    <SoftPaqId>sp160195</SoftPaqId>
+    <ProductId>2101555059</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8B41</SystemId>
+    <SystemName>HP EliteBook 830 13 inch G10 Notebook PC</SystemName>
+    <OSName>Windows 11 64-bit, 25H2</OSName>
+    <OSId>4333</OSId>
+    <SoftPaqId>sp160195</SoftPaqId>
+    <ProductId>2101554831</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8B41</SystemId>
+    <SystemName>HP EliteBook 840 14 inch G10 Notebook PC</SystemName>
+    <OSName>Windows 11 64-bit, 25H2</OSName>
+    <OSId>4333</OSId>
+    <SoftPaqId>sp160195</SoftPaqId>
+    <ProductId>2101554995</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8B41</SystemId>
+    <SystemName>HP EliteBook 860 16 inch G10 Notebook PC</SystemName>
+    <OSName>Windows 11 64-bit, 25H2</OSName>
+    <OSId>4333</OSId>
+    <SoftPaqId>sp160195</SoftPaqId>
+    <ProductId>2101555155</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8b41</SystemId>
+    <SystemName>HP ZBook Firefly 14 inch G10 Mobile Workstation PC</SystemName>
+    <OSName>Windows 11 64-bit, 25H2</OSName>
+    <OSId>4333</OSId>
+    <SoftPaqId>sp160195</SoftPaqId>
+    <ProductId>2101497528</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Notebooks &amp; Tablets</ProductType>
+    <SystemId>8b41</SystemId>
+    <SystemName>HP ZBook Firefly 16 inch G10 Mobile Workstation PC</SystemName>
+    <OSName>Windows 11 64-bit, 25H2</OSName>
+    <OSId>4333</OSId>
+    <SoftPaqId>sp160195</SoftPaqId>
+    <ProductId>2101497562</ProductId>
+  </ProductOSDriverPack>
+<ProductOSDriverPack>
+    <Architecture>64-bit</Architecture>
+    <ProductType>Desktops</ProductType>
+    <SystemId>81c3,8396</SystemId>
+    <SystemName>HP Elite Slice</SystemName>
+    <OSName>Windows 10 64-bit, 1607</OSName>
+    <OSId>4243</OSId>
+    <SoftPaqId>sp80493</SoftPaqId>
+    <ProductId>12716695</ProductId>
+  </ProductOSDriverPack>
+</ProductOSDriverPackList>
+</HPClientDriverPackCatalog>
+</NewDataSet>

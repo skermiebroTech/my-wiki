@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ManifestIndex baseLocation="downloads.dell.com" creationDateTime="2026-09-11T14:37:35-05:00" version="2026.09.11" baseLocationAccessProtocols="HTTPS" schemaVersion="3.0" xmlns="openmanage/cm/dm">
+  <InventoryComponent inventoryCollectorType="COMPACT" schemaVersion="3.0" releaseID="G39WD" releaseDate="August 21,2026" vendorVersion="15.0.1.190" dellVersion="A00" osCode="WIN" path="FOLDER14931626M/1/InvColPC_x64_15.0.1.190.exe" size="2167560">
+    <ICManifest URL="https://dellupdater.dell.com/non_du/ClientService/invcol/08212026/1/ICManifest.cab">
+      <Cryptography>
+        <Hash algorithm="MD5">AF2FB0F0578D14FBA12A01BAB90AC2D8</Hash>
+        <Hash algorithm="SHA256">20A6A87E8D25B1DAB849C03A0A244A10262B62EEE33ED3F494A9D70D47BB3CF6</Hash>
+        <Hash algorithm="SHA1">5E193C0BAE1A90C17C24432CDC03FB978B0B2D4F</Hash>
+      </Cryptography>
+    </ICManifest>
+    <Cryptography>
+      <Hash algorithm="MD5">86799e1c81854fd7a814768962746f30</Hash>
+      <Hash algorithm="SHA256">1179e1906e5b091d44819219838503eae12fb4aa80004c2c79c8df1e8938287f</Hash>
+      <Hash algorithm="SHA1">b77a78e0a237bac410deecf19de118fba411193c</Hash>
+    </Cryptography>
+  </InventoryComponent>
+  <InventoryComponent inventoryCollectorType="ARM64" schemaVersion="3.0" releaseID="WDX3H" releaseDate="August 21,2026" vendorVersion="15.0.1.190" dellVersion="A00" osCode="WIN" path="FOLDER14931644M/1/InvColPC_ARM64_15.0.1.190.exe" size="2480712">
+    <ICManifest URL="https://dellupdater.dell.com/non_du/ClientService/invcol/08212026/2/ICManifest.cab">
+      <Cryptography>
+        <Hash algorithm="MD5">DF7D9A33571EEA48C6DB997BE22B30A7</Hash>
+        <Hash algorithm="SHA256">B60FF0F2619F6326E3D81C3336E7F97C259925B1B7850DF8F37471756C02B0E5</Hash>
+        <Hash algorithm="SHA1">268929BEDFF072ECDB7710F9C5B78634041AF85B</Hash>
+      </Cryptography>
+    </ICManifest>
+    <Cryptography>
+      <Hash algorithm="MD5">b45ddf68da1fc558e1354d6da10423eb</Hash>
+      <Hash algorithm="SHA256">379c243881eab210f6cec65168de8995b3ea9f1f5841bb85e4368bd81434024d</Hash>
+      <Hash algorithm="SHA1">32f4a7cb84be845d9d20383331ff52c85dd82e25</Hash>
+    </Cryptography>
+  </InventoryComponent>
+  <GroupManifest type="MTPDK" id="322dfbaf-d11a-4151-ba06-231ffcc38c36" latest="6e03658b-3276-4c6c-a773-f6b25e90931b" eol="false" BKCCompliance="false" creationDateTime="2026-09-11T14:42:39-05:00">
+    <Display lang="en"><![CDATA[ PDK Catalog for Inspiron G15 5515]]></Display>
+    <SupportedSystems>
+      <Brand key="25" prefix="INS">
+        <Display lang="en"><![CDATA[Inspiron]]></Display>
+        <Model systemID="0A6E" systemIDType="BIOS">
+          <Display lang="en"><![CDATA[G15 5515]]></Display>
+        </Model>
+      </Brand>
+    </SupportedSystems>
+    <ManifestInformation id="6e03658b-3276-4c6c-a773-f6b25e90931b" releaseID="9HH6J" creationDateTime="2026-09-02T04:03:14-05:00" version="2026.09.02" path="FOLDER14982975M/1/Inspiron_0A6E.cab" size="162560" inventoryCollectorType="COMPACT">
+      <Cryptography>
+        <Hash algorithm="MD5">765c92bc9be2b52f331b76beb40339e2</Hash>
+        <Hash algorithm="SHA1">dbc459112fbf952d183bea52e386992e155a6bfa</Hash>
+        <Hash algorithm="SHA256">1b48aac88cc585134c37b3d1c0256d315f9bb20a6adfee8ff5bb3d6040c647ab</Hash>
+      </Cryptography>
+      <Display lang="en"><![CDATA[ PDK Catalog for Inspiron G15 5515]]></Display>
+    </ManifestInformation>
+  </GroupManifest>
+<GroupManifest type="MTPDK" id="57230306-cdd5-4cc0-9765-f797f137c606" latest="3807fd70-d3d3-463e-a1b7-fb57d10dc59c" eol="false" BKCCompliance="false" creationDateTime="2026-09-11T14:44:42-05:00">
+    <Display lang="en"><![CDATA[ PDK Catalog for Precision 3431]]></Display>
+    <SupportedSystems>
+      <Brand key="38" prefix="PRE">
+        <Display lang="en"><![CDATA[Precision]]></Display>
+        <Model systemID="0942" systemIDType="BIOS">
+          <Display lang="en"><![CDATA[3431]]></Display>
+        </Model>
+      </Brand>
+    </SupportedSystems>
+    <ManifestInformation id="3807fd70-d3d3-463e-a1b7-fb57d10dc59c" releaseID="G91CF" creationDateTime="2026-09-11T09:01:11-05:00" version="2026.09.11" path="FOLDER15015075M/1/Precision_0942.cab" size="342564" inventoryCollectorType="COMPACT">
+      <Cryptography>
+        <Hash algorithm="MD5">4a9f43e1dcb0d31102cb0f4257c257a6</Hash>
+        <Hash algorithm="SHA1">c796186af68e4433df4f9dbd8a98617eb8c8c79c</Hash>
+        <Hash algorithm="SHA256">0168ebfc7a7fe0bb3b99ed12f14c8eecac862af1ee15233f099d649644b044d1</Hash>
+      </Cryptography>
+      <Display lang="en"><![CDATA[ PDK Catalog for Precision 3431]]></Display>
+    </ManifestInformation>
+  </GroupManifest>
+<GroupManifest type="MTPDK" id="95258056-8653-44d8-9003-d4b03eb31803" latest="d836106c-393d-4876-b93a-f84d56e3d644" eol="false" BKCCompliance="true" creationDateTime="2026-09-11T14:53:10-05:00">
+    <Display lang="en"><![CDATA[ PDK Catalog for Vostro Notebook Vostro 5320]]></Display>
+    <SupportedSystems>
+      <Brand key="51" prefix="VOSNB">
+        <Display lang="en"><![CDATA[Vostro Notebook]]></Display>
+        <Model systemID="0B3D" systemIDType="BIOS">
+          <Display lang="en"><![CDATA[Vostro 5320]]></Display>
+        </Model>
+      </Brand>
+    </SupportedSystems>
+    <ManifestInformation id="d836106c-393d-4876-b93a-f84d56e3d644" releaseID="G91CF" creationDateTime="2026-09-11T08:59:35-05:00" version="2026.09.11" path="FOLDER15015075M/1/Vostro_Notebook_0B3D.cab" size="354692" inventoryCollectorType="COMPACT">
+      <Cryptography>
+        <Hash algorithm="MD5">f4777c8bd5b991fe847f78355b30a2a0</Hash>
+        <Hash algorithm="SHA1">76a82897d3d58431f60eb581483a0485d619f316</Hash>
+        <Hash algorithm="SHA256">3cfe41ae807075d6f82f63d07dc2657381376c837915da56548d4875cf9c3121</Hash>
+      </Cryptography>
+      <Display lang="en"><![CDATA[ PDK Catalog for Vostro Notebook Vostro 5320]]></Display>
+    </ManifestInformation>
+  </GroupManifest>
+<GroupManifest type="MTPDK" id="a4c6ecce-e18b-4c73-ba0b-2af6d2091836" latest="df0db6b5-29cd-428e-9301-d0fb310eb397" eol="false" BKCCompliance="true" creationDateTime="2026-09-11T14:53:39-05:00">
+    <Display lang="en"><![CDATA[ PDK Catalog for Latitude Latitude 7430]]></Display>
+    <SupportedSystems>
+      <Brand key="28" prefix="LAT">
+        <Display lang="en"><![CDATA[Latitude]]></Display>
+        <Model systemID="0B0B" systemIDType="BIOS">
+          <Display lang="en"><![CDATA[Latitude 7430]]></Display>
+        </Model>
+      </Brand>
+    </SupportedSystems>
+    <ManifestInformation id="df0db6b5-29cd-428e-9301-d0fb310eb397" releaseID="G91CF" creationDateTime="2026-09-11T08:30:13-05:00" version="2026.09.11" path="FOLDER15015075M/1/Latitude_0B0B.cab" size="406441" inventoryCollectorType="COMPACT">
+      <Cryptography>
+        <Hash algorithm="MD5">b75fedbd18a4380f99c00b69070bbb2a</Hash>
+        <Hash algorithm="SHA1">e4d05581e9eea14555a22ee3678af2a52d6688c0</Hash>
+        <Hash algorithm="SHA256">eda2a19d1459aebb935f60693eb0eb83090711c11b4092cce28a977b4719fa77</Hash>
+      </Cryptography>
+      <Display lang="en"><![CDATA[ PDK Catalog for Latitude Latitude 7430]]></Display>
+    </ManifestInformation>
+  </GroupManifest>
+<GroupManifest type="MTPDK" id="4cfc543f-3ebf-40e4-a079-1476a98b77b5" latest="b8d357eb-7185-4a31-9e6b-e0a299582945" eol="false" BKCCompliance="true" creationDateTime="2026-09-11T14:57:02-05:00">
+    <Display lang="en"><![CDATA[ PDK Catalog for Latitude Latitude 7350]]></Display>
+    <SupportedSystems>
+      <Brand key="28" prefix="LAT">
+        <Display lang="en"><![CDATA[Latitude]]></Display>
+        <Model systemID="0CBF" systemIDType="BIOS">
+          <Display lang="en"><![CDATA[Latitude 7350]]></Display>
+        </Model>
+      </Brand>
+    </SupportedSystems>
+    <ManifestInformation id="b8d357eb-7185-4a31-9e6b-e0a299582945" releaseID="G91CF" creationDateTime="2026-09-11T08:46:40-05:00" version="2026.09.11" path="FOLDER15015075M/1/Latitude_0CBF.cab" size="424163" inventoryCollectorType="COMPACT">
+      <Cryptography>
+        <Hash algorithm="MD5">7b760cc8a38ded34041528b7e09ddd98</Hash>
+        <Hash algorithm="SHA1">e8653f47cefde988ec9b70237d48736a4971d347</Hash>
+        <Hash algorithm="SHA256">225aad0cd289bdcd9b9f98d8d6b137aa10bfe44527a06a8655c3b4b5ddccfc15</Hash>
+      </Cryptography>
+      <Display lang="en"><![CDATA[ PDK Catalog for Latitude Latitude 7350]]></Display>
+    </ManifestInformation>
+  </GroupManifest>
+</ManifestIndex>
