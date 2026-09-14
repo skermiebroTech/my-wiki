@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.29.0 (keep in sync with $SCRIPT_VERSION below)
+# Version: 1.29.1 (keep in sync with $SCRIPT_VERSION below)
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -74,6 +74,12 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.29.1 - Analytics: the Dell per-SKU catalog CAB (served as e.g.
+#           Latitude_0B0B.cab) was recorded as a DRIVER download and sent to
+#           the sheet's driver_urls column (seen in the first two v1.29.0
+#           field rows), which would pollute the dashboard's "most common
+#           missing drivers" table. Add-DownloadRecord now also classifies by
+#           the local file name (DellCatalog_<SKU>.cab) -> kind=catalog.
 # v1.29.0 - Audit fixes (see the 2026-09-14 audit report) + dev/prod merge.
 #           MERGE: this file = prod v1.28.1 (Auto-reboot, TEMP RULE) + every
 #           dev-only change that the July rollback dropped from prod: the
@@ -1000,7 +1006,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.29.0"
+$SCRIPT_VERSION = "1.29.1"
 
 # =============================================================
 # TEMP RULE (v1.28.0) - CURRENTLY OFF (v1.28.1): when $true, the WINDOWS
@@ -3162,8 +3168,13 @@ function Add-DownloadRecord {
         # Catalog / metadata heuristic: vendor catalog cabs, descriptor /
         # catalog XML, the HP driver-pack matrix HTML. Anything else
         # (.exe / .msi / non-catalog .cab) is a re-downloadable driver.
+        # v1.29.1 - also test the local OutFile name: the Dell per-SKU catalog
+        # is served as e.g. Latitude_0B0B.cab (no "catalog" in the URL) and was
+        # being recorded - and sent to the sheet - as a driver URL.
         $lf   = $fileName.ToLower()
-        $kind = if ($lf -match 'catalog' -or $lf -match '\.xml$' -or $lf -match '\.html?$') {
+        $lo   = ""
+        try { $lo = ([System.IO.Path]::GetFileName($OutFile)).ToLower() } catch {}
+        $kind = if ($lf -match 'catalog' -or $lo -match 'catalog' -or $lf -match '\.xml$' -or $lf -match '\.html?$') {
             'catalog'
         } else {
             'driver'
