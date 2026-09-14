@@ -173,7 +173,7 @@ function _numOrBlank(v) {
 // CORS: an Apps Script web app deployed "Execute as me / Anyone" serves GET
 // responses with Access-Control-Allow-Origin:* (the /exec call 302-redirects to
 // googleusercontent.com), so the wiki can fetch it directly from the browser.
-const MAX_GET_ROWS = 1000;
+const MAX_GET_ROWS = 100000;   // effectively "all rows": the dashboard wants the full history (~1,150 rows, ~400 KB as JSON)
 const FIELD_KEYS = [
   'timestamp','result','manufacturer','model','serial','os_version','os_build',
   'inf_count','download_mb','missing_before','missing_after','duration_sec',
