@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.29.0 (keep in sync with $SCRIPT_VERSION below)
+# Version: 1.28.1 (keep in sync with $SCRIPT_VERSION below)
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -48,9 +48,6 @@
 #                  driver pack downloads.
 #   -SkipInstall   Download and extract only, skip pnputil driver installation
 #   -SkipCleanup   Keep C:\DRIVERS after run for inspection
-#   -TimeZone      v1.29.0 - time zone applied with tzutil at load (default
-#                  "E. Australia Standard Time"). Pass "" to leave the zone
-#                  alone. Never applied under -TestMode.
 #   -AutoReboot    v1.27.0 - pre-check the GUI "Auto-reboot" toggle (off by
 #                  default). While the toggle is checked, a SUCCESSFUL run skips
 #                  the completion dialog and schedules a restart instead
@@ -74,46 +71,6 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
-# v1.29.0 - Audit fixes (see the 2026-09-14 audit report) + dev/prod merge.
-#           MERGE: this file = prod v1.28.1 (Auto-reboot, TEMP RULE) + every
-#           dev-only change that the July rollback dropped from prod: the
-#           v1.24.1 on-hardware fixes (log-file lock retry, camera companion
-#           dedup, -MachineType shadowing, override note), the v1.25.0 "Run
-#           Windows Update" button, and the v1.26.0 HP known-device rescue.
-#           (1) Microsoft Update Catalog tier was DEAD: the catalog switched
-#               its result anchors to single-quoted ids and the regex only
-#               accepted double quotes, so every search returned "no match".
-#               Get-MsCatalogResultRows now parses the result rows quote-
-#               agnostically and Select-MsCatalogDriverGuid picks by Windows
-#               generation + newest date instead of the first row.
-#           (2) Dell individual mode reads the per-SKU catalog from
-#               CatalogIndexPC.cab (current, ~10 MB, SKU-scoped, SHA256 per
-#               package, covers Vostro/Inspiron consumer SKUs) and falls back
-#               to the stale CatalogPC.cab (last refreshed 2026-06-12) only
-#               when the index has no entry. Downloads are SHA256-verified
-#               when the catalog supplies a hash. osCode matching accepts any
-#               W11*/W21*/W10* code; osArch filters x86/ARM64 packages.
-#           (3) 7-Zip is now portable: 7zr.exe unpacks 7z.exe + 7z.dll from
-#               the official installer into %TEMP% (7-Zip 26.03, 24.09
-#               fallback; arm64 build on ARM64). A 7-Zip already installed on
-#               the machine is used in place and is NEVER uninstalled (the old
-#               Remove-7Zip removed a pre-existing install).
-#           (4) "Missing drivers" no longer counts devices the installer cannot
-#               act on (codes 22 disabled, 24 not present, 29, 45 phantom,
-#               46, 53, 55). They are listed once in the BEFORE snapshot. The
-#               end-of-run dump names the reason per code (48/52 = policy
-#               block). Code 52 dropped from the remediation list.
-#           (5) HP full-pack path reads HPClientDriverPackCatalog.cab (XML,
-#               keyed by SystemId + OS version, with SHA256) before the matrix
-#               HTML scrape, so the pack matches this OS version instead of the
-#               first matrix column (25H2). Matrix scrape kept as fallback.
-#           (6) -TestMode mutates nothing: powercfg/tzutil skipped; w32tm moved
-#               after elevation (Sync-BenchClock). New -TimeZone parameter.
-#           (7) curl retries: --retry-all-errors removed (with --fail it retried
-#               a 404 ten times); --retry-max-time 300 --retry-connrefused added.
-#           (8) Download progress logs every 2% / 5 s instead of every 700 ms.
-#           (9) Six 2026 Surface Download Center IDs added (WMI model strings
-#               still to be confirmed on hardware - see the table comments).
 # v1.28.1 - TEMP RULE OFF: back to VENDOR DRIVER PACK FIRST, Windows Update
 #           last. $script:TempRuleWuFirst is now $false, so the WU-first pass
 #           in Start-Install is skipped entirely and Windows Update returns to
@@ -151,101 +108,20 @@
 #           slimmed 146->132 @ x=300 to fit the third checkbox at x=202.
 #           Version jumps 1.24.2 -> 1.27.0 to stay clear of the dev copy's
 #           1.25.0/1.26.0, keeping script_version unambiguous in analytics.
-# v1.26.0 - HP known-device rescue: a targeted last tier in the HP flow that
-#           installs a specific small SoftPaq for stubborn devices the catalog
-#           and full-pack paths can miss - and that Windows Update has no driver
-#           for. Field trigger: HP ProBook 635 Aero G7 (run 20260713_090835),
-#           Synaptics FS7605 fingerprint sensor (USB\VID_06CB&PID_00DF, error 43)
-#           left unresolved. The auto run was cancelled early and the operator's
-#           two follow-up Windows Update searches then returned nothing (the
-#           FS76xx fingerprint driver is not on WU). The HPIA reference catalog
-#           for this model (SystemID 8830) maps that hardware ID to sp144777
-#           (Synaptics FS7600 WBF Touch Fingerprint Driver v6.0.117.1110, 2.5 MB);
-#           the rescue downloads and SHA256-verifies just that SoftPaq.
-#           (1) New Invoke-HpKnownDeviceRescue + $script:HpKnownDeviceSoftpaqs
-#               table (HardwareID substring -> curated SoftPaq w/ URL + SHA256).
-#           (2) Runs after the full-pack tier in Start-HpDriverInstall (the
-#               matrix body is now Start-HpFullPackInstall). Idempotent: it acts
-#               only on devices still in a problem state, so it is a no-op once
-#               the normal path has already bound the driver. Honours cancel.
-# v1.25.0 - Windows Update driver method exposed in the UI. The WUA driver
-#           search (Install-DriversViaWindowsUpdate) already ran automatically
-#           as an end-of-run fallback; this surfaces it as an operator-driven
-#           action too. (Built on v1.24.2 - all new controls/text are pure
-#           ASCII; see the KEEP THIS FILE PURE ASCII note below.)
-#           (1) New "Run Windows Update" button on the main window (full-width
-#               secondary action below Install/Cancel). It launches the WUA
-#               driver search on the same background STA runspace the install
-#               uses - progress bars, Cancel, and the missing-device link all
-#               work - then reports what it installed and offers a reboot if
-#               anything landed. Disabled while any run is in flight; Cancel
-#               kills it within one poll (same child-process kill path).
-#           (2) The end-of-run "drivers still missing" dialogs now RUN the
-#               Windows Update method instead of only launching the Settings
-#               app. Success dialog: No = run Windows Update to fetch the rest;
-#               Failure dialog: Yes = run Windows Update. Both re-scan and
-#               refresh the missing-device count afterward.
-#           (3) Shared plumbing: Start-WorkerInstall/Start-WorkerWindowsUpdate
-#               now delegate to a generic Start-Worker; the WU run/report/
-#               reboot-offer logic lives in Invoke-WindowsUpdateDriverRun(
-#               Interactive), reused by both the button and the dialogs.
-# v1.24.2 - ASCII-only source file; replaces the v1.24.1 BOM fix (item 5 below).
-#           The BOM broke the irm|iex one-liner on Windows PowerShell 5.1: irm
-#           returns the UTF-8 BOM as a literal U+FEFF char, and 5.1's tokenizer
-#           does NOT treat it as whitespace (PS7 does). Line 1 then isn't a
-#           comment, so param() is no longer the first statement and every
-#           parameter default fails with InvalidLeftHandSide. Fix: file saved
-#           UTF-8 WITHOUT BOM, and every non-ASCII GUI glyph (braille spinner
-#           frames, status dots, ellipses, middle-dot title separator) is built
-#           at runtime via [char]. Pure-ASCII bytes decode identically under
-#           every host and encoding, so irm|iex, -File on a clone, and the
-#           elevated -File relaunch all render correctly.
+# v1.24.2 - ASCII-only source file; replaces the v1.24.1 BOM fix. The BOM broke
+#           the irm|iex one-liner on Windows PowerShell 5.1: irm returns the
+#           UTF-8 BOM as a literal U+FEFF char, and 5.1's tokenizer does NOT
+#           treat it as whitespace (PS7 does). Line 1 then isn't a comment, so
+#           param() is no longer the first statement and every parameter default
+#           fails with InvalidLeftHandSide. Fix: file saved UTF-8 WITHOUT BOM,
+#           and every non-ASCII GUI glyph (braille spinner frames, status dots,
+#           ellipses, middle-dot title separator) is built at runtime via
+#           [char]. Pure-ASCII bytes decode identically under every host and
+#           encoding, so irm|iex, -File on a clone, and the elevated -File
+#           relaunch all render correctly.
 #           KEEP THIS FILE PURE ASCII - do not paste literal glyphs into it.
-# v1.24.1 - Fixes from the first full on-hardware test pass (Latitude
-#           7410 / SKU 09BE test box, plus live-CatalogPC unit tests of the
-#           v1.24.0 matcher helpers):
-#           (1) Find-DellCameraCompanionPackages "newest release per package
-#               name" never collapsed anything: Dell embeds the version INSIDE
-#               the Display name ("...Driver for Camera,74.22000.13.22,A07"),
-#               so every release was a distinct hash key - live catalog, SKU
-#               0CBF returned the SAME IVSC package three times (13.19/.21/
-#               .22) and the companion rescue would download + silently run
-#               all three, in arbitrary hashtable order (oldest possibly
-#               first). Now dedups on the name with the ",<version>,<rev>"
-#               suffix stripped and returns newest-first (the rescue stops at
-#               the first companion that clears the device, so order matters).
-#           (2) "[OVERRIDDEN via param]" appeared on EVERY run since v1.5.5:
-#               PowerShell variable names are case-insensitive, so Start-
-#               Install's "$manufacturer = ..." assignment IS $Manufacturer -
-#               the later "if ($Manufacturer -or $Model)" tested the detection
-#               RESULT, not the params. The log note now reflects whether an
-#               override was actually passed.
-#           (3) Same shadowing bug, worse consequence, in the Lenovo path:
-#               "$machineType = $null" nulled the -MachineType param before
-#               "if ($MachineType)" read it, so the documented override was
-#               silently ignored (WMI always won - forcing the Lenovo path
-#               from a non-Lenovo box derived a garbage "LATI" prefix from
-#               the local model instead of the requested machine type).
-#           (4) Log-sink error suppression never worked: Add-Content raises
-#               NON-terminating errors, so "try { Add-Content } catch {}"
-#               let a locked .log emit one error record PER LOG CALL to the
-#               error stream (observed live when a log viewer held the file:
-#               every line from mid-install onward was dropped AND spammed
-#               stderr; in GUI mode those echo as "[worker error]" lines).
-#               All log/events Add-Content sites now use -ErrorAction Stop
-#               (so the catch actually engages) and the .log write gets one
-#               short retry to ride out transient open-collisions.
-#           (5) Saved the file with a UTF-8 BOM. Without one, Windows
-#               PowerShell 5.1 reads "-File" runs as ANSI, so every non-ASCII
-#               glyph was mojibake: GUI title "Dell Inc. <garbled dot> Latitude 7410"
-#               (seen in the on-hardware GUI smoke test), spinner braille
-#               frames, the status dots and "Waiting..." labels. The irm|iex
-#               Win+R path decodes UTF-8 and was always correct - but the
-#               v1.17.0 elevation relaunch uses -File on the local copy, so
-#               every elevated GUI session had the garbled variants. A
-#               leading BOM is treated as whitespace by the tokenizer, so
-#               the irm|iex path is unaffected. (WRONG: that whitespace rule is
-#               PS7-only; on PS 5.1 the BOM broke irm|iex - see v1.24.2.)
+# v1.24.1 - Five fixes from the on-hardware test pass (see dev copy changelog),
+#           including the UTF-8 BOM save that v1.24.2 reverts.
 # v1.24.0 - Dell individual mode: SKU-relaxed catalog retry (field report:
 #           Latitude 7430 / SKU 0B0B, run 20260709_105131 - ONE missing device,
 #           the AX211 Wi-Fi at PCI\VEN_8086&DEV_51F0, triggered the full 1.4GB
@@ -977,7 +853,6 @@ param(
     [int]$MaxParallelDownloads = 3,  # v1.11.0 - cap for parallel downloads in HP catalog / Dell individual paths.
     [switch]$SkipInstall,
     [switch]$SkipCleanup,
-    [string]$TimeZone = "E. Australia Standard Time",  # v1.29.0 - bench time zone set at load via tzutil; pass "" to leave the machine's zone alone. Skipped under -TestMode.
     [switch]$AutoReboot,    # v1.27.0 - pre-check the GUI Auto-reboot toggle (headless: reboot on success). Never fires on failure/cancel/-TestMode.
     [bool]$PromptWindowsUpdate = $true  # v1.12.1 - enabled by default: offer Windows Update if drivers still missing
 )
@@ -1000,7 +875,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.29.0"
+$SCRIPT_VERSION = "1.28.1"
 
 # =============================================================
 # TEMP RULE (v1.28.0) - CURRENTLY OFF (v1.28.1): when $true, the WINDOWS
@@ -1031,17 +906,14 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
-# v1.29.0 - Bench environment setup is SKIPPED under -TestMode: the header
-# promises a dry run mutates nothing, but these three ran unconditionally (and
-# before the admin check). The time zone still runs at load so the log filename
-# timestamp is local time; it is now the -TimeZone parameter (default Brisbane,
-# UTC+10, no DST). The clock resync needs admin, so it moved into Start-Install
-# after elevation (Sync-BenchClock).
-if (-not $TestMode) {
-    powercfg /change standby-timeout-ac 0
-    powercfg /change monitor-timeout-ac 0
-    if ($TimeZone) { tzutil /s "$TimeZone" }
-}
+powercfg /change standby-timeout-ac 0
+powercfg /change monitor-timeout-ac 0
+
+# Set timezone to Brisbane (UTC+10, no DST) and sync clock
+# Runs before log file creation so the filename timestamp is correct
+tzutil /s "E. Australia Standard Time"
+Start-Service w32tm -ErrorAction SilentlyContinue
+w32tm /resync /force | Out-Null
 
 # =========================
 # LOG FILE SETUP
@@ -1150,7 +1022,7 @@ $ToneConsoleColors = @{
 # =========================
 $form                 = New-Object System.Windows.Forms.Form
 $form.Text            = "Driver Installer  v$SCRIPT_VERSION"
-$form.Size            = New-Object System.Drawing.Size(612, 680)
+$form.Size            = New-Object System.Drawing.Size(612, 628)
 $form.StartPosition   = "CenterScreen"
 $form.FormBorderStyle = "FixedSingle"
 $form.MaximizeBox     = $false
@@ -1483,24 +1355,6 @@ $cancelButton.FlatAppearance.MouseDownBackColor = $ColorDangerDk
 $cancelButton.Enabled    = $false
 $form.Controls.Add($cancelButton)
 
-# v1.25.0 - Secondary full-width action: run the Windows Update driver method
-# (Install-DriversViaWindowsUpdate) on demand, independent of a full install.
-# Same background STA runspace as Install, so progress/Cancel/link all work.
-# Sits on its own row beneath the Install/Cancel pair.
-$wuButton            = New-Object System.Windows.Forms.Button
-$wuButton.Text       = "Run Windows Update  (search for missing drivers)"
-$wuButton.Size       = New-Object System.Drawing.Size(556, 34)
-$wuButton.Location   = New-Object System.Drawing.Point(28, 578)
-$wuButton.Font       = $FontButton
-$wuButton.BackColor  = $ColorAccent                            # indigo-500: distinct from the blue primary
-$wuButton.ForeColor  = [System.Drawing.Color]::White
-$wuButton.FlatStyle  = "Flat"
-$wuButton.FlatAppearance.BorderSize         = 0
-$wuButton.FlatAppearance.MouseOverBackColor = [System.Drawing.Color]::FromArgb(79, 70, 229)   # indigo-600 (hover)
-$wuButton.FlatAppearance.MouseDownBackColor = [System.Drawing.Color]::FromArgb(67, 56, 202)   # indigo-700 (pressed)
-$wuButton.Cursor     = "Hand"
-$form.Controls.Add($wuButton)
-
 # =========================
 # SOUND HELPER
 # =========================
@@ -1790,107 +1644,6 @@ Out-Line "RESULT:$installedCount"
 }
 
 # =========================
-# v1.25.0 - MANUAL WINDOWS UPDATE DRIVER RUN (button + dialog option)
-#
-# Install-DriversViaWindowsUpdate is the raw WUA method. The helpers below wrap
-# it for operator-initiated use: they run it, re-scan the machine, refresh the
-# analytics count + missing-device link, and (in GUI mode) report the outcome.
-# All of this runs on the worker runspace - either the standalone WU worker
-# (the new button) or inline in an end-of-run dialog handler (already on the
-# worker thread). None of it touches WinForms controls directly; UI updates go
-# through the enqueue helpers, exactly like the install path.
-# =========================
-function Invoke-WindowsUpdateDriverRun {
-    # Core: run the WUA driver method once, re-scan, refresh UI/analytics.
-    # Returns the installed-driver count. No dialogs (see -Interactive wrapper).
-    $before = Get-MissingDriverCount
-    Log "=== WINDOWS UPDATE: operator-requested driver search ==="
-    if ($before -ge 0) { Log "  Devices missing drivers before: $before" }
-
-    $installed = [int](Install-DriversViaWindowsUpdate)
-
-    if (Test-CancelFlag) {
-        Log "  Windows Update driver search cancelled by user." -Level "cancel"
-    }
-
-    # Re-scan so the footer link and analytics reflect what WU just changed.
-    $after = Get-MissingDriverCount
-    if ($after -ge 0) { $script:AnalyticsMissingAfter = $after }
-    $names = Get-MissingDriverNames
-    Update-MissingDeviceLink -Names $names -Phase "after Windows Update"
-    Log "  Devices missing drivers after:  $after  (Windows Update installed $installed driver(s))"
-    if ($installed -gt 0) {
-        Log "  NOTE: some Windows Update drivers may only bind after a reboot." -Level "info"
-    }
-    return $installed
-}
-
-function Invoke-WindowsUpdateDriverRunInteractive {
-    # Runs the method, then (GUI, non-cancelled) reports the outcome and offers
-    # a reboot if anything installed. Worker-runspace only. Returns the count.
-    $installed = [int](Invoke-WindowsUpdateDriverRun)
-
-    if (-not $script:Headless -and -not (Test-CancelFlag)) {
-        $after = if ($script:AnalyticsMissingAfter -ge 0) { $script:AnalyticsMissingAfter } else { -1 }
-        if ($installed -gt 0) {
-            $msg = "Windows Update installed $installed driver(s)."
-            if ($after -gt 0) { $msg += "`n$after device(s) still need drivers." }
-            $msg += "`n`nSome drivers may only take effect after a reboot.`nReboot now?"
-            $r = Show-TopMostMessageBox $msg "Windows Update Complete" "YesNo" "Information"
-            if ($r -eq [System.Windows.Forms.DialogResult]::Yes) { Restart-Computer -Force }
-        } else {
-            $msg = "Windows Update found no additional drivers to install."
-            if ($after -gt 0) {
-                $msg += "`n`n$after device(s) still need drivers.`n" +
-                        "You can also open Windows Update in Settings to check for optional driver updates."
-            }
-            Show-TopMostMessageBox $msg "Windows Update" "OK" "Information" | Out-Null
-        }
-    }
-    return $installed
-}
-
-function Start-WindowsUpdateOnly {
-    # Worker-runspace entry point behind the "Run Windows Update" button.
-    Set-ButtonRunning
-    try {
-        Play-Sound -Event "Start"
-        $installed = [int](Invoke-WindowsUpdateDriverRunInteractive)
-        if (Test-CancelFlag)     { Play-Sound -Event "Cancel" }
-        elseif ($installed -gt 0){ Play-Sound -Event "Success" }
-        else                     { Play-Sound -Event "DownloadComplete" }
-    } finally {
-        Set-ButtonIdle
-    }
-}
-
-function Invoke-WindowsUpdateOnlySafe {
-    # v1.25.0 - crash-safe wrapper mirroring Invoke-StartInstallSafe, scoped to
-    # the standalone WU run so a WUA hiccup can't leave the UI greyed out.
-    try {
-        Start-WindowsUpdateOnly
-    } catch {
-        $ex = $_
-        try {
-            Log "FATAL (Windows Update run): unhandled exception." -Level "error" -Event "crash" -Context @{
-                message = $ex.Exception.Message
-                type    = $ex.Exception.GetType().FullName
-            }
-            Log "  $($ex.Exception.Message)" -Level "error"
-        } catch {}
-        try { Set-ButtonIdle } catch {}
-        try { Play-Sound -Event "Failure" } catch {}
-        if (-not $script:Headless) {
-            try {
-                Show-TopMostMessageBox `
-                    "The Windows Update run hit an unexpected error and stopped:`n`n$($ex.Exception.Message)" `
-                    "Windows Update" "OK" "Error" | Out-Null
-            } catch {}
-        }
-    }
-}
-
-# =========================
 # MICROSOFT UPDATE CATALOG DRIVER FALLBACK (scrape-by-hardware-ID)
 # =========================
 # v1.15.0 - Final, vendor-agnostic tier, tried only after BOTH the vendor handler
@@ -1906,68 +1659,9 @@ function Invoke-WindowsUpdateOnlySafe {
 # slightly over-broad catalog hit is harmless.
 $script:MsCatalogMaxDrivers = 30   # safety cap on how many catalog cabs to pull
 
-function Get-MsCatalogResultRows {
-    # v1.29.0 - Parse the catalog's search-result rows into objects. Each row is
-    # <tr id="<guid>_R<n>"> with cells: [1] Title, [2] Products, [3]
-    # Classification, [4] Last Updated (M/d/yyyy), [5] Version, [6] Size.
-    # Pure (no I/O) so it can be unit-tested against a saved search page.
-    # Quote-agnostic: the catalog switched id attributes to single quotes.
-    param([string]$Html)
-    $rows = New-Object System.Collections.Generic.List[object]
-    if (-not $Html) { return @() }
-    $flat = $Html -replace '[\r\n]+', ' '
-    foreach ($rm in [regex]::Matches($flat, '(?is)<tr[^>]*\bid=["'']([0-9a-f\-]{36})_R\d+["''][^>]*>(.*?)</tr>')) {
-        $guid  = $rm.Groups[1].Value
-        $cells = @()
-        foreach ($cm in [regex]::Matches($rm.Groups[2].Value, '(?is)<td[^>]*>(.*?)</td>')) {
-            $txt = [regex]::Replace($cm.Groups[1].Value, '<[^>]+>', ' ')
-            $txt = [System.Net.WebUtility]::HtmlDecode($txt) -replace '\s+', ' '
-            $cells += $txt.Trim()
-        }
-        if ($cells.Count -lt 6) { continue }
-        $date = [datetime]::MinValue
-        try { $date = [datetime]::ParseExact($cells[4], 'M/d/yyyy', [System.Globalization.CultureInfo]::InvariantCulture) } catch {}
-        $rows.Add([PSCustomObject]@{
-            Guid           = $guid
-            Title          = $cells[1]
-            Products       = $cells[2]
-            Classification = $cells[3]
-            Updated        = $date
-            Version        = $cells[5]
-        }) | Out-Null
-    }
-    # Emit the rows plainly (no leading comma): callers wrap with @() and count.
-    return $rows.ToArray()
-}
-
-function Select-MsCatalogDriverGuid {
-    # v1.29.0 - Rank parsed rows: driver rows only; prefer rows whose Products
-    # names the running Windows generation (build >= 22000 = Windows 11) and is
-    # not a Server product; then newest Last Updated. Falls back to any driver
-    # row, then any row. Returns the GUID or $null.
-    param($Rows, [int]$OsBuild = 0)
-    $rows = @($Rows)
-    if ($rows.Count -eq 0) { return $null }
-    $drv = @($rows | Where-Object { $_.Classification -match '(?i)driver' })
-    if ($drv.Count -eq 0) { $drv = $rows }
-    $gen = if ($OsBuild -ge 22000) { 'Windows 11' } elseif ($OsBuild -gt 0) { 'Windows 10' } else { '' }
-    $pref = @()
-    if ($gen) { $pref = @($drv | Where-Object { $_.Products -match [regex]::Escape($gen) -and $_.Products -notmatch '(?i)server' }) }
-    if ($pref.Count -eq 0) { $pref = @($drv | Where-Object { $_.Products -notmatch '(?i)server' }) }
-    if ($pref.Count -eq 0) { $pref = $drv }
-    $best = $pref | Sort-Object @{ E = { $_.Updated }; Descending = $true } | Select-Object -First 1
-    return $best.Guid
-}
-
 function Get-MsCatalogDriverGuid {
-    # Search the catalog for one hardware-ID term; return the best result's
-    # update GUID, or $null if there are no matches.
-    # v1.29.0 - The catalog now emits single-quoted anchor ids
-    # (<a id='<guid>_link' ...>); the old regex required double quotes and so
-    # this whole tier had silently returned "no match" on every run. The rows
-    # are now parsed quote-agnostically and ranked by OS generation + date
-    # (Select-MsCatalogDriverGuid) instead of taking the first anchor blind -
-    # the first row for a PCI ID is often the Windows 10 or 22H2 package.
+    # Search the catalog for one hardware-ID term; return the top result's update
+    # GUID, or $null if there are no matches.
     param([string]$Term)
     $enc = [uri]::EscapeDataString($Term)
     $url = "https://www.catalog.update.microsoft.com/Search.aspx?q=$enc"
@@ -1977,11 +1671,9 @@ function Get-MsCatalogDriverGuid {
             --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" "$url" 2>$null) -join "`n"
     } catch { return $null }
     if (-not $html) { return $null }
-    $rows = Get-MsCatalogResultRows -Html $html
-    $g = Select-MsCatalogDriverGuid -Rows $rows -OsBuild ([int]$script:AnalyticsOsBuild)
-    if ($g) { return $g }
-    # Last resort: any result anchor, either quote style.
-    $m = [regex]::Match($html, '(?is)<a[^>]*\bid=["'']([0-9a-f\-]{36})_link["''][^>]*>')
+    # Each result row exposes <a id="<GUID>_link" ...>Title</a>; the first is the
+    # catalog's best match for this hardware ID.
+    $m = [regex]::Match($html, '(?is)<a[^>]*id="([0-9a-f\-]{36})_link"[^>]*>')
     if ($m.Success) { return $m.Groups[1].Value }
     return $null
 }
@@ -2023,7 +1715,7 @@ function Install-DriversFromMsUpdateCatalog {
     $missing = @()
     try {
         $missing = @(Get-CimInstance Win32_PnPEntity |
-            Where-Object { Test-ActionableProblemCode $_.ConfigManagerErrorCode } |
+            Where-Object { $_.ConfigManagerErrorCode -ne 0 } |
             Select-Object Name, DeviceID,
                 @{N='HardwareIDs';E={
                     try {
@@ -2217,18 +1909,7 @@ function Log {
     # v1.18.0 - try/catch: the UI thread also logs the odd line (cancel click,
     # startup) while the worker is writing; a rare open-collision on the file
     # must never kill the run. Worst case one line is missing from the .log.
-    # v1.24.1 - -ErrorAction Stop is load-bearing: Add-Content raises NON-
-    # terminating errors, so the catch never engaged - a locked log file (live
-    # test: a tail that denied write sharing; in the field: any viewer that
-    # opens the log exclusively mid-run) emitted one error record PER LOG CALL
-    # into the error stream (echoed as "[worker error]" spam at end-of-run in
-    # GUI mode) while still dropping the line. One short retry rides out
-    # transient collisions; a persistently locked file now degrades silently
-    # to the console + events sinks.
-    for ($lfTry = 0; $lfTry -lt 2; $lfTry++) {
-        try { Add-Content -Path $LogFile -Value $line -Encoding UTF8 -ErrorAction Stop; break }
-        catch { if ($lfTry -eq 0) { Start-Sleep -Milliseconds 120 } }
-    }
+    try { Add-Content -Path $LogFile -Value $line -Encoding UTF8 } catch {}
 
     # Structured NDJSON sink.
     try {
@@ -2241,10 +1922,7 @@ function Log {
         if ($Event)   { $evt['event']   = $Event }
         if ($Context) { foreach ($k in $Context.Keys) { $evt[$k] = $Context[$k] } }
         $json = $evt | ConvertTo-Json -Compress -Depth 4
-        # v1.24.1 - -ErrorAction Stop for the same reason as the .log sink
-        # above: without it a locked events file leaks an error record per
-        # line instead of being swallowed by this catch.
-        Add-Content -Path $EventsLogFile -Value $json -Encoding UTF8 -ErrorAction Stop
+        Add-Content -Path $EventsLogFile -Value $json -Encoding UTF8
     } catch {
         # Never let event-log failure interrupt the script. Worst case: the
         # NDJSON sidecar is incomplete, but the canonical .log still has the line.
@@ -2414,14 +2092,6 @@ function Test-Cancelled {
     return $false
 }
 
-function Sync-BenchClock {
-    # v1.29.0 - w32tm resync needs admin, so it runs here (after elevation)
-    # instead of at script load. Skipped under -TestMode.
-    if ($script:TestMode) { return }
-    try { Start-Service w32tm -ErrorAction SilentlyContinue } catch {}
-    try { w32tm /resync /force 2>&1 | Out-Null } catch {}
-}
-
 function Assert-Curl {
     if (-not (Get-Command curl.exe -ErrorAction SilentlyContinue)) {
         Log "ERROR: curl.exe not found. Windows 10 1803+ required."
@@ -2430,54 +2100,10 @@ function Assert-Curl {
     return $true
 }
 
-# v1.29.0 - Problem codes the installer cannot act on. A device in one of these
-# states is not "missing a driver": 22 = disabled by the user, 24 = not present,
-# 29 = disabled by firmware, 45 = phantom (not connected), 46 = system shutting
-# down, 53 = reserved by the kernel debugger, 55 = waiting for console unlock.
-# Counting them made every run on a machine with one disabled device end at
-# "1 still missing", fire the Windows Update / catalog tiers, and skew the sheet.
-$script:IgnoredProblemCodes = @(22, 24, 29, 45, 46, 53, 55)
-
-function Test-ActionableProblemCode {
-    param($Code)
-    $c = 0
-    try { $c = [int]$Code } catch { return $false }
-    if ($c -eq 0) { return $false }
-    return (-not ($script:IgnoredProblemCodes -contains $c))
-}
-
-function Get-IgnoredProblemDeviceNames {
-    # Names of devices in a non-actionable problem state, for one log line.
-    try {
-        $list = @(Get-CimInstance Win32_PnPEntity -EA Stop |
-                  Where-Object { [int]$_.ConfigManagerErrorCode -ne 0 -and ($script:IgnoredProblemCodes -contains [int]$_.ConfigManagerErrorCode) })
-        return @($list | ForEach-Object { "$(if ($_.Name) { $_.Name } else { $_.DeviceID }) [code $($_.ConfigManagerErrorCode)]" })
-    } catch { return @() }
-}
-
-function Get-ProblemCodeHint {
-    # Short human reason for the end-of-run "still missing" dump.
-    param($Code)
-    switch ([int]$Code) {
-        1  { return ' - no driver configured' }
-        10 { return ' - driver present, device cannot start' }
-        28 { return ' - no driver installed' }
-        31 { return ' - Windows cannot load the driver' }
-        39 { return ' - driver failed to load (file missing or corrupt)' }
-        43 { return ' - device reported a failure after start' }
-        48 { return ' - BLOCKED BY POLICY: driver blocklist / memory integrity' }
-        52 { return ' - BLOCKED BY POLICY: driver signature rejected' }
-        14 { return ' - reboot required' }
-        21 { return ' - reboot required (device is being removed)' }
-        38 { return ' - reboot required (previous driver still in memory)' }
-        default { return '' }
-    }
-}
-
 function Get-MissingDriverCount {
     try {
         $count = @(Get-CimInstance Win32_PnPEntity |
-            Where-Object { Test-ActionableProblemCode $_.ConfigManagerErrorCode }).Count
+            Where-Object { $_.ConfigManagerErrorCode -ne 0 }).Count
         return $count
     } catch {
         Log "  WARNING: Could not query PnP device status: $($_.Exception.Message)"
@@ -2496,7 +2122,7 @@ function Get-MissingDriverNames {
     # null-handling.
     try {
         $missing = @(Get-CimInstance Win32_PnPEntity -EA Stop |
-                     Where-Object { Test-ActionableProblemCode $_.ConfigManagerErrorCode })
+                     Where-Object { $_.ConfigManagerErrorCode -ne 0 })
         $names = New-Object 'System.Collections.Generic.List[string]'
         foreach ($m in $missing) {
             $n = if ($m.Name)        { [string]$m.Name }
@@ -2583,7 +2209,7 @@ function Write-MissingDriverDetails {
     # would need to claim to bind to each device.
     try {
         $missing = @(Get-CimInstance Win32_PnPEntity -EA Stop |
-                     Where-Object { Test-ActionableProblemCode $_.ConfigManagerErrorCode })
+                     Where-Object { $_.ConfigManagerErrorCode -ne 0 })
     } catch {
         Log "-- Missing drivers AFTER install (enumeration error: $($_.Exception.Message)) --"
         return
@@ -2597,7 +2223,7 @@ function Write-MissingDriverDetails {
         $name = if ($m.Name)         { $m.Name }
                 elseif ($m.Caption)  { $m.Caption }
                 else                 { '(unnamed device)' }
-        Log "  [ERR $($m.ConfigManagerErrorCode)] $name$(Get-ProblemCodeHint $m.ConfigManagerErrorCode)"
+        Log "  [ERR $($m.ConfigManagerErrorCode)] $name"
         Log "    DeviceID:    $($m.DeviceID)"
         try {
             $pnp = Get-PnpDevice -InstanceId $m.DeviceID -EA Stop
@@ -2637,7 +2263,7 @@ function Write-MissingDriverDetails {
 # connected). pnputil /restart-device requires Win10 2004+; on older builds
 # the command fails, gets logged, and the pass degrades to a no-op.
 # =========================
-$script:PnpRemediationCodes = @(3, 10, 14, 21, 38, 39, 43)   # v1.29.0 - 52 (signature rejected) dropped: a restart/re-enumerate cannot clear a policy block
+$script:PnpRemediationCodes = @(3, 10, 14, 21, 38, 39, 43, 52)
 
 function Invoke-ProblemDeviceRemediation {
     # Returns the number of devices whose error state was cleared.
@@ -2724,7 +2350,7 @@ function Invoke-ProblemDeviceRemediation {
     $stillIds = @()
     try {
         $stillIds = @(Get-CimInstance Win32_PnPEntity -EA Stop |
-                      Where-Object { Test-ActionableProblemCode $_.ConfigManagerErrorCode } |
+                      Where-Object { $_.ConfigManagerErrorCode -ne 0 } |
                       Select-Object -ExpandProperty DeviceID)
     } catch {}
     $resolved = 0
@@ -3009,103 +2635,72 @@ function Write-HtmlReport {
 # Removed before final cleanup so nothing persists to the customer.
 # Lenovo uses Inno Setup - 7-Zip cannot extract its proprietary format.
 # =========================
-# v1.29.0 - PORTABLE 7-Zip. The full 7-Zip installer is itself a plain 7z
-# archive (verified: 7z2603-x64.exe lists 7z.exe + 7z.dll), so the small
-# 7zr.exe console tool can unpack the two files we need into %TEMP% - no
-# installer, no Program Files, no uninstall. Pre-v1.29.0 Install-7Zip set
-# 7zInstalled=$true when it FOUND an existing 7-Zip, and Remove-7Zip then
-# uninstalled it - the script removed a 7-Zip the operator had installed.
-# A system copy is now used in place and never touched; only the temp copy
-# this run unpacked is removed at the end.
-$script:SevenZipVersions = @('2603', '2409')   # newest first; the older pin is a fallback if the new URL ever 404s
-$script:7zDir          = Join-Path $env:TEMP "DriverInstaller-7z"
-$script:7zExe          = Join-Path $script:7zDir "7z.exe"
-$script:7zInstaller    = Join-Path $script:7zDir "7z-full.exe"
-$script:7zInstalled    = $false   # $true only when WE unpacked a temp copy (Remove-7Zip may then delete it)
-
-function Get-ToolDownload {
-    # Small curl wrapper for helper tools (7zr.exe etc.). Deliberately not
-    # Invoke-CurlDownload: that records the URL as a "driver" download in the
-    # analytics and HTML report, and these are not drivers.
-    param([string]$Url, [string]$OutFile, [int]$MaxTimeSec = 120)
-    try {
-        $psi                 = New-Object System.Diagnostics.ProcessStartInfo
-        $psi.FileName        = "curl.exe"
-        $psi.Arguments       = "--silent --location --fail --max-time $MaxTimeSec --connect-timeout 15 --retry 3 --retry-delay 2 " +
-                               "--user-agent `"Mozilla/5.0 (Windows NT 10.0; Win64; x64)`" " +
-                               "--output `"$OutFile`" `"$Url`""
-        $psi.UseShellExecute = $false
-        $psi.CreateNoWindow  = $true
-        $proc                = New-Object System.Diagnostics.Process
-        $proc.StartInfo      = $psi
-        $proc.Start() | Out-Null
-        while (-not $proc.HasExited) { Start-Sleep -Milliseconds 400; Step-AllSpinners }
-        return ($proc.ExitCode -eq 0 -and (Test-Path $OutFile) -and (Get-Item $OutFile).Length -gt 0)
-    } catch { return $false }
-}
+$script:7zExe         = "C:\Program Files\7-Zip\7z.exe"
+$script:7zInstaller   = "$env:TEMP\7z-installer.exe"
+$script:7zInstalled   = $false
 
 function Install-7Zip {
-    # Returns $true when $script:7zExe points at a usable 7z.exe.
-    $systemExe = "C:\Program Files\7-Zip\7z.exe"
-    if (Test-Path $systemExe) {
-        Log "7-Zip is already installed on this machine - using it (it will NOT be removed)."
-        $script:7zExe       = $systemExe
-        $script:7zInstalled = $false
-        return $true
-    }
-    $script:7zExe = Join-Path $script:7zDir "7z.exe"
     if (Test-Path $script:7zExe) {
-        Log "Portable 7-Zip already unpacked in $($script:7zDir)."
+        Log "7-Zip already present - skipping install."
         $script:7zInstalled = $true
         return $true
     }
-    Log "Fetching portable 7-Zip (unpacked to %TEMP%, removed after the run)..."
+    Log "Installing 7-Zip (temporary - will be removed after extraction)..."
     SetDownload -Pct 0 -Label "Downloading 7-Zip..."
     try {
-        if (-not (Test-Path $script:7zDir)) { New-Item -ItemType Directory -Path $script:7zDir -Force | Out-Null }
-        $sevenZr = Join-Path $script:7zDir "7zr.exe"
-        if (-not (Get-ToolDownload -Url "https://www.7-zip.org/a/7zr.exe" -OutFile $sevenZr)) {
-            Log "  7zr.exe download failed."
+        $psi                        = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName               = "curl.exe"
+        $psi.Arguments              = "--silent --location --max-time 60 --connect-timeout 15 " +
+                                      "--output `"$($script:7zInstaller)`" " +
+                                      "`"https://www.7-zip.org/a/7z2409-x64.exe`""
+        $psi.UseShellExecute        = $false
+        $psi.CreateNoWindow         = $true
+        $proc                       = New-Object System.Diagnostics.Process
+        $proc.StartInfo             = $psi
+        $proc.Start() | Out-Null
+        while (-not $proc.HasExited) { Start-Sleep -Milliseconds 400; Step-AllSpinners }
+        if ($proc.ExitCode -ne 0 -or -not (Test-Path $script:7zInstaller)) {
+            Log "  7-Zip download failed (curl exit $($proc.ExitCode))."
             return $false
         }
-        $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }
-        $got  = $false
-        foreach ($v in $script:SevenZipVersions) {
-            $u = "https://www.7-zip.org/a/7z$v-$arch.exe"
-            Log "  Downloading $u"
-            if (Get-ToolDownload -Url $u -OutFile $script:7zInstaller) { $got = $true; break }
-            Log "  Not available - trying the next pinned version."
-        }
-        if (-not $got) { Log "  7-Zip package download failed."; return $false }
-        Log "  Unpacking 7z.exe + 7z.dll with 7zr.exe..."
-        $p = Start-Process -FilePath $sevenZr -ArgumentList @("x", "`"$($script:7zInstaller)`"", "-o`"$($script:7zDir)`"", "7z.exe", "7z.dll", "-y") `
-                -Wait -PassThru -WindowStyle Hidden
-        if ($p.ExitCode -ne 0 -or -not (Test-Path $script:7zExe)) {
-            Log "  7zr.exe unpack failed (exit $($p.ExitCode))."
+        Start-Process $script:7zInstaller -ArgumentList "/S" -Wait
+        if (-not (Test-Path $script:7zExe)) {
+            Log "  7-Zip installer ran but 7z.exe not found."
             return $false
         }
         $script:7zInstalled = $true
-        Log "  Portable 7-Zip ready: $($script:7zExe)"
+        Log "  7-Zip installed OK."
         return $true
     } catch {
-        Log "  7-Zip setup error: $($_.Exception.Message)"
+        Log "  7-Zip install error: $($_.Exception.Message)"
         return $false
     }
 }
 
 function Remove-7Zip {
-    # Only ever deletes the temp copy this run unpacked. Never touches
-    # C:\Program Files\7-Zip.
-    if (-not $script:7zInstalled) { return }
-    Log "Removing portable 7-Zip from $($script:7zDir)..."
+    Log "Removing 7-Zip..."
     try {
-        if (Test-Path $script:7zDir) { Remove-Item $script:7zDir -Recurse -Force -EA SilentlyContinue }
+        $uninstaller = "C:\Program Files\7-Zip\Uninstall.exe"
+        if (Test-Path $uninstaller) {
+            Start-Process $uninstaller -ArgumentList "/S" -Wait
+            Start-Sleep -Seconds 2
+        }
+        # Belt-and-braces: remove folder if uninstaller left anything
+        $folder = "C:\Program Files\7-Zip"
+        if (Test-Path $folder) { Remove-Item $folder -Recurse -Force -EA SilentlyContinue }
     } catch {
-        Log "  WARNING: could not remove $($script:7zDir) - $($_.Exception.Message)"
+        Log "  WARNING: 7-Zip uninstall error: $($_.Exception.Message)"
     }
+    # Always clean up the installer temp file
+    Remove-Item $script:7zInstaller -Force -EA SilentlyContinue
     $script:7zInstalled = $false
-    if (Test-Path $script:7zDir) { Log "  WARNING: $($script:7zDir) still present - delete it manually before sysprep." }
-    else { Log "  Portable 7-Zip removed OK." }
+
+    # Verify
+    if (Test-Path $script:7zExe) {
+        Log "  WARNING: 7z.exe still present after uninstall - check manually before sysprep."
+    } else {
+        Log "  7-Zip removed OK."
+    }
 }
 
 # =========================
@@ -3412,7 +3007,7 @@ function Invoke-CurlDownload {
     $psi                 = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName        = "curl.exe"
     $psi.Arguments       = "--location --fail --connect-timeout 30 " +
-                           "--retry 5 --retry-delay 3 --retry-max-time 300 --retry-connrefused " +   # v1.29.0 - no --retry-all-errors: with --fail it retried a plain 404 ten times
+                           "--retry 10 --retry-delay 5 --retry-all-errors " +
                            "--continue-at - " +
                            "--user-agent `"Mozilla/5.0 (Windows NT 10.0; Win64; x64)`" " +
                            "--output `"$OutFile`" `"$Url`""
@@ -3423,7 +3018,6 @@ function Invoke-CurlDownload {
     $proc.Start() | Out-Null
 
     $lastSize = 0; $stall = 0; $prevSize = 0
-    $lastLoggedPct = -1; $lastLogAt = [datetime]::MinValue   # v1.29.0 - log throttle
     while (-not $proc.HasExited) {
         Start-Sleep -Milliseconds 700
         # Honour cancel mid-download: kill curl immediately so the next ~10MB
@@ -3448,19 +3042,13 @@ function Invoke-CurlDownload {
         $speedMbps = [math]::Round(($sz - $prevSize) * 8 / 1MB / 0.7, 1)
         $prevSize  = $sz
         $speedStr  = if ($speedMbps -gt 0) { "  $speedMbps Mbps" } else { "" }
-        # v1.29.0 - the UI label updates every tick; the .log / events.json line
-        # only every 2% or 5 s (was every 700 ms: ~330 lines per 1.4 GB pack).
-        $logNow = (((Get-Date) - $lastLogAt).TotalSeconds -ge 5)
         if ($totalMB -gt 0) {
             $pct = [math]::Min([int](($sz / $totalBytes) * 100), 99)
             SetDownload -Pct $pct -Label "$mbDone MB / $totalMB MB  ($pct%)$speedStr"
-            if ($logNow -or ($pct - $lastLoggedPct) -ge 2) {
-                Log "  $mbDone MB / $totalMB MB ($pct%)$speedStr"
-                $lastLoggedPct = $pct; $lastLogAt = Get-Date
-            }
+            Log "  $mbDone MB / $totalMB MB ($pct%)$speedStr"
         } else {
             SetDownload -Pct 0 -Label "$mbDone MB received...$speedStr"
-            if ($logNow) { Log "  $mbDone MB received$speedStr"; $lastLogAt = Get-Date }
+            Log "  $mbDone MB received$speedStr"
         }
         Step-AllSpinners
         if ($stall -gt 300) {
@@ -3561,7 +3149,7 @@ function Invoke-CurlDownloadParallel {
             $psi                 = New-Object System.Diagnostics.ProcessStartInfo
             $psi.FileName        = "curl.exe"
             $psi.Arguments       = "--location --fail --connect-timeout 30 " +
-                                   "--retry 5 --retry-delay 3 --retry-max-time 300 --retry-connrefused " +   # v1.29.0 - no --retry-all-errors: with --fail it retried a plain 404 ten times
+                                   "--retry 10 --retry-delay 5 --retry-all-errors " +
                                    "--continue-at - " +
                                    "--user-agent `"Mozilla/5.0 (Windows NT 10.0; Win64; x64)`" " +
                                    "--output `"$out`" `"$url`""
@@ -4070,109 +3658,6 @@ function Get-DeviceParentVenDev {
     return @()
 }
 
-# =========================
-# v1.29.0 - DELL CATALOG RESOLUTION (per-SKU catalog first, CatalogPC fallback)
-# =========================
-function Get-DellCatalogXml {
-    # Download a single-file Dell catalog CAB, expand it, parse the UTF-16 XML.
-    # Returns [xml] or $null.
-    param([string]$Url, [string]$CabName, [string]$XmlName, [string]$Label)
-    $cab = Join-Path $env:TEMP $CabName
-    $xml = Join-Path $env:TEMP $XmlName
-    Remove-Item $cab -EA SilentlyContinue
-    Remove-Item $xml -EA SilentlyContinue
-    SetDownload -Pct 0 -Label "Downloading $Label..."
-    if (-not (Invoke-CurlDownload -Url $Url -OutFile $cab)) { Log "  $Label download failed."; return $null }
-    if (Test-CancelFlag) { return $null }
-    SetExtract -Pct 10 -Label "Extracting $Label..."
-    $expandOut = & expand.exe "`"$cab`"" "`"$xml`"" 2>&1
-    Log "  expand.exe: $expandOut"
-    if (-not (Test-Path $xml) -or (Get-Item $xml).Length -eq 0) { Log "  $Label extraction failed."; return $null }
-    try {
-        $raw = [System.IO.File]::ReadAllText($xml, [System.Text.Encoding]::Unicode)
-        return ([xml]$raw)
-    } catch {
-        Log "  $Label parse failed: $($_.Exception.Message)"
-        return $null
-    }
-}
-
-function Find-DellIndexManifestPath {
-    # Pure: given the parsed CatalogIndexPC.xml, return the relative path of the
-    # per-SKU catalog CAB for this SystemSKUNumber, or $null.
-    param([xml]$Index, [string]$SystemSKU)
-    if (-not $Index -or -not $SystemSKU) { return $null }
-    $sku = $SystemSKU.Trim().ToUpper()
-    foreach ($gm in $Index.SelectNodes("//*[local-name()='GroupManifest']")) {
-        $hit = $false
-        foreach ($m in $gm.SelectNodes(".//*[local-name()='Model']")) {
-            if (([string]$m.GetAttribute("systemID")).ToUpper() -eq $sku) { $hit = $true; break }
-        }
-        if (-not $hit) { continue }
-        $mi = $gm.SelectSingleNode("*[local-name()='ManifestInformation']")
-        if ($mi) {
-            $p = [string]$mi.GetAttribute("path")
-            if ($p) { return $p }
-        }
-    }
-    return $null
-}
-
-function Get-DellCatalogForSystem {
-    # Returns @{ Catalog=[xml]; Source=<string>; Components=<int> } or $null.
-    param([string]$SystemSKU)
-    $cat = $null; $source = $null
-    if ($SystemSKU) {
-        Log "Downloading Dell CatalogIndexPC.cab (per-SKU catalog index)..."
-        $idx = Get-DellCatalogXml -Url "https://downloads.dell.com/catalog/CatalogIndexPC.cab" `
-            -CabName "DellCatalogIndexPC.cab" -XmlName "CatalogIndexPC.xml" -Label "Dell catalog index"
-        if ($idx) {
-            $rel = Find-DellIndexManifestPath -Index $idx -SystemSKU $SystemSKU
-            if ($rel) {
-                $base = ""
-                try { $base = [string]$idx.DocumentElement.GetAttribute("baseLocation") } catch {}
-                if (-not $base) { $base = "downloads.dell.com" }
-                $url = "https://$base/$($rel.TrimStart('/'))"
-                Log "  Per-SKU catalog for $SystemSKU`: $url"
-                $cat = Get-DellCatalogXml -Url $url -CabName "DellCatalog_$SystemSKU.cab" `
-                    -XmlName "DellCatalog_$SystemSKU.xml" -Label "Dell per-SKU catalog"
-                if ($cat) { $source = "per-SKU catalog ($SystemSKU)" }
-            } else {
-                Log "  SystemSKU $SystemSKU is not in CatalogIndexPC - falling back to CatalogPC.cab."
-            }
-        }
-    }
-    if (-not $cat) {
-        if (Test-CancelFlag) { return $null }
-        Log "Downloading Dell CatalogPC.cab (legacy aggregate catalog)..."
-        $cat = Get-DellCatalogXml -Url "https://downloads.dell.com/catalog/CatalogPC.cab" `
-            -CabName "DellCatalogPC.cab" -XmlName "CatalogPC.xml" -Label "Dell CatalogPC"
-        if ($cat) { $source = "CatalogPC.cab (legacy)" }
-    }
-    if (-not $cat) { return $null }
-    $n = 0
-    try { $n = @($cat.SelectNodes("//*[local-name()='SoftwareComponent']")).Count } catch {}
-    return @{ Catalog = $cat; Source = $source; Components = $n }
-}
-
-function Test-DellOsCode {
-    # Accept the known code lists plus any code with the Windows 11 (W11*/W21*)
-    # or Windows 10 (W10*) prefix.
-    param([string]$Code, [bool]$IsWin11, [string[]]$Win11Codes, [string[]]$Win10Codes)
-    if (-not $Code) { return $false }
-    $c = $Code.ToUpper()
-    if ($IsWin11) { return (($Win11Codes -contains $c) -or $c.StartsWith('W11') -or $c.StartsWith('W21')) }
-    return (($Win10Codes -contains $c) -or $c.StartsWith('W10'))
-}
-
-function Test-DellOsArch {
-    # osArch on a catalog OperatingSystem node: x64 / x86 / ARM64. Empty = accept.
-    param([string]$Arch)
-    if (-not $Arch) { return $true }
-    $want = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'ARM64' } else { 'X64' }
-    return ($Arch.Trim().ToUpper() -eq $want)
-}
-
 function Find-DellCameraCompanionPackages {
     # v1.22.0 - Camera devices are frequently un-fixable through their own
     # hardware IDs: the Latitude 7450's AVStream camera carries the iGPU's
@@ -4194,15 +3679,15 @@ function Find-DellCameraCompanionPackages {
         [string[]]$Win10Codes
     )
     $nameRx = '(?i)camera|webcam|visual\s*sensing|imaging\s*mcu|\bIPU\b'
-    $found  = @{}   # base package name (version/rev stripped) -> newest matching entry
+    $found  = @{}   # Display name -> newest matching entry
     foreach ($component in $Catalog.SelectNodes("//*[local-name()='SoftwareComponent']")) {
         $typeNode = $component.SelectSingleNode("*[local-name()='ComponentType']")
         if ($typeNode -and $typeNode.GetAttribute("value") -ne "DRVR") { continue }
 
         $osMatch = $false
+        $targetCodes = if ($IsWin11) { $Win11Codes } else { $Win10Codes }
         foreach ($osNode in $component.SelectNodes(".//*[local-name()='OperatingSystem']")) {
-            if (-not (Test-DellOsArch ([string]$osNode.GetAttribute("osArch")))) { continue }   # v1.29.0 - skip x86/ARM64 packages on the wrong architecture
-            if (Test-DellOsCode -Code ([string]$osNode.GetAttribute("osCode")) -IsWin11 $IsWin11 -Win11Codes $Win11Codes -Win10Codes $Win10Codes) { $osMatch = $true; break }
+            if ($targetCodes -contains $osNode.GetAttribute("osCode")) { $osMatch = $true; break }
         }
         if (-not $osMatch) { continue }
 
@@ -4224,18 +3709,8 @@ function Find-DellCameraCompanionPackages {
         $date = [datetime]::MinValue
         try { $date = [datetime]::Parse($component.GetAttribute("dateTime")) } catch {}
 
-        # v1.24.1 - dedup on the name with the ",<version>,<rev>" suffix
-        # stripped. Dell embeds the version INSIDE the Display name
-        # ("...Driver for Camera,74.22000.13.22,A07"), so keying the hash on
-        # the raw Display never collapsed releases: live-catalog test, SKU
-        # 0CBF (Latitude 7450) returned the SAME IVSC package three times
-        # (13.19/13.21/13.22) and the rescue would download and silently run
-        # all three - oldest possibly first, since hashtable order is
-        # arbitrary. Keying on the base name keeps one (newest) per package.
-        $baseName = if ($name -match '^(.+),\d[\d.]*,[A-Za-z]?\d+$') { $Matches[1] } else { $name }
-
-        if (-not $found[$baseName] -or $date -gt $found[$baseName].Date) {
-            $found[$baseName] = [PSCustomObject]@{ Path = $path; Name = $name; Date = $date }
+        if (-not $found[$name] -or $date -gt $found[$name].Date) {
+            $found[$name] = [PSCustomObject]@{ Path = $path; Name = $name; Date = $date }
         }
     }
     # v1.24.0 - was "return ,@($found.Values)": the leading comma made the
@@ -4244,9 +3719,7 @@ function Find-DellCameraCompanionPackages {
     # branch with an empty-path entry, and 2+ companions collapsed into a
     # single garbage item. Only the 1-companion field case worked. Emitting
     # the values plainly lets @() at the call sites count correctly.
-    # v1.24.1 - newest-first so the companion rescue tries the most recent
-    # release before older ones (it stops at the first that clears the device).
-    return @($found.Values | Sort-Object Date -Descending)
+    return @($found.Values)
 }
 
 # v1.24.0 - Scan the parsed CatalogPC for driver entries matching one device's
@@ -4283,9 +3756,9 @@ function Find-DellCatalogDeviceMatches {
 
         # Check OS compatibility via osCode attribute
         $osMatch = $false
+        $targetCodes = if ($IsWin11) { $Win11Codes } else { $Win10Codes }
         foreach ($osNode in $component.SelectNodes(".//*[local-name()='OperatingSystem']")) {
-            if (-not (Test-DellOsArch ([string]$osNode.GetAttribute("osArch")))) { continue }   # v1.29.0 - skip x86/ARM64 packages on the wrong architecture
-            if (Test-DellOsCode -Code ([string]$osNode.GetAttribute("osCode")) -IsWin11 $IsWin11 -Win11Codes $Win11Codes -Win10Codes $Win10Codes) { $osMatch = $true; break }
+            if ($targetCodes -contains $osNode.GetAttribute("osCode")) { $osMatch = $true; break }
         }
         if (-not $osMatch) { continue }
 
@@ -4324,13 +3797,10 @@ function Find-DellCatalogDeviceMatches {
         try { $driverName = $component.SelectSingleNode("*[local-name()='Name']/*[local-name()='Display']").InnerText } catch {}
         $driverDate = [datetime]::MinValue
         try { $driverDate = [datetime]::Parse($component.GetAttribute("dateTime")) } catch {}
-        $driverSha = ""   # v1.29.0 - per-SKU catalogs carry SHA256 per package (CatalogPC does not)
-        try { $driverSha = [string]$component.SelectSingleNode("*[local-name()='Cryptography']/*[local-name()='Hash' and @algorithm='SHA256']").InnerText } catch {}
         $found.Add([PSCustomObject]@{
             Path        = $driverPath
             Name        = $driverName
             Date        = $driverDate
-            Sha256      = $driverSha
             Version     = $component.GetAttribute("vendorVersion")   # v1.21.0 - for the already-installed pre-check
             SubsysMatch = $subsysMatch
             IsBtPackage = [bool]($driverName -match '(?i)bluetooth')
@@ -4363,7 +3833,7 @@ function Start-DellIndividualDriverInstall {
     $missingDevices = @()
     try {
         $missingDevices = @(Get-CimInstance Win32_PnPEntity |
-            Where-Object { Test-ActionableProblemCode $_.ConfigManagerErrorCode } |
+            Where-Object { $_.ConfigManagerErrorCode -ne 0 } |
             Select-Object Name, DeviceID,
                 @{ N='HardwareIDs'; E={
                     try { (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Enum\$($_.DeviceID)" -EA Stop).HardwareID }
@@ -4393,26 +3863,41 @@ function Start-DellIndividualDriverInstall {
         Log "  SystemSKUNumber: $systemSKU"
     } catch { Log "  WARNING: Could not read SystemSKUNumber - model filtering disabled." }
 
-    # v1.29.0 - Catalog source. Dell stopped refreshing the monolithic
-    # CatalogPC.cab (last manifest 2026-06-12) and now publishes
-    # CatalogIndexPC.cab: an index of small per-SKU catalogs with the SAME
-    # SoftwareComponent schema (~10 MB instead of ~58 MB of XML, SKU-scoped,
-    # SHA256 per package, and it lists the consumer SKUs - Vostro 5320 / G15
-    # 5515 - that CatalogPC never carried). Per-SKU first; CatalogPC only when
-    # the index has no entry for this SKU.
-    $catInfo = Get-DellCatalogForSystem -SystemSKU $systemSKU
-    if (Test-Cancelled) { return $false }
-    if (-not $catInfo) {
-        Log "  No Dell catalog could be loaded - falling back to full pack."
+    # Download CatalogPC.cab
+    Log "Downloading Dell CatalogPC.cab..."
+    $catalogCab = Join-Path $env:TEMP "DellCatalogPC.cab"
+    $catalogXml = Join-Path $env:TEMP "CatalogPC.xml"
+    Remove-Item $catalogCab -EA SilentlyContinue
+    Remove-Item $catalogXml -EA SilentlyContinue
+
+    SetDownload -Pct 0 -Label "Downloading Dell CatalogPC..."
+    if (-not (Invoke-CurlDownload -Url "https://downloads.dell.com/catalog/CatalogPC.cab" -OutFile $catalogCab)) {
+        Log "  Failed to download CatalogPC.cab - falling back to full pack."
         return $null
     }
-    [xml]$cat = $catInfo.Catalog
-    Log "  Catalog source: $($catInfo.Source)  ($($catInfo.Components) components)"
-    SetExtract -Pct 30 -Label "Catalog loaded ($($catInfo.Source))"
+    if (Test-Cancelled) { return $false }
 
-    # Win11 osCodes use W21xx / W11xx prefixes (not Display text). These lists
-    # are the codes seen so far; Test-DellOsCode also accepts any code with
-    # those prefixes so a new Dell code cannot silently exclude a package.
+    Log "Extracting CatalogPC.cab..."
+    SetExtract -Pct 10 -Label "Extracting catalog..."
+    $expandOut = & expand.exe "`"$catalogCab`"" "`"$catalogXml`"" 2>&1
+    Log "  expand.exe: $expandOut"
+    if (-not (Test-Path $catalogXml) -or (Get-Item $catalogXml).Length -eq 0) {
+        Log "  CatalogPC CAB extraction failed - falling back to full pack."
+        return $null
+    }
+    SetExtract -Pct 30 -Label "Catalog extracted OK"
+
+    # CatalogPC.xml is UTF-16 encoded
+    Log "Parsing CatalogPC.xml (UTF-16)..."
+    try {
+        $rawXml   = [System.IO.File]::ReadAllText($catalogXml, [System.Text.Encoding]::Unicode)
+        [xml]$cat = $rawXml
+    } catch {
+        Log "  Failed to parse CatalogPC.xml: $($_.Exception.Message) - falling back to full pack."
+        return $null
+    }
+
+    # Win11 osCodes in CatalogPC.xml use W21xx prefix (not Display text)
     $win11Codes = @('W21H4','W21P4','W21S4','W21S5','W11AH','W11AP','W11S5','W11TM','IOTL5')
     $win10Codes = @('W10H4','W10P4','W10H2','W10P2','IOT01','IOTL3','IOTL4','WTCLD')
 
@@ -4584,7 +4069,6 @@ function Start-DellIndividualDriverInstall {
                             DriverName = $c.Name
                             Path       = $c.Path
                             DeviceID   = $dev.DeviceID
-                            Sha256     = ""
                         })
                     }
                 }
@@ -4603,7 +4087,6 @@ function Start-DellIndividualDriverInstall {
                 DriverName = $best.Name
                 Path       = $best.Path
                 DeviceID   = $dev.DeviceID   # v1.20.0 - lets the DUP fallback re-check this exact device
-                Sha256     = [string]$best.Sha256   # v1.29.0
             })
         }
     }
@@ -4629,11 +4112,9 @@ function Start-DellIndividualDriverInstall {
     # Same shape as HP: build manifest, batch-download, then iterate survivors
     # serially for extraction (extraction needs disk I/O exclusivity per file).
     $dlItems = New-Object 'System.Collections.Generic.List[hashtable]'
-    $shaByFile = @{}   # v1.29.0 - OutFile -> catalog SHA256 (empty when the source catalog has none)
     foreach ($drv in $toDownload) {
         $driverUrl  = "https://downloads.dell.com/$($drv.Path)"
         $driverFile = Join-Path $DriverRoot ([System.IO.Path]::GetFileName($drv.Path))
-        $shaByFile[$driverFile] = [string]$drv.Sha256
         $dlItems.Add(@{
             Url     = $driverUrl
             OutFile = $driverFile
@@ -4646,19 +4127,6 @@ function Start-DellIndividualDriverInstall {
 
     $allDownloaded = $true
     foreach ($r in $dlResults) {
-        # v1.29.0 - verify the catalog SHA256 when the (per-SKU) catalog supplies one.
-        if ($r.Success -and $shaByFile.ContainsKey($r.Item.OutFile) -and $shaByFile[$r.Item.OutFile]) {
-            $want = $shaByFile[$r.Item.OutFile].ToUpper()
-            $have = ""
-            try { $have = (Get-FileHash -Path $r.Item.OutFile -Algorithm SHA256).Hash.ToUpper() } catch {}
-            if ($have -ne $want) {
-                Log "  SHA256 mismatch for '$($r.Item.Label)' (got $have, catalog says $want) - discarding the download." -Level "error"
-                Remove-Item $r.Item.OutFile -Force -EA SilentlyContinue
-                $r.Success = $false; $r.ErrorMsg = "sha256 mismatch"
-            } else {
-                Log "  SHA256 OK: $($r.Item.Label)"
-            }
-        }
         if (-not $r.Success) {
             if ($BestEffort) {
                 Log "  Download failed for '$($r.Item.Label)': $($r.ErrorMsg) - skipping (best-effort)."
@@ -4893,7 +4361,7 @@ function Start-DellDriverInstall {
     $missingCount = $script:AnalyticsMissingBefore
     if ($missingCount -ge 1 -and $missingCount -le 3) {
         $allHaveVenDev = $true
-        $missingEntities = @(Get-CimInstance Win32_PnPEntity | Where-Object { Test-ActionableProblemCode $_.ConfigManagerErrorCode })
+        $missingEntities = @(Get-CimInstance Win32_PnPEntity | Where-Object { $_.ConfigManagerErrorCode -ne 0 })
         foreach ($ent in $missingEntities) {
             try {
                 $hwIds = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Enum\$($ent.DeviceID)" -EA Stop).HardwareID
@@ -5134,36 +4602,6 @@ function Start-DellDriverInstall {
 $script:HpCatalogBudgetMB = 800   # tuning knob - over this, prefer full pack
 $script:HpHpUpSuccessCodes = @(0, 1, 1641, 3010)  # HPUP/HpFirmwareUpdRec exit-OK set
 
-# v1.26.0 - Curated "known-stubborn HP device -> specific SoftPaq" table used by
-# Invoke-HpKnownDeviceRescue. These are devices that the catalog/full-pack paths
-# can leave unresolved (cancelled or failed pack download) AND that Windows
-# Update has no driver for, so a re-run alone does not reliably fix them.
-#   Match  : uppercase HardwareID/CompatibleID substring to test each still-
-#            missing device against (contains match).
-#   SpId   : HP SoftPaq id (also the download filename stem).
-#   Url    : direct HP FTP url. SHA256 is verified before install, so a silently
-#            re-released SoftPaq fails safe (mismatch -> skip) rather than
-#            installing something unexpected.
-# Values below were taken from the HPIA reference catalog for SystemID 8830 and
-# verified byte-for-byte against the live SoftPaq on ftp.hp.com (2026-07-13).
-# The FS76xx sensor family (PIDs 00C0/00C4/00D8/00DF/00E9/00F0/0103/0104) all map
-# to sp144777 in that catalog; we key on the observed FS7605 id and add siblings
-# here only as they are confirmed in the field.
-$script:HpKnownDeviceSoftpaqs = @(
-    @{
-        Match         = 'USB\VID_06CB&PID_00DF'
-        SpId          = 'sp144777'
-        Name          = 'Synaptics FS7600 WBF Touch Fingerprint Driver'
-        Version       = '6.0.117.1110'
-        Category      = 'Driver - Keyboard, Mouse and Input Devices'
-        Url           = 'https://ftp.hp.com/pub/softpaq/sp144501-145000/sp144777.exe'
-        SHA256        = 'F009CC64AE92EBD6F32CE6348E5E5171E2E0EB1E4A628BC96913A5C792C0071A'
-        Size          = 2583392
-        SilentInstall = '"InstallCmdWrapper.exe"'
-        Why           = 'Synaptics FS7605 fingerprint sensor (HP ProBook 6xx Aero G7); not on Windows Update'
-    }
-)
-
 function Get-HpSystemId {
     # The 4-char hex platform ID is in Win32_BaseBoard.Product per HPIA docs.
     try {
@@ -5373,7 +4811,7 @@ function Get-HpMissingDevicesWithHwIds {
     $list = New-Object System.Collections.Generic.List[object]
     try {
         $entities = @(Get-CimInstance Win32_PnPEntity -EA Stop |
-            Where-Object { Test-ActionableProblemCode $_.ConfigManagerErrorCode })
+            Where-Object { $_.ConfigManagerErrorCode -ne 0 })
     } catch {
         Log "  HP catalog: cannot enumerate Win32_PnPEntity - $($_.Exception.Message)"
         return $list
@@ -5788,97 +5226,6 @@ function Start-HpReferenceCatalogInstall {
 # =========================
 # HP
 # =========================
-function Invoke-HpKnownDeviceRescue {
-    # v1.26.0 - Targeted last tier for the HP flow. For every device still in a
-    # problem state that matches $script:HpKnownDeviceSoftpaqs, download and
-    # install that one small SoftPaq, then kick the device so it re-binds. This
-    # exists because the catalog/full-pack paths can be skipped, cancelled, or
-    # fail their download, and Windows Update has no driver for these devices
-    # (e.g. the Synaptics FS76xx fingerprint sensor). Reuses Install-HpSoftpaq
-    # (download -> SHA256 verify -> extract -> SilentInstall) so behaviour and
-    # analytics recording match the catalog path exactly.
-    #
-    # Returns $true if at least one SoftPaq installed OK, else $false.
-    param([string]$DriverRoot)
-
-    if (Test-CancelFlag) { return $false }
-    if (-not $script:HpKnownDeviceSoftpaqs -or @($script:HpKnownDeviceSoftpaqs).Count -eq 0) { return $false }
-
-    $missing = Get-HpMissingDevicesWithHwIds
-    if ($missing.Count -eq 0) { return $false }
-
-    # Match each still-missing device against the curated table. A SoftPaq is
-    # queued once even if several devices map to it; keep one device per SoftPaq
-    # so we can restart it after the install.
-    $queue = [ordered]@{}   # SpId -> @{ Entry = <table row>; Device = <missing dev> }
-    foreach ($dev in $missing) {
-        $ids = @()
-        if ($dev.HardwareIDs)   { $ids += @($dev.HardwareIDs) }
-        if ($dev.CompatibleIDs) { $ids += @($dev.CompatibleIDs) }
-        if ($dev.DeviceID)      { $ids += $dev.DeviceID }
-        $idsUpper = @($ids | Where-Object { $_ } | ForEach-Object { $_.ToUpper() })
-
-        foreach ($row in $script:HpKnownDeviceSoftpaqs) {
-            $needle = ([string]$row.Match).ToUpper()
-            if (-not $needle) { continue }
-            # Match is a literal substring - \, & and _ are not -like wildcards,
-            # and no curated Match contains * ? or [.
-            $hit = $false
-            foreach ($idU in $idsUpper) { if ($idU -like "*$needle*") { $hit = $true; break } }
-            if ($hit -and -not $queue.Contains($row.SpId)) {
-                $queue[$row.SpId] = @{ Entry = $row; Device = $dev }
-            }
-        }
-    }
-    if ($queue.Count -eq 0) { return $false }
-
-    Log ""
-    Log "=== HP KNOWN-DEVICE RESCUE: $($queue.Count) targeted SoftPaq(s) for stubborn device(s) ===" -Level "info"
-    if (-not (Test-Path $DriverRoot)) { New-Item -Path $DriverRoot -ItemType Directory -Force | Out-Null }
-
-    $installed = 0
-    $i = 0
-    foreach ($spId in @($queue.Keys)) {
-        $i++
-        if (Test-CancelFlag) { Log "  Cancelled."; break }
-        $entry = $queue[$spId].Entry
-        $dev   = $queue[$spId].Device
-        Log "  Rescue [$i/$($queue.Count)]: $($dev.Name)"
-        Log "    -> $spId  $($entry.Name)  ($($entry.Why))"
-
-        # Build the SoftPaq hashtable Install-HpSoftpaq expects - same shape the
-        # catalog indexer produces (Build-HpSolutionIndex + Id).
-        $sp = @{
-            Id            = $spId
-            Name          = $entry.Name
-            Version       = $entry.Version
-            Category      = $entry.Category
-            Url           = $entry.Url
-            SHA256        = $entry.SHA256
-            Size          = $entry.Size
-            SilentInstall = $entry.SilentInstall
-        }
-        if (Install-HpSoftpaq -Sp $sp -DriverRoot $DriverRoot -Index $i -Total $queue.Count) {
-            $installed++
-            # Kick the device so it re-enumerates and binds the fresh driver
-            # without waiting for the end-of-run rescan or a reboot.
-            try {
-                $null = pnputil /restart-device "$($dev.DeviceID)" 2>&1
-                Start-Sleep -Seconds 2
-                if ([int](Get-PnpDevice -InstanceId $dev.DeviceID -EA Stop).ConfigManagerErrorCode -eq 0) {
-                    Log "    '$($dev.Name)' cleared - rescue succeeded."
-                } else {
-                    Log "    Driver installed; device still settling (end-of-run rescan or reboot may finish it)."
-                }
-            } catch {
-                Log "    Driver installed; device not enumerable right now (may re-appear on the rescan)."
-            }
-        }
-    }
-    Log "  Known-device rescue: installed $installed of $($queue.Count) targeted SoftPaq(s)."
-    return ($installed -gt 0)
-}
-
 function Start-HpDriverInstall {
     param([string]$DriverRoot, [string]$ModelName)
 
@@ -5895,24 +5242,6 @@ function Start-HpDriverInstall {
     if ($catalogResult -eq $true)  { return $true }
     if ($catalogResult -eq $false) { return $false }
     Log "Falling back to full-pack driver matrix..."
-    $packResult = Start-HpFullPackInstall -DriverRoot $DriverRoot -ModelName $ModelName
-
-    # v1.26.0 - After the full-pack tier, run the targeted known-device rescue so
-    # stubborn devices (e.g. the Synaptics fingerprint sensor) that the pack path
-    # missed - or that a failed/absent pack left unaddressed - still get their
-    # specific SoftPaq. No-op when nothing in the curated table is still missing.
-    # Skipped on an in-flight cancel so we don't start a fresh download after the
-    # operator asked to stop.
-    if (Test-CancelFlag) { return $packResult }
-    $rescued = Invoke-HpKnownDeviceRescue -DriverRoot $DriverRoot
-    return ($packResult -or $rescued)
-}
-
-function Start-HpFullPackInstall {
-    # v1.26.0 - the HP Driver Pack Matrix scrape + full-pack install, extracted
-    # verbatim from Start-HpDriverInstall so the known-device rescue tier can run
-    # after it. Returns $true on install success, $false on failure/cancel.
-    param([string]$DriverRoot, [string]$ModelName)
 
     $osBuild = $null; $isWin11 = $false
     try {
@@ -5920,31 +5249,6 @@ function Start-HpFullPackInstall {
         $isWin11 = $osBuild -ge 22000
         Log "OS Build: $osBuild  ($(if ($isWin11) {'Win11'} else {'Win10'}))"
     } catch { Log "Could not read OS build: $($_.Exception.Message)" }
-
-    # v1.29.0 - HP publishes the driver-pack list as XML (HPClientDriverPackCatalog
-    # .cab: ProductOSDriverPack rows keyed by SystemId + OSName + SoftPaqId, plus
-    # a SoftPaq list with Url + SHA256). Use it first: it matches on the machine's
-    # SystemID and Windows version instead of model-name tokens, and it picks the
-    # pack for THIS OS version rather than the first matrix column (25H2). The
-    # matrix HTML scrape below stays as the fallback.
-    $catPick = $null
-    try {
-        $sysidForPack = Get-HpSystemId
-        $displayVer = $null
-        try { $displayVer = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -EA Stop).DisplayVersion } catch {}
-        if ($sysidForPack) {
-            $dpc = Get-HpDriverPackCatalogXml
-            if ($dpc) { $catPick = Select-HpDriverPack -Catalog $dpc -SysId $sysidForPack -IsWin11 $isWin11 -DisplayVersion $displayVer }
-        }
-    } catch { Log "  HP driver-pack catalog lookup error: $($_.Exception.Message) - using the matrix page." }
-    if (Test-Cancelled) { return $false }
-    if ($catPick) {
-        Log "Driver pack from HPClientDriverPackCatalog: $($catPick.SoftPaqId)  [$($catPick.OSName)]  $($catPick.Name)"
-        Log "  URL: $($catPick.Url)"
-        SetExtract  -Pct 40 -Label "Catalog OK - $($catPick.SoftPaqId)"
-        return (Install-HpFullPackFromUrl -DriverRoot $DriverRoot -PackUrl $catPick.Url -PackSpNum $catPick.SoftPaqId -Sha256 $catPick.SHA256)
-    }
-    Log "HP driver-pack catalog had no entry for this SystemID / OS - falling back to the matrix page."
 
     $matrixUrl  = "https://ftp.hp.com/pub/caps-softpaq/cmit/HP_Driverpack_Matrix_x64.html"
     $matrixFile = Join-Path $env:TEMP "HP_DPMatrix.html"
@@ -6019,29 +5323,12 @@ function Start-HpFullPackInstall {
     }
 
     SetExtract  -Pct 40 -Label "Matrix OK - $packSpNum"
-    return (Install-HpFullPackFromUrl -DriverRoot $DriverRoot -PackUrl $packUrl -PackSpNum $packSpNum -Sha256 "")
-}
-
-function Install-HpFullPackFromUrl {
-    # v1.29.0 - shared tail of the HP full-pack path: download -> optional
-    # SHA256 check (catalog path only) -> extract -> pnputil.
-    param([string]$DriverRoot, [string]$PackUrl, [string]$PackSpNum, [string]$Sha256 = "")
     SetProgress 25
     if (-not (Test-Path $DriverRoot)) { New-Item -Path $DriverRoot -ItemType Directory -Force | Out-Null }
-    $packFile = Join-Path $DriverRoot "$PackSpNum.exe"
+    $packFile = Join-Path $DriverRoot "$packSpNum.exe"
     SetProgress 30
-    if (-not (Invoke-CurlDownload -Url $PackUrl -OutFile $packFile)) { Log "HP driver pack download failed."; return $false }
+    if (-not (Invoke-CurlDownload -Url $packUrl -OutFile $packFile)) { Log "HP driver pack download failed."; return $false }
     if (Test-Cancelled) { return $false }
-    if ($Sha256) {
-        $have = ""
-        try { $have = (Get-FileHash -Path $packFile -Algorithm SHA256).Hash.ToUpper() } catch {}
-        if ($have -ne $Sha256.ToUpper()) {
-            Log "SHA256 mismatch on $PackSpNum (got $have, catalog says $($Sha256.ToUpper())) - not installing it." -Level "error"
-            Remove-Item $packFile -Force -EA SilentlyContinue
-            return $false
-        }
-        Log "  SHA256 OK."
-    }
     SetProgress 55
 
     $extractPath = Join-Path $DriverRoot "HP_Extracted"
@@ -6049,82 +5336,6 @@ function Install-HpFullPackFromUrl {
     Start-PackExtraction -PackFile $packFile -DestPath $extractPath -StallLimitSec 300 -Vendor "HP"
     SetProgress 60
     return (Install-DriversFromPath -BasePath $extractPath)
-}
-
-function Get-HpDriverPackCatalogXml {
-    # v1.29.0 - Download + expand HPClientDriverPackCatalog.cab (one XML inside).
-    # Returns [xml] or $null.
-    $url = "https://hpia.hpcloud.hp.com/downloads/driverpackcatalog/HPClientDriverPackCatalog.cab"
-    $cab = Join-Path $env:TEMP "HPClientDriverPackCatalog.cab"
-    $dir = Join-Path $env:TEMP "HPClientDriverPackCatalog_x"
-    Remove-Item $cab -EA SilentlyContinue
-    if (Test-Path $dir) { Remove-Item $dir -Recurse -Force -EA SilentlyContinue }
-    Log "Downloading HP driver-pack catalog (XML)..."
-    if (-not (Invoke-CurlDownload -Url $url -OutFile $cab)) { return $null }
-    if (Test-CancelFlag) { return $null }
-    New-Item -ItemType Directory -Path $dir -Force | Out-Null
-    try {
-        $null = Start-Process -FilePath "expand.exe" -ArgumentList @("-F:*", $cab, $dir) -NoNewWindow -Wait -PassThru -EA Stop
-    } catch { Log "  expand error: $($_.Exception.Message)"; return $null }
-    $xmlFile = Get-ChildItem $dir -Filter "*.xml" -Recurse -EA SilentlyContinue | Select-Object -First 1
-    if (-not $xmlFile) { Log "  HP driver-pack catalog: no XML after expand."; return $null }
-    try {
-        $bytes = [System.IO.File]::ReadAllBytes($xmlFile.FullName)
-        $text  = [System.Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0xFEFF)
-        return ([xml]$text)
-    } catch { Log "  HP driver-pack catalog parse failed: $($_.Exception.Message)"; return $null }
-}
-
-function Select-HpDriverPack {
-    # v1.29.0 - Pure: pick the driver pack for this SystemID + Windows version
-    # from the parsed HPClientDriverPackCatalog.xml. Prefers the exact
-    # DisplayVersion row, then the newest same-generation row (25H2 > 24H2 > ...).
-    # Returns @{ SoftPaqId; OSName; Url; SHA256; Name } or $null.
-    param([xml]$Catalog, [string]$SysId, [bool]$IsWin11, [string]$DisplayVersion)
-    if (-not $Catalog -or -not $SysId) { return $null }
-    $sid = $SysId.Trim().ToUpper()
-    $gen = if ($IsWin11) { 'Windows 11' } else { 'Windows 10' }
-    $rows = @()
-    foreach ($n in $Catalog.SelectNodes("//*[local-name()='ProductOSDriverPack']")) {
-        $ids = ""; $os = ""; $sp = ""; $arch = ""
-        try { $ids  = [string]$n.SelectSingleNode("*[local-name()='SystemId']").InnerText } catch {}
-        try { $os   = [string]$n.SelectSingleNode("*[local-name()='OSName']").InnerText } catch {}
-        try { $sp   = [string]$n.SelectSingleNode("*[local-name()='SoftPaqId']").InnerText } catch {}
-        try { $arch = [string]$n.SelectSingleNode("*[local-name()='Architecture']").InnerText } catch {}
-        if (-not $ids -or -not $os -or -not $sp) { continue }
-        if ($arch -and $arch -notmatch '64') { continue }
-        $idList = @($ids -split ',' | ForEach-Object { $_.Trim().ToUpper() })
-        if ($idList -notcontains $sid) { continue }
-        if ($os -notmatch [regex]::Escape($gen)) { continue }
-        if ($os -match '(?i)IoT|LTSC|LTSB') { continue }
-        $ver = ""
-        if ($os -match ',\s*([0-9]{2}H[12]|[0-9]{4})\s*$') { $ver = $Matches[1].ToUpper() }
-        $rows += [PSCustomObject]@{ SoftPaqId = $sp.Trim(); OSName = $os.Trim(); Ver = $ver }
-    }
-    if ($rows.Count -eq 0) { return $null }
-    $pick = $null
-    if ($DisplayVersion) {
-        $pick = $rows | Where-Object { $_.Ver -eq $DisplayVersion.Trim().ToUpper() } | Select-Object -First 1
-    }
-    if (-not $pick) {
-        # "25H2" > "24H2" > "21H2" > "2004" > "1909" as plain strings - the right order.
-        $pick = $rows | Sort-Object @{ E = { $_.Ver }; Descending = $true } | Select-Object -First 1
-    }
-    if (-not $pick) { return $null }
-    $url = ""; $sha = ""; $name = ""
-    foreach ($s in $Catalog.SelectNodes("//*[local-name()='SoftPaq']")) {
-        $id = ""
-        try { $id = [string]$s.SelectSingleNode("*[local-name()='Id']").InnerText } catch {}
-        if ($id.Trim() -ne $pick.SoftPaqId) { continue }
-        try { $url  = [string]$s.SelectSingleNode("*[local-name()='Url']").InnerText } catch {}
-        try { $sha  = [string]$s.SelectSingleNode("*[local-name()='SHA256']").InnerText } catch {}
-        try { $name = [string]$s.SelectSingleNode("*[local-name()='Name']").InnerText } catch {}
-        break
-    }
-    if (-not $url) { return $null }
-    $url = $url.Trim()
-    if ($url -notmatch '^https?://') { $url = "https://$url" }
-    return @{ SoftPaqId = $pick.SoftPaqId; OSName = $pick.OSName; Url = $url; SHA256 = $sha.Trim(); Name = $name.Trim() }
 }
 
 # =========================
@@ -6537,7 +5748,7 @@ function Get-LenovoUnboundDevices {
     # counts agree between the pre/post snapshot and this helper.
     try {
         return @(Get-CimInstance Win32_PnPEntity -EA Stop |
-                 Where-Object { Test-ActionableProblemCode $_.ConfigManagerErrorCode })
+                 Where-Object { $_.ConfigManagerErrorCode -ne 0 })
     } catch { return @() }
 }
 
@@ -7196,18 +6407,11 @@ function Start-LenovoDriverInstall {
     SetDownload -Pct 0 -Label "Waiting..."
     SetExtract  -Pct 0 -Label "Waiting..."
 
-    # v1.24.1 - read the -MachineType param BEFORE "$machineType = $null" runs:
-    # variable names are case-insensitive, so that initializer created a local
-    # that shadowed the param, making "if ($MachineType)" always false - the
-    # documented -MachineType override has been silently ignored (WMI always
-    # won, so e.g. forcing the Lenovo path from a non-Lenovo test box derived
-    # a garbage prefix like "LATI" from the local model name instead).
-    $mtOverride  = $MachineType
     $machineType = $null
-    if ($mtOverride) {
+    if ($MachineType) {
         # Use override from -MachineType param - take first 4 chars uppercased
-        $machineType = $mtOverride.Substring(0, [math]::Min(4, $mtOverride.Length)).ToUpper()
-        Log "Machine type: $mtOverride  ->  prefix: $machineType  [overridden via param]"
+        $machineType = $MachineType.Substring(0, [math]::Min(4, $MachineType.Length)).ToUpper()
+        Log "Machine type: $MachineType  ->  prefix: $machineType  [overridden via param]"
     } else {
         try {
             $sku = (Get-CimInstance Win32_ComputerSystemProduct).Name.Trim()
@@ -7299,8 +6503,7 @@ function Start-LenovoDriverInstall {
 
 $SurfaceDownloadIds = [ordered]@{
     # Surface Pro
-    "Surface Pro 12"                          = "108199"   # verified - Download Center title: "Surface Pro 12-inch 1st Edition with Snapdragon"
-    "Surface Pro for Business (12th Edition)" = "108671"   # v1.29.0 - page verified 2026-09-14 (Intel); WMI model string NOT yet confirmed on hardware
+    "Surface Pro 12"                          = "108199"   # verified
     "Surface Pro for Business (11th Edition)" = "108013"   # verified (Intel)
     "Surface Pro (11th Edition)"              = "106119"   # verified (Snapdragon)
     "Surface Pro 10 with 5G"                  = "106292"   # verified
@@ -7318,11 +6521,6 @@ $SurfaceDownloadIds = [ordered]@{
     "Surface Pro 3"                           = "38826"    # verified
     "Surface Pro 2"                           = "49042"    # verified
     # Surface Laptop
-    "Surface Laptop for Business (8th Edition)" = "108669" # v1.29.0 - page verified 2026-09-14 (Intel); WMI model string NOT yet confirmed on hardware
-    "Surface Laptop (8th Edition)"            = "108705"   # v1.29.0 - page verified 2026-09-14 (Snapdragon); WMI model string NOT yet confirmed
-    "Surface Laptop for Business 13-inch"     = "108670"   # v1.29.0 - "Surface Laptop for Business 13-inch 1st Edition with Intel"; WMI string NOT yet confirmed
-    "Surface Laptop 13-inch"                  = "108198"   # v1.29.0 - "Surface Laptop 13-inch 1st Edition with Snapdragon"; WMI string NOT yet confirmed
-    "Surface Laptop 5G for Business"          = "108347"   # v1.29.0 - "Surface Laptop 5G for Business 7th Edition with Intel"; WMI string NOT yet confirmed
     "Surface Laptop 7 with Intel"             = "108014"   # verified
     "Surface Laptop 7"                        = "106120"   # verified (Snapdragon)
     "Surface Laptop 6"                        = "105946"   # verified
@@ -8470,8 +7668,6 @@ function Start-Install {
         exit
     }
 
-    Sync-BenchClock   # v1.29.0 - was at script load (unelevated, and under -TestMode)
-
     Log "Driver Installer v$SCRIPT_VERSION" -Level "info" -Event "run_start" -Context @{
         log_file       = $LogFile
         events_file    = $EventsLogFile
@@ -8503,17 +7699,9 @@ function Start-Install {
 
     $cs = Get-CimInstance Win32_ComputerSystem
 
-    # Use param overrides if provided, otherwise read from WMI.
-    # v1.24.1 - capture the "was a param passed" facts BEFORE the assignments:
-    # PowerShell variable names are case-insensitive, so $manufacturer IS
-    # $Manufacturer - the first assignment below overwrites the param, and any
-    # later "if ($Manufacturer)" is really asking "did detection produce a
-    # value" (always yes). Every log since v1.5.5 claimed "[OVERRIDDEN via
-    # param]" even for pure WMI detection because of this.
-    $mfgOverridden   = [bool]$Manufacturer
-    $modelOverridden = [bool]$Model
-    $manufacturer = if ($mfgOverridden)   { $Manufacturer } else { $cs.Manufacturer.Trim() }
-    $model        = if ($modelOverridden) { $Model }        else { $cs.Model.Trim() }
+    # Use param overrides if provided, otherwise read from WMI
+    $manufacturer = if ($Manufacturer) { $Manufacturer } else { $cs.Manufacturer.Trim() }
+    $model        = if ($Model)        { $Model }        else { $cs.Model.Trim() }
 
     $script:AnalyticsManufacturer = $manufacturer
     $script:AnalyticsModel        = $model
@@ -8531,7 +7719,7 @@ function Start-Install {
         Set-UiTitle "$manufacturer  $([char]0xB7)  $model"
     }
 
-    $overrideNote = if ($mfgOverridden -or $modelOverridden) { "  [OVERRIDDEN via param]" } else { "  (from WMI)" }
+    $overrideNote = if ($Manufacturer -or $Model) { "  [OVERRIDDEN via param]" } else { "  (from WMI)" }
     Log "Manufacturer : $manufacturer$overrideNote"
     Log "Model        : $model$overrideNote"
 
@@ -8546,11 +7734,6 @@ function Start-Install {
     $beforeNames = Get-MissingDriverNames
     foreach ($n in $beforeNames) { $script:AnalyticsMissingBeforeList.Add($n) | Out-Null }
     Log "Missing drivers BEFORE install: $($script:AnalyticsMissingBefore)"
-    # v1.29.0 - say which devices are excluded from the count (disabled / absent).
-    $ignoredNames = @(Get-IgnoredProblemDeviceNames)
-    if ($ignoredNames.Count -gt 0) {
-        Log "  ($($ignoredNames.Count) device(s) disabled or not present are not counted: $($ignoredNames -join '; '))"
-    }
     if ($beforeNames.Count -gt 0) {
         # Mirror the at-a-glance list into the log for the human reader too,
         # so the .log and the analytics sheet tell the same story.
@@ -8655,7 +7838,7 @@ function Start-Install {
 
     # Install 7-Zip for Dell and HP extraction (not needed for Lenovo or Surface)
     if (-not $wuFirstResolvedAll -and $manufacturer -match "Dell|HP|Hewlett") {
-        Log "Preparing 7-Zip for fast extraction..."
+        Log "Installing 7-Zip for fast extraction..."
         if (-not (Install-7Zip)) {
             Log "WARNING: 7-Zip unavailable - will fall back to vendor extractor."
         }
@@ -8878,20 +8061,16 @@ function Start-Install {
             # v1.12.0 - Add Windows Update prompt if drivers still missing
             if ($PromptWindowsUpdate -and $stillMissing -gt 0) {
                 # v1.16.1 - Framed around the reboot question. Cancel (and Esc) is the
-                # safe no-op. Yes = reboot now, Cancel = nothing.
-                # v1.25.0 - "No" now RUNS the Windows Update driver method
-                # (Install-DriversViaWindowsUpdate) instead of just opening the
-                # Settings app. We're on the worker thread here, so the call is
-                # inline with full progress/Cancel support.
+                # safe no-op. Yes = reboot now, No = open Windows Update, Cancel = nothing.
                 $msgText += "`n`n$stillMissing driver(s) still missing. Would you like to reboot?`n`n" +
                             "  - Yes:     reboot now to finish installing drivers`n" +
-                            "  - No:      run Windows Update to fetch the remaining drivers`n" +
+                            "  - No:      open Windows Update to search for the rest`n" +
                             "  - Cancel:  do nothing"
                 $result = Show-TopMostMessageBox $msgText "Installation Complete" "YesNoCancel" "Information"
                 if ($result -eq [System.Windows.Forms.DialogResult]::Yes) {
                     Restart-Computer -Force
                 } elseif ($result -eq [System.Windows.Forms.DialogResult]::No) {
-                    Invoke-WindowsUpdateDriverRunInteractive | Out-Null
+                    Open-WindowsUpdate
                     Set-ButtonIdle
                 } else {
                     Set-ButtonIdle
@@ -8943,12 +8122,10 @@ function Start-Install {
             $msgText = "Driver installation failed or no pack was found.`nCheck the log:`n`n$LogFile`n`nReport: $ReportFile"
             # v1.12.0 - Add Windows Update prompt if drivers still missing
             if ($PromptWindowsUpdate -and $stillMissing -gt 0) {
-                # v1.25.0 - "Yes" runs the Windows Update driver method inline
-                # (worker thread) rather than only launching the Settings app.
-                $msgText += "`n`n$stillMissing drivers still missing.`nWould you like to run Windows Update to search for the remaining drivers?"
+                $msgText += "`n`n$stillMissing drivers still missing.`nWould you like to open Windows Update to search for additional drivers?"
                 $result = Show-TopMostMessageBox $msgText "Installation Failed" "YesNo" "Warning"
                 if ($result -eq [System.Windows.Forms.DialogResult]::Yes) {
-                    Invoke-WindowsUpdateDriverRunInteractive | Out-Null
+                    Open-WindowsUpdate
                     Set-ButtonIdle
                 } else {
                     Set-ButtonIdle
@@ -9094,11 +8271,6 @@ function Invoke-UiOp {
             $cancelButton.Enabled   = $true
             $cancelButton.BackColor = $ColorDanger
             $cancelButton.ForeColor = [System.Drawing.Color]::White
-            # v1.25.0 - the WU button shares the single worker runspace, so it
-            # must grey out for the duration of any run (install or WU).
-            $wuButton.Enabled       = $false
-            $wuButton.BackColor     = $ColorMutedBg
-            $wuButton.ForeColor     = $ColorDisabledFg
             # Reset section dots back to muted - they light up as spinners fire
             $dlStatusDot.ForeColor      = $ColorMuted
             $exStatusDot.ForeColor      = $ColorMuted
@@ -9111,10 +8283,6 @@ function Invoke-UiOp {
             $cancelButton.Enabled   = $false
             $cancelButton.BackColor = $ColorMutedBg
             $cancelButton.ForeColor = $ColorDisabledFg
-            # v1.25.0 - re-arm the Windows Update button alongside Install.
-            $wuButton.Enabled       = $true
-            $wuButton.BackColor     = $ColorAccent
-            $wuButton.ForeColor     = [System.Drawing.Color]::White
         }
         'missing' {
             # Stored UI-side: Show-MissingDevicesWindow (link click) reads these
@@ -9134,18 +8302,14 @@ function Invoke-UiOp {
     }
 }
 
-function Start-Worker {
-    # v1.25.0 - Launch $Entry in a background STA runspace. The snapshot approach:
+function Start-WorkerInstall {
+    # Launch the install in a background STA runspace. The snapshot approach:
     # every function and (nearly) every variable currently visible is copied
     # into an InitialSessionState, so the worker sees the same world the main
     # runspace would have - including param overrides, catalogs, log paths,
     # and the shared $UiQueue/$UiSync objects (same instances, thread-safe).
     # Control references ride along too, but the worker-side helpers never
     # touch them (all UI mutation is enqueued back to this thread).
-    # $Entry is the name of the worker-side entry function to invoke
-    # ('Invoke-StartInstallSafe' for a full run, 'Invoke-WindowsUpdateOnlySafe'
-    # for the Windows-Update-only run behind the new button).
-    param([string]$Entry = 'Invoke-StartInstallSafe')
     if ($script:WorkerPS) { return }   # a run is already in flight
     $script:UiSync['CancelRequested'] = $false
     $script:CancelRequested           = $false
@@ -9158,7 +8322,7 @@ function Start-Worker {
     }
     $skipVars = @(
         # worker bookkeeping + this function's locals
-        'WorkerPS','WorkerHandle','WorkerRunspace','UiTimer','iss','fn','skipVars','v','Entry',
+        'WorkerPS','WorkerHandle','WorkerRunspace','UiTimer','iss','fn','skipVars','v',
         # automatics / readonly / host plumbing that must not be overridden
         '_','null','true','false','input','args','foreach','switch','PSItem','Matches',
         'MyInvocation','PSBoundParameters','PSCommandPath','PSScriptRoot','StackTrace',
@@ -9185,14 +8349,9 @@ function Start-Worker {
     $script:WorkerRunspace = $rs
     $script:WorkerPS       = [PowerShell]::Create()
     $script:WorkerPS.Runspace = $rs
-    $null = $script:WorkerPS.AddScript($Entry)
+    $null = $script:WorkerPS.AddScript('Invoke-StartInstallSafe')
     $script:WorkerHandle = $script:WorkerPS.BeginInvoke()
 }
-
-# v1.25.0 - thin wrappers so existing call sites read the same and the button
-# handlers stay declarative. Both funnel through Start-Worker's single-run guard.
-function Start-WorkerInstall       { Start-Worker -Entry 'Invoke-StartInstallSafe' }
-function Start-WorkerWindowsUpdate { Start-Worker -Entry 'Invoke-WindowsUpdateOnlySafe' }
 
 # =========================
 # WIRE UP + LAUNCH
@@ -9225,7 +8384,7 @@ if ($Headless) {
             } catch {
                 # Something escaped even the crash wrapper (dispatch/parse-level).
                 $emsg = "[UI] Worker terminated abnormally: $($_.Exception.Message)"
-                try { Add-Content -Path $LogFile -Value $emsg -Encoding UTF8 -ErrorAction Stop } catch {}
+                try { Add-Content -Path $LogFile -Value $emsg -Encoding UTF8 } catch {}
                 try { Invoke-UiOp @{ Op = 'log'; Line = $emsg; Tone = 'error' } } catch {}
             }
             foreach ($e in @($ps.Streams.Error)) {
@@ -9241,9 +8400,6 @@ if ($Headless) {
     })
 
     $button.Add_Click({ Start-WorkerInstall })
-
-    # v1.25.0 - run the Windows Update driver method on its own worker.
-    $wuButton.Add_Click({ Start-WorkerWindowsUpdate })
 
     $cancelButton.Add_Click({
         if ($cancelButton.Enabled) {
