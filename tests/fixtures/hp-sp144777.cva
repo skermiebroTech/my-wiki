@@ -1,0 +1,301 @@
+[CVA File Information]
+CVATimeStamp=20251017T065402
+CVASyntaxVersion=2.1A6
+
+[Software Title]
+US=Synaptics FS7600 WBF Touch Fingerprint Driver
+AR=Synaptics FS7600 WBF Touch Fingerprint Driver
+BR=Synaptics FS7600 WBF Touch Fingerprint Driver
+CS=Synaptics FS7600 WBF Touch Fingerprint Driver
+DA=Synaptics FS7600 WBF Touch Fingerprint Driver
+DE=Synaptics FS7600 WBF Touch Fingerprint Driver
+EL=Synaptics FS7600 WBF Touch Fingerprint Driver
+ES=Synaptics FS7600 WBF Touch Fingerprint Driver
+ET=Synaptics FS7600 WBF Touch Fingerprint Driver
+FI=Synaptics FS7600 WBF Touch Fingerprint Driver
+FR=Synaptics FS7600 WBF Touch Fingerprint Driver
+HE=Synaptics FS7600 WBF Touch Fingerprint Driver
+HK=Synaptics FS7600 WBF Touch Fingerprint Driver
+HR=Synaptics FS7600 WBF Touch Fingerprint Driver
+HU=Synaptics FS7600 WBF Touch Fingerprint Driver
+IT=Synaptics FS7600 WBF Touch Fingerprint Driver
+JA=Synaptics FS7600 WBF Touch Fingerprint Driver
+KO=Synaptics FS7600 WBF Touch Fingerprint Driver
+LT=Synaptics FS7600 WBF Touch Fingerprint Driver
+LV=Synaptics FS7600 WBF Touch Fingerprint Driver
+NL=Synaptics FS7600 WBF Touch Fingerprint Driver
+NO=Synaptics FS7600 WBF Touch Fingerprint Driver
+PL=Synaptics FS7600 WBF Touch Fingerprint Driver
+PT=Synaptics FS7600 WBF Touch Fingerprint Driver
+RO=Synaptics FS7600 WBF Touch Fingerprint Driver
+RU=Synaptics FS7600 WBF Touch Fingerprint Driver
+SK=Synaptics FS7600 WBF Touch Fingerprint Driver
+SL=Synaptics FS7600 WBF Touch Fingerprint Driver
+SR=Synaptics FS7600 WBF Touch Fingerprint Driver
+SV=Synaptics FS7600 WBF Touch Fingerprint Driver
+TH=Synaptics FS7600 WBF Touch Fingerprint Driver
+TR=Synaptics FS7600 WBF Touch Fingerprint Driver
+TW=Synaptics FS7600 WBF Touch Fingerprint Driver
+ZH=Synaptics FS7600 WBF Touch Fingerprint Driver
+
+[US.Software Description]
+This package contains the driver that enables the Synaptics (Validity) Fingerprint Sensor in supported notebook models that are running a supported operating system. The fingerprint sensor scans fingerprints for use with biometric security applications.
+
+[AR.Software Description]
+تحتوي هذه الحزمة على برنامج التشغيل لمستشعر بصمات أصابع Synaptics .
+
+[BR.Software Description]
+Este pacote contém o driver Synaptics do sensor de impressão digital.
+
+[CS.Software Description]
+Tento balíček obsahuje ovladač pro čtečku otisků prstů Synaptics .
+
+[DA.Software Description]
+Denne pakke indeholder driveren til Synaptics fingeraftrykssensoren.
+
+[DE.Software Description]
+Dieses Paket enthält den Treiber für den Synaptics Fingerabdruck-Sensor.
+
+[EL.Software Description]
+Το πακέτο αυτό περιέχει το πρόγραμμα οδήγησης για τον Αισθητήρα δαχτυλικών αποτυπωμάτων Synaptics .
+
+[ES.Software Description]
+Este paquete contiene el controlador del sensor de huellas Synaptics .
+
+[ET.Software Description]
+See pakett sisaldab Synaptics sõrmejälje sensori draiverit.
+
+[FI.Software Description]
+Tämä pakkaus sisältää  Synaptics sormenjälkitunnistimen ohjaimen.
+
+[FR.Software Description]
+Ce package contient le pilote du capteur d'empreintes digitales Synaptics .
+
+[HE.Software Description]
+חבילה זו מכילה את מנהל ההתקן עבור חיישן טביעות האצבע של Synaptics .
+
+[HK.Software Description]
+此封裝包含了 Synaptics 指紋感應器的驅動程式。
+
+[HR.Software Description]
+U paketu je sadržan i upravljači program za Synaptics senzor otiska prsta.
+
+[HU.Software Description]
+Ez a csomag a Synaptics ujjlenyomat-érzékelő illesztőprogramját tartalmazza.
+
+[IT.Software Description]
+Questo pacchetto contiene il driver per il sensore di impronte digitali Synaptics .
+
+[JA.Software Description]
+このパッケージには、Synaptics 指紋認証センサー用のドライバーが含まれています。
+
+[KO.Software Description]
+이 패키지에는 Synaptics 지문 센서용 드라이버가 들어 있습니다.
+
+[LT.Software Description]
+Šiame pakete yra Synaptics pirštų atspaudų jutiklio tvarkyklė.
+
+[LV.Software Description]
+Šī pakotne satur draiverus Synaptics pirkstu nospiedumu sensoram.
+
+[NL.Software Description]
+Dit pakket bevat het stuurprogramma voor de Synapticsvingerafdruksensor.
+
+[NO.Software Description]
+Denne pakken innneholder driveren tilSynaptics  fingeravtrykkssensoren.
+
+[PL.Software Description]
+Niniejszy pakiet zawiera sterownik czytnika linii papilarnych Synaptics .
+
+[PT.Software Description]
+Este pacote contém o controlador do Sensor de impressões digitais Synaptics .
+
+[RO.Software Description]
+Acest pachet conține driverul pentru senzorul de amprente Synaptics .
+
+[RU.Software Description]
+Данный пакет содержит драйвер для Датчика Отпечатков Пальцев Synaptics .
+
+[SK.Software Description]
+Tento balík obsahuje ovládač pre Snímač odtlačkov prstov Synaptics .
+
+[SL.Software Description]
+Ta paket vsebuje gonilnik za tipalo za prstni odtis Synaptics .
+
+[SR.Software Description]
+Ovaj paket sadrži upravljački program za senzor za otisak prsta Synaptics .
+
+[SV.Software Description]
+Det här paketet innehåller drivrutinen för fingeravtryckssensorn Synaptics .
+
+[TH.Software Description]
+แพกเกจนี้จะมีไดร์ฟเวอร์สำหรับเซนเซอร์ตรวจวัดลายนิ้วมือจาก Synaptics
+
+[TR.Software Description]
+Bu paket, Synaptics Parmak İzi Sensörü sürücüsünü içerir.
+
+[TW.Software Description]
+此封裝包含了 Synaptics 指紋感應器的驅動程式。
+
+[ZH.Software Description]
+该程序包包含 Synaptics 指纹传感器的驱动程序。
+
+[General]
+PN=000000-000
+Version=6.0.117.1110
+Revision=A
+Pass=3
+Type=Driver
+Category=Driver-Keyboard,Mouse and Input Devices
+SystemMustBeRebooted=0
+VendorName=Synaptics
+VendorVersion=6.0.117.1110
+
+[SupportedLanguages]
+Languages=GLOBAL
+Countries=GBL
+
+[ProfessionalInnovations]
+HPPI=NO
+LearnMore=
+
+[DetailFileInformation]
+synaWudfBioUsb110.dll=<WINSYSDIR>\drivers\UMDF\,0x0006,0x0000,0x0075,0x0456,WT64_2004
+synaWudfBioUsb110.dll=<WINSYSDIR>\drivers\UMDF\,0x0006,0x0000,0x0075,0x0456,WT64_2009
+synaWudfBioUsb110.dll=<WINSYSDIR>\drivers\UMDF\,0x0006,0x0000,0x0075,0x0456,WT64_21H1
+synaWudfBioUsb110.dll=<WINSYSDIR>\drivers\UMDF\,0x0006,0x0000,0x0075,0x0456,WT64_21H2
+synaWudfBioUsb110.dll=<WINSYSDIR>\drivers\UMDF\,0x0006,0x0000,0x0075,0x0456,WT64_22H2
+synaWudfBioUsb110.dll=<WINSYSDIR>\drivers\UMDF\,0x0006,0x0000,0x0075,0x0456,W11_21H2
+synaWudfBioUsb110.dll=<WINSYSDIR>\drivers\UMDF\,0x0006,0x0000,0x0075,0x0456,W11_22H2
+synaWudfBioUsb110.dll=<WINSYSDIR>\drivers\UMDF\,0x0006,0x0000,0x0075,0x0456,W11_23H2
+synaWudfBioUsb110.dll=<WINSYSDIR>\drivers\UMDF\,0x0006,0x0000,0x0075,0x0456,W11_24H2
+synaWudfBioUsb110.dll=<WINSYSDIR>\drivers\UMDF\,0x0006,0x0000,0x0075,0x0456,W11_25H2
+
+[Softpaq]
+SoftpaqNumber=SP144777
+SupersededSoftpaqNumber=SP143054
+SoftPaqMD5=3423d308f9751349ef8b0a6adc20937a
+SoftPaqSHA256=F009CC64AE92EBD6F32CE6348E5E5171E2E0EB1E4A628BC96913A5C792C0071A
+
+[Devices]
+USB\VID_06CB&PID_00C0="Synaptics FS7614 Touch Fingerprint Sensor with PurePrint(TM)"
+USB\VID_06CB&PID_00C4="Synaptics FS7605 Touch Fingerprint Sensor with PurePrint(TM)"
+USB\VID_06CB&PID_00DF="Synaptics FS7605 Touch Fingerprint Sensor with PurePrint(TM)"
+USB\VID_06CB&PID_00D8="Synaptics FS7605 Touch Fingerprint Sensor with PurePrint(TM)"
+USB\VID_06CB&PID_00E9="Synaptics FS7606 Touch Fingerprint Sensor with PurePrint(TM)"
+USB\VID_06CB&PID_00F0="Synaptics FS7605 Touch Fingerprint Sensor with PurePrint(TM)"
+USB\VID_06CB&PID_0103="Synaptics FS7606 Touch Fingerprint Sensor with PurePrint(TM)"
+USB\VID_06CB&PID_0104="Synaptics FS7606 Touch Fingerprint Sensor with PurePrint(TM)"
+
+[Devices_INFPath]
+WT64_2004_INFPath=src\driver\INF\x64
+WT64_2009_INFPath=src\driver\INF\x64
+WT64_21H1_INFPath=src\driver\INF\x64
+WT64_21H2_INFPath=src\driver\INF\x64
+WT64_22H2_INFPath=src\driver\INF\x64
+W11_21H2_INFPath=src\driver\INF\x64
+W11_22H2_INFPath=src\driver\INF\x64
+W11_23H2_INFPath=src\driver\INF\x64
+W11_24H2_INFPath=src\driver\INF\x64
+W11_25H2_INFPath=src\driver\INF\x64
+
+[System Information]
+SysId01=0x8895
+SysName01=HP ELITEBOOK 845 G8,HP ELITEBOOK 835 G8,HP ELITEBOOK 855 G8
+SysId02=0x8870
+SysName02=HP ZBOOK FURY 15.6 INCHG8 MOBILE
+SysId03=0x880D
+SysName03=HP ELITEBOOK 840 G8,HP ELITEBOOK 830 G8,HP ELITEBOOK 840 AERO G8,HP ZBOOK FIREFLY 14 INCH G8 MOBILE
+SysId04=0x8AB3
+SysName04=HP ELITEBOOK 840 G8,HP ELITEBOOK 830 G8,HP ZBOOK FIREFLY 14 INCH G8 MOBILE
+SysId05=0x8AB8
+SysName05=HP ELITEBOOK 840 G8,HP ELITEBOOK 830 G8
+SysId06=0x8B63
+SysName06=HP DRAGONFLY 13.5 INCH G4
+SysId07=0x8724
+SysName07=HP ELITEBOOK 850 G7,HP ZBOOK FIREFLY 14 G7 MOBILE,HP ZBOOK FIREFLY 15 G7 MOBILE
+SysId08=0x8847
+SysName08=HP ELITEBOOK X360 830 G8
+SysId09=0x8720
+SysName09=HP ELITEBOOK X360 1040 G8,HP ELITEBOOK X360 1030 G8
+SysId10=0x8B92
+SysName10=HP ZBOOK FURY 16 G10 MOBILE
+SysId11=0x8B93
+SysName11=HP ZBOOK FURY 16 G10 MOBILE
+SysId12=0x8B94
+SysName12=HP ZBOOK FURY 16 G10 MOBILE
+SysId13=0x8BD8
+SysName13=HP ZBOOK FURY 16 G10 MOBILE
+SysId14=0x8846
+SysName14=HP ZBOOK FIREFLY 15.6 INCH G8 MOBILE,HP ELITEBOOK 850 G8
+SysId15=0x89C6
+SysName15=HP ZBOOK FURY 16 G9 MOBILE
+SysId16=0x8886
+SysName16=HP PROBOOK X360 435 G8
+SysId17=0x886D
+SysName17=HP ZBOOK FURY 17.3 INCH G8 MOBILE
+SysId18=0x8716
+SysName18=HP ELITE DRAGONFLY G2
+SysId19=0x8830
+SysName19=HP PROBOOK 635 AERO G7
+SysId20=0x8723
+SysName20=HP ZBOOK FIREFLY 14 G7 MOBILE,HP ELITEBOOK 840 G7,HP ELITEBOOK 830 G7
+SysId21=0x870D
+SysName21=HP ELITE X2 G8
+SysId22=0x8725
+SysName22=HP ELITEBOOK X360 830 G7
+SysId23=0x8B8F
+SysName23=HP ZBOOK STUDIO 16 INCH G10 MOBILE
+SysId24=0x8892
+SysName24=HP PROBOOK 635 AERO G8
+SysId25=0x8890
+SysName25=HP ELITE DRAGONFLY MAX
+SysId26=0x897F
+SysName26=HP ELITE DRAGONFLY 13.5 INCH G3
+SysId27=0x89C3
+SysName27=HP ZBOOK STUDIO 16 INCH G9 MOBILE
+
+[Operating Systems]
+WT64_2004=OEM
+WT64_2009=OEM
+WT64_21H1=OEM
+WT64_21H2=OEM
+WT64_22H2=OEM
+W11_21H2=OEM
+W11_22H2=OEM
+W11_23H2=OEM
+W11_24H2=OEM
+W11_25H2=OEM
+
+[US.Enhancements]
+- Provides the updated driver.
+
+[Install Execution]
+Install="InstallCmdWrapper.exe"
+SilentInstall="InstallCmdWrapper.exe"
+
+[ReturnCode]
+0:SUCCESS:NOREBOOT=Installation successful.
+1603:FAILURE:NOREBOOT=A fatal error occurred during installation.
+3010:SUCCESS:REBOOT=Installation successful. A reboot is required to complete the installation.
+1602:CANCEL:NOREBOOT=User canceled installation.
+1223:CANCEL:NOREBOOT=User canceled installation.
+
+[Private]
+Private_SSMCompliant=1
+HardwareSupportApp_Compliant=0
+DPB_Compliant=1
+MS_Store_App=0
+DriverType=Universal
+Private_ReleaseType=Routine
+Private_ProductType = Notebooks
+
+[Private_SoftpaqInstall]
+
+1. Download the file by clicking the Download or Obtain Software button and saving the file to a folder on your hard drive (make a note of the folder where the downloaded file is saved).
+
+2. Double-click the downloaded file and follow the on-screen instructions.
+
+[CVAToolDocumentStamp]
+Generated by Release CVA Tool Version 1.0 using Syntax Version 2.0 A1 on 10/17/2025 6:54:02 AM
+Copyright (c) 2025 HP Development Company, L.P.

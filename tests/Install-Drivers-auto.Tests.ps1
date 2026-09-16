@@ -20,7 +20,7 @@ $ErrorActionPreference = 'Stop'
 # script's main body creates a WinForms form, so it cannot be dot-sourced here).
 $tok=$null;$err=$null
 $ast=[System.Management.Automation.Language.Parser]::ParseFile($ScriptPath,[ref]$tok,[ref]$err)
-$want='Get-MsCatalogResultRows','Select-MsCatalogDriverGuid','Find-DellIndexManifestPath','Test-DellOsCode','Test-DellOsArch','Test-ActionableProblemCode','Get-ProblemCodeHint','Select-HpDriverPack','Find-DellCatalogDeviceMatches'
+$want='Find-HpSupportProductOids','Select-HpSupportOs','Get-HpCvaInfo','Test-HpCvaAppliesToDevices','Get-MsCatalogResultRows','Select-MsCatalogDriverGuid','Find-DellIndexManifestPath','Test-DellOsCode','Test-DellOsArch','Test-ActionableProblemCode','Get-ProblemCodeHint','Select-HpDriverPack','Find-DellCatalogDeviceMatches'
 foreach ($f in $ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst]},$true)) {
     if ($want -contains $f.Name) { Invoke-Expression $f.Extent.Text }
 }
@@ -86,6 +86,29 @@ Check "45 (phantom) not actionable" (-not (Test-ActionableProblemCode '45'))
 Check "28 actionable" (Test-ActionableProblemCode 28)
 Check "0 not actionable" (-not (Test-ActionableProblemCode 0))
 Check "hint for 48 mentions policy" ((Get-ProblemCodeHint 48) -match 'POLICY')
+
+"== HP consumer tier (v1.30.0) =="
+$sj = Get-Content (Join-Path $Fixtures 'hp-support-search-model.json') -Raw | ConvertFrom-Json
+$oids = @(Find-HpSupportProductOids -SearchJson $sj)
+Check "model-name search yields product OIDs" ($oids.Count -ge 1 -and $oids[0].Oid -match '^\d+$')
+$sj2 = Get-Content (Join-Path $Fixtures 'hp-support-search-product.json') -Raw | ConvertFrom-Json
+$oids2 = @(Find-HpSupportProductOids -SearchJson $sj2)
+Check "product-name search yields OID 31291399" (@($oids2 | Where-Object { $_.Oid -eq '31291399' }).Count -eq 1)
+Check "empty search yields nothing" (@(Find-HpSupportProductOids -SearchJson $null).Count -eq 0)
+$oj = Get-Content (Join-Path $Fixtures 'hp-support-osVersionData.json') -Raw | ConvertFrom-Json
+$os = Select-HpSupportOs -OsJson $oj -IsWin11 $true -DisplayVersion '24H2'
+Check "Win11 machine falls back to Windows 10 (64-bit) generic" ($os -and $os.OsName -eq 'Windows 10 (64-bit)' -and $os.OsTmsId -eq '792898937266030878164166465223921' -and $os.PlatformId -eq '487192269364721453674728010296573')
+$os10 = Select-HpSupportOs -OsJson $oj -IsWin11 $false -DisplayVersion '20H2'
+Check "Win10 20H2 machine picks the 20H2 row" ($os10.OsName -like '*20H2*')
+$cva = Get-HpCvaInfo -Text (Get-Content (Join-Path $Fixtures 'hp-sp144777.cva') -Raw)
+Check "CVA softpaq number + SHA256" ($cva.SoftpaqNumber -eq 'sp144777' -and $cva.SHA256 -eq 'F009CC64AE92EBD6F32CE6348E5E5171E2E0EB1E4A628BC96913A5C792C0071A')
+Check "CVA type Driver, 8 device ids, silent install" ($cva.Type -eq 'Driver' -and $cva.Devices.Count -eq 8 -and $cva.Devices -contains 'USB\VID_06CB&PID_00DF' -and $cva.SilentInstall)
+Check "CVA sysids include 8830 (ProBook 635 Aero G7)" ($cva.SysIds -contains '8830')
+$devs = @([pscustomobject]@{ Name='Synaptics WBDI'; HardwareIDs=@('USB\VID_06CB&PID_00DF&REV_0100','USB\VID_06CB&PID_00DF'); CompatibleIDs=@('USB\CLASS_FF') },
+          [pscustomobject]@{ Name='Other'; HardwareIDs=@('PCI\VEN_8086&DEV_51F0'); CompatibleIDs=@() })
+Check "CVA matches the fingerprint device by prefix" (@(Test-HpCvaAppliesToDevices -Cva $cva -MissingDevices $devs -SysId '8830') -eq @('Synaptics WBDI'))
+Check "CVA rejects a machine whose SysId is not listed" (@(Test-HpCvaAppliesToDevices -Cva $cva -MissingDevices $devs -SysId '9999').Count -eq 0)
+Check "CVA with no SysId check still matches" (@(Test-HpCvaAppliesToDevices -Cva $cva -MissingDevices $devs -SysId '').Count -eq 1)
 ""
 "passed: $pass  failed: $fail"
 if ($fail -gt 0) { exit 1 }

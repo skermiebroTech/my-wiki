@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.29.1 (keep in sync with $SCRIPT_VERSION below)
+# Version: 1.30.0 (keep in sync with $SCRIPT_VERSION below)
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -74,6 +74,26 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.30.0 - HP consumer tier + duration fix.
+#           (1) HP consumer machines (ENVY / Pavilion / OMEN / Spectre /
+#               Victus) have no HPIA reference catalog and no driver pack, so
+#               they ended at "not found in HP Driver Pack Matrix" and were
+#               left to Windows Update (field: ENVY x360 15-dr1xxx, five failed
+#               runs). New Start-HpConsumerSupportInstall queries the support
+#               site's JSON API (searchresult by SystemSKUNumber / model ->
+#               osVersionData -> driverDetails), downloads each candidate
+#               SoftPaq's CVA, matches its [Devices] hardware IDs against the
+#               machine's MISSING devices and its [System Information] SysIds
+#               against Win32_BaseBoard.Product, then installs the newest match
+#               per title through the existing SHA256 -> extract -> SilentInstall
+#               helper. Runs only when the matrix has no row. Caps: 15 SoftPaqs,
+#               1500 MB. Pure helpers (Find-HpSupportProductOids,
+#               Select-HpSupportOs, Get-HpCvaInfo, Test-HpCvaAppliesToDevices)
+#               are covered by tests/fixtures.
+#           (2) Run duration now comes from a Stopwatch (Get-RunDurationSec).
+#               v1.29.0 moved the w32tm clock resync AFTER the start timestamp,
+#               so a machine whose clock was hours out reported 19-hour and
+#               77-hour durations in the sheet (three rows on 15 Sep 2026).
 # v1.29.1 - Analytics: the Dell per-SKU catalog CAB (served as e.g.
 #           Latitude_0B0B.cab) was recorded as a DRIVER download and sent to
 #           the sheet's driver_urls column (seen in the first two v1.29.0
@@ -1006,7 +1026,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.29.1"
+$SCRIPT_VERSION = "1.30.0"
 
 # =============================================================
 # TEMP RULE (v1.28.0) - CURRENTLY OFF (v1.28.1): when $true, the WINDOWS
@@ -2420,6 +2440,17 @@ function Test-Cancelled {
     return $false
 }
 
+function Get-RunDurationSec {
+    # v1.30.0 - Run duration from a monotonic stopwatch. Field rows in v1.29.x
+    # showed 19-hour and 77-hour "durations": the clock resync (w32tm) now
+    # runs after the start timestamp is taken, so a fresh image whose clock
+    # was hours out produced start-to-end wall-clock deltas that included the
+    # correction. Falls back to the wall clock only when the stopwatch is absent.
+    if ($script:AnalyticsStopwatch) { return [int]$script:AnalyticsStopwatch.Elapsed.TotalSeconds }
+    if ($script:AnalyticsStartTime) { return [int]((Get-Date) - $script:AnalyticsStartTime).TotalSeconds }
+    return 0
+}
+
 function Sync-BenchClock {
     # v1.29.0 - w32tm resync needs admin, so it runs here (after elevation)
     # instead of at script load. Skipped under -TestMode.
@@ -2603,7 +2634,7 @@ function Write-MissingDriverDetails {
         $name = if ($m.Name)         { $m.Name }
                 elseif ($m.Caption)  { $m.Caption }
                 else                 { '(unnamed device)' }
-        Log "  [ERR $($m.ConfigManagerErrorCode)] $name$(Get-ProblemCodeHint $m.ConfigManagerErrorCode)"
+        Log "  [ERR $([int]$m.ConfigManagerErrorCode)] $name$(Get-ProblemCodeHint $m.ConfigManagerErrorCode)"
         Log "    DeviceID:    $($m.DeviceID)"
         try {
             $pnp = Get-PnpDevice -InstanceId $m.DeviceID -EA Stop
@@ -2669,7 +2700,7 @@ function Invoke-ProblemDeviceRemediation {
                 elseif ($dev.Caption) { $dev.Caption }
                 else                  { '(unnamed device)' }
         $id = $dev.DeviceID
-        Log "  [ERR $($dev.ConfigManagerErrorCode)] $name"
+        Log "  [ERR $([int]$dev.ConfigManagerErrorCode)] $name"
         Log "    pnputil /restart-device `"$id`""
         $out = pnputil /restart-device "$id" 2>&1
         $rc  = $LASTEXITCODE
@@ -2789,9 +2820,7 @@ function Write-HtmlReport {
         [string]$Result
     )
     try {
-        $durationSec = if ($script:AnalyticsStartTime) {
-            [int]((Get-Date) - $script:AnalyticsStartTime).TotalSeconds
-        } else { 0 }
+        $durationSec = Get-RunDurationSec   # v1.30.0 - stopwatch, not wall clock
         $durationDisplay = if ($durationSec -ge 60) {
             "{0}m {1}s" -f ([math]::Floor($durationSec/60)), ($durationSec % 60)
         } else { "${durationSec}s" }
@@ -3200,7 +3229,7 @@ function Send-AnalyticsEvent {
     $script:AnalyticsEventSent = $true
     $durationSec = 0
     if ($script:AnalyticsStartTime) {
-        $durationSec = [int]((Get-Date) - $script:AnalyticsStartTime).TotalSeconds
+        $durationSec = Get-RunDurationSec   # v1.30.0 - stopwatch, not wall clock
     }
     # v1.11.0 - DRY helper. Was duplicated for installed_drivers; also used
     # for missing_after_list and (since v1.13.2) the driver_urls list. Strips
@@ -5919,6 +5948,285 @@ function Start-HpDriverInstall {
     return ($packResult -or $rescued)
 }
 
+# =========================
+# v1.30.0 - HP CONSUMER TIER (ENVY / Pavilion / OMEN / Spectre / Victus)
+# HP publishes reference catalogs (HPIA) and driver packs only for the
+# commercial lines, so a consumer unit reached this file with "no pack" and
+# was left to Windows Update. The support site has an undocumented JSON API
+# the drivers page itself uses (no cookies, no token; browser-style headers):
+#   1. searchresult  - product number (SystemSKUNumber) or model name -> product OID
+#   2. osVersionData - OID -> platformId + osTMSId for the Windows version
+#   3. driverDetails - POST -> every SoftPaq with title, version, URL, MD5, SSM flag
+# Each SoftPaq has a CVA text file next to it whose [Devices] section lists
+# PnP hardware IDs and whose [System Information] section lists SysIDs, so
+# SoftPaqs are matched to the machine's MISSING devices by hardware ID and
+# to the board by SysID, then installed through the same SHA256-verify ->
+# extract -> SilentInstall path as the commercial reference catalog.
+# Field trigger: HP ENVY x360 15-dr1xxx, five failed runs Aug-Sep 2026.
+# =========================
+$script:HpConsumerMaxSoftpaqs = 15
+$script:HpConsumerBudgetMB    = 1500
+
+function Invoke-HpSupportJson {
+    # GET (or POST when -Body is given) an HP support-site JSON endpoint via
+    # curl.exe. Returns the parsed object or $null. Never throws.
+    param([string]$Url, [string]$Body = $null, [int]$MaxTimeSec = 60)
+    $bodyFile = $null
+    try {
+        $args = @("--silent", "--location", "--max-time", "$MaxTimeSec", "--connect-timeout", "15",
+                  "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                  "-H", "Accept: application/json", "-H", "Accept-Language: en-US,en;q=0.9",
+                  "-H", "Referer: https://support.hp.com/us-en/drivers")
+        if ($null -ne $Body) {
+            $bodyFile = Join-Path $env:TEMP ("hp_support_body_" + [guid]::NewGuid().ToString("N") + ".json")
+            [System.IO.File]::WriteAllText($bodyFile, $Body, (New-Object System.Text.UTF8Encoding $false))
+            $args += @("-X", "POST", "-H", "Content-Type: application/json", "--data", "@$bodyFile")
+        }
+        $args += $Url
+        $raw = (& curl.exe @args 2>$null) -join "`n"
+        if (-not $raw) { return $null }
+        return ($raw | ConvertFrom-Json)
+    } catch {
+        Log-Diag "HP support JSON call failed: $($_.Exception.Message)"
+        return $null
+    } finally {
+        if ($bodyFile) { Remove-Item $bodyFile -Force -EA SilentlyContinue }
+    }
+}
+
+function Find-HpSupportProductOids {
+    # Pure: walk the searchresult categories -> subCategoryList -> productList
+    # tree and return @( @{ Name; Oid } ) for every /model/<oid> targetUrl.
+    param($SearchJson)
+    $found = New-Object System.Collections.ArrayList
+    $seen  = @{}
+    if (-not $SearchJson) { return @() }
+    $cats = $null
+    try { $cats = $SearchJson.data.kaaSResponse.data.searchResults.categories } catch {}
+    if (-not $cats) { return @() }
+    $walk = $null
+    $walk = {
+        param($node)
+        if (-not $node) { return }
+        foreach ($pr in @($node.productList)) {
+            if (-not $pr) { continue }
+            $u = [string]$pr.targetUrl
+            if ($u -match '/model/(\d+)') {
+                $oid = $Matches[1]
+                if (-not $seen.ContainsKey($oid)) {
+                    $seen[$oid] = $true
+                    [void]$found.Add(@{ Name = [string]$pr.productName; Oid = $oid })
+                }
+            }
+        }
+        foreach ($sc in @($node.subCategoryList)) { if ($sc) { & $walk $sc } }
+    }
+    foreach ($c in @($cats)) { & $walk $c }
+    return @($found.ToArray())
+}
+
+function Select-HpSupportOs {
+    # Pure: from osVersionData pick the Windows platform + version to query.
+    # Prefer the running generation (Windows 11 when build >= 22000) and the
+    # exact DisplayVersion; then the generic "(64-bit)" entry of that
+    # generation; then Windows 10 generic (HP consumer pages often stop at
+    # Windows 10 - the drivers still apply). Returns @{ PlatformId; OsTmsId;
+    # OsName } or $null.
+    param($OsJson, [bool]$IsWin11, [string]$DisplayVersion)
+    $plats = $null
+    try { $plats = @($OsJson.data.osAvailablePlatformsAnsOS.osPlatforms) } catch {}
+    if (-not $plats -or $plats.Count -eq 0) { return $null }
+    $win = $plats | Where-Object { [string]$_.name -match '(?i)windows' } | Select-Object -First 1
+    if (-not $win) { $win = $plats[0] }
+    $vers = @($win.osVersions | Where-Object { $_ -and $_.name -match '(?i)64' })
+    if ($vers.Count -eq 0) { return $null }
+    $gen = if ($IsWin11) { 'Windows 11' } else { 'Windows 10' }
+    $pick = $null
+    if ($DisplayVersion) { $pick = $vers | Where-Object { $_.name -match [regex]::Escape($gen) -and $_.name -match [regex]::Escape($DisplayVersion) } | Select-Object -First 1 }
+    if (-not $pick) { $pick = $vers | Where-Object { $_.name -match ('^' + [regex]::Escape($gen) + '\s*\(64-bit\)$') } | Select-Object -First 1 }
+    if (-not $pick) { $pick = $vers | Where-Object { $_.name -match [regex]::Escape($gen) } | Sort-Object { $_.name } -Descending | Select-Object -First 1 }
+    if (-not $pick) { $pick = $vers | Where-Object { $_.name -match '^Windows 10\s*\(64-bit\)$' } | Select-Object -First 1 }
+    if (-not $pick) { $pick = $vers | Sort-Object { $_.name } -Descending | Select-Object -First 1 }
+    return @{ PlatformId = [string]$win.id; OsTmsId = [string]$pick.id; OsName = [string]$pick.name }
+}
+
+function Get-HpCvaInfo {
+    # Pure: parse a SoftPaq CVA (INI-style text). Returns a hashtable with
+    # Title, Type, Category, Version, SoftpaqNumber, SHA256, MD5, SilentInstall,
+    # Devices (hardware IDs, upper-case) and SysIds (upper-case, no 0x).
+    param([string]$Text)
+    $info = @{ Title=""; Type=""; Category=""; Version=""; SoftpaqNumber=""; SHA256=""; MD5=""; SilentInstall=""; Devices=@(); SysIds=@() }
+    if (-not $Text) { return $info }
+    $section = ""
+    $devices = New-Object System.Collections.Generic.List[string]
+    $sysids  = New-Object System.Collections.Generic.List[string]
+    foreach ($rawLine in ($Text -split "`r?`n")) {
+        $line = $rawLine.Trim()
+        if (-not $line -or $line.StartsWith(';')) { continue }
+        if ($line -match '^\[(.+)\]$') { $section = $Matches[1]; continue }
+        $eq = $line.IndexOf('=')
+        if ($eq -lt 1) { continue }
+        $k = $line.Substring(0, $eq).Trim(); $v = $line.Substring($eq + 1).Trim()
+        switch ($section) {
+            'Software Title'     { if ($k -eq 'US') { $info.Title = $v } }
+            'General'            { switch ($k) { 'Type' { $info.Type = $v } 'Category' { $info.Category = $v } 'Version' { $info.Version = $v } } }
+            'Softpaq'            { switch ($k) { 'SoftpaqNumber' { $info.SoftpaqNumber = $v.ToLower() } 'SoftPaqSHA256' { $info.SHA256 = $v.ToUpper() } 'SoftPaqMD5' { $info.MD5 = $v.ToUpper() } } }
+            'Install Execution'  { if ($k -eq 'SilentInstall') { $info.SilentInstall = $v.Trim('"') } }
+            'Devices'            { $id = $k.Trim().ToUpper(); if ($id -and -not $devices.Contains($id)) { $devices.Add($id) } }
+            'System Information' { if ($k -match '^SysId\d+$') { $sid = $v.Trim().ToUpper() -replace '^0X', ''; if ($sid -and -not $sysids.Contains($sid)) { $sysids.Add($sid) } } }
+        }
+    }
+    $info.Devices = @($devices); $info.SysIds = @($sysids)
+    return $info
+}
+
+function Test-HpCvaAppliesToDevices {
+    # Pure: return the names of the missing devices this CVA's [Devices] list
+    # covers. A CVA id matches when it equals, or is a prefix of, one of the
+    # device's HardwareIDs/CompatibleIDs (CVAs usually omit &REV_xx). When the
+    # CVA names SysIds and the machine's SysId is not among them, nothing matches.
+    param([hashtable]$Cva, $MissingDevices, [string]$SysId)
+    $hits = New-Object System.Collections.Generic.List[string]
+    if (-not $Cva -or $Cva.Devices.Count -eq 0) { return @() }
+    if ($Cva.SysIds.Count -gt 0 -and $SysId) {
+        if ($Cva.SysIds -notcontains $SysId.Trim().ToUpper()) { return @() }
+    }
+    foreach ($dev in @($MissingDevices)) {
+        $ids = @()
+        if ($dev.HardwareIDs)   { $ids += @($dev.HardwareIDs) }
+        if ($dev.CompatibleIDs) { $ids += @($dev.CompatibleIDs) }
+        $idsU = @($ids | Where-Object { $_ } | ForEach-Object { ([string]$_).ToUpper() })
+        $hit = $false
+        foreach ($cid in $Cva.Devices) {
+            foreach ($u in $idsU) { if ($u -eq $cid -or $u.StartsWith($cid + '&')) { $hit = $true; break } }
+            if ($hit) { break }
+        }
+        if ($hit -and -not $hits.Contains([string]$dev.Name)) { $hits.Add([string]$dev.Name) }
+    }
+    return @($hits)
+}
+
+function Start-HpConsumerSupportInstall {
+    # Returns $true when at least one SoftPaq installed, else $false.
+    param([string]$DriverRoot, [string]$ModelName)
+    if ($script:TestMode) { Log "HP consumer tier skipped (TestMode)."; return $false }
+    if (Test-Cancelled) { return $false }
+    Log "=== HP CONSUMER TIER: support.hp.com driver list by product number ==="
+
+    $sysid = Get-HpSystemId
+    $missing = @(Get-HpMissingDevicesWithHwIds)
+    if ($missing.Count -eq 0) { Log "  No missing devices - nothing for the consumer tier to do."; return $false }
+
+    # 1. Product OID. The product number (e.g. 7XX12UA#ABA) is the exact key;
+    #    the WMI model name is the fallback and may return several SKUs.
+    $sku = ""
+    try { $sku = ([string](Get-CimInstance Win32_ComputerSystem -EA Stop).SystemSKUNumber).Trim() } catch {}
+    $sku = ($sku -split '#')[0].Trim()
+    $queries = @()
+    if ($sku)       { $queries += $sku }
+    if ($ModelName) { $queries += $ModelName }
+    # Collect product OIDs from BOTH searches (SKU first, then model name):
+    # an OID that resolves in the search can still answer an empty OS list,
+    # so every candidate gets a turn below.
+    $oids = @(); $seenOid = @{}
+    foreach ($q in $queries) {
+        if (Test-Cancelled) { return $false }
+        $enc = [uri]::EscapeDataString($q)
+        $sj  = Invoke-HpSupportJson -Url "https://support.hp.com/wcc-services/searchresult/us-en?q=$enc&context=pdp&navigation=false&authState=anonymous&template=Search"
+        $found = @(Find-HpSupportProductOids -SearchJson $sj)
+        Log "  Search '$q' -> $($found.Count) product match(es)."
+        foreach ($o in $found) { if (-not $seenOid[$o.Oid]) { $seenOid[$o.Oid] = $true; $oids += ,$o } }
+    }
+    if ($oids.Count -eq 0) { Log "  support.hp.com has no product entry for this machine."; return $false }
+
+    # 2. OS selection - the first OID whose OS list answers wins.
+    $isWin11 = $false; $displayVer = $null
+    try { $isWin11 = ([int](Get-CimInstance Win32_OperatingSystem -EA Stop).BuildNumber -ge 22000) } catch {}
+    try { $displayVer = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -EA Stop).DisplayVersion } catch {}
+    $osSel = $null; $oid = $null
+    foreach ($o in ($oids | Select-Object -First 6)) {
+        if (Test-Cancelled) { return $false }
+        $oj = Invoke-HpSupportJson -Url "https://support.hp.com/wcc-services/swd-v2/osVersionData?cc=us&lc=en&productOid=$($o.Oid)&authState=anonymous&template=SWDSeriesDownload"
+        $osSel = Select-HpSupportOs -OsJson $oj -IsWin11 $isWin11 -DisplayVersion $displayVer
+        if ($osSel) { $oid = $o.Oid; Log "  Product '$($o.Name)' (OID $oid) -> $($osSel.OsName)"; break }
+    }
+    if (-not $osSel) { Log "  No OS list for any matched product - giving up on the consumer tier."; return $false }
+
+    # 3. Driver list.
+    $body = '{"productLineCode":"","lc":"en","cc":"us","osTMSId":"' + $osSel.OsTmsId + '","osName":"' + ($osSel.OsName -replace '"','') + '","productSeriesOid":"' + $oid + '","platformId":"' + $osSel.PlatformId + '"}'
+    $dj = Invoke-HpSupportJson -Url "https://support.hp.com/wcc-services/swd-v2/driverDetails?authState=anonymous&template=SWDSeriesDownload" -Body $body
+    $drivers = New-Object System.Collections.Generic.List[object]
+    try {
+        foreach ($t in @($dj.data.softwareTypes)) {
+            foreach ($d in @($t.softwareDriversList)) {
+                $l = $d.latestVersionDriver
+                if (-not $l -or -not $l.fileUrl) { continue }
+                $drivers.Add(@{ Title=[string]$l.title; Version=[string]$l.version; Url=[string]$l.fileUrl; Ssm=[bool]$l.ssmCompliant; Size=[long]$l.fileSize; Type=[string]$t.accordionNameEn }) | Out-Null
+            }
+        }
+    } catch {}
+    Log "  Driver list: $($drivers.Count) SoftPaq(s) published for this product."
+    if ($drivers.Count -eq 0) { return $false }
+
+    # 4. CVA match against the missing devices. One small CVA download per
+    #    candidate; utilities, BIOS and anything without a [Devices] list drop out.
+    $matched = @{}   # softpaq id -> entry
+    $ci = 0
+    foreach ($d in $drivers) {
+        if (Test-Cancelled) { return $false }
+        if (-not $d.Ssm) { continue }
+        if ($d.Url -notmatch '(?i)/(sp\d+)\.exe$') { continue }
+        $spId   = $Matches[1].ToLower()
+        $cvaUrl = $d.Url -replace '(?i)\.exe$', '.cva'
+        $ci++
+        SetDownload -Pct -1 -Label "Checking SoftPaq metadata $ci/$($drivers.Count)..."
+        $cvaText = ""
+        try { $cvaText = (& curl.exe --silent --location --max-time 30 --connect-timeout 10 --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" "$cvaUrl" 2>$null) -join "`n" } catch {}
+        if (-not $cvaText) { continue }
+        $cva = Get-HpCvaInfo -Text $cvaText
+        if ($cva.Type -and $cva.Type -notmatch '(?i)driver') { continue }
+        $hits = @(Test-HpCvaAppliesToDevices -Cva $cva -MissingDevices $missing -SysId $sysid)
+        if ($hits.Count -eq 0) { continue }
+        $key = ($d.Title -replace '\s*\(.*$', '').Trim().ToLower()
+        $prev = $matched[$key]
+        $newer = $true
+        if ($prev) {
+            try { $newer = ([version]$d.Version -gt [version]$prev.Version) } catch { $newer = ($d.Version -gt $prev.Version) }
+        }
+        if (-not $prev -or $newer) {
+            $matched[$key] = @{ Id=$spId; Name=$d.Title; Version=$d.Version; Category=$cva.Category; Url=$d.Url; SHA256=$cva.SHA256; Size=$d.Size; SilentInstall=$cva.SilentInstall; Devices=$hits }
+        }
+    }
+    $sps = @($matched.Values)
+    if ($sps.Count -eq 0) { Log "  No SoftPaq covers a missing device on this machine."; return $false }
+    $sps = @($sps | Sort-Object { $_.Name } | Select-Object -First $script:HpConsumerMaxSoftpaqs)
+    $totalMB = [math]::Round((($sps | Measure-Object -Property Size -Sum).Sum) / 1MB, 1)
+    Log "  $($sps.Count) SoftPaq(s) match missing devices ($totalMB MB):"
+    foreach ($sp in $sps) { Log "    $($sp.Id)  $($sp.Name) v$($sp.Version)  -> $($sp.Devices -join ', ')" }
+    if ($totalMB -gt $script:HpConsumerBudgetMB) { Log "  Total exceeds the $($script:HpConsumerBudgetMB) MB budget - skipping the consumer tier."; return $false }
+
+    # 5. Download in parallel, then SHA256-verify / extract / silent-install serially
+    #    through the same helper the commercial catalog uses.
+    if (-not (Test-Path $DriverRoot)) { New-Item -Path $DriverRoot -ItemType Directory -Force | Out-Null }
+    $dlItems = New-Object 'System.Collections.Generic.List[hashtable]'
+    foreach ($sp in $sps) { $dlItems.Add(@{ Url = $sp.Url; OutFile = (Get-HpSoftpaqOutFile -Sp $sp -DriverRoot $DriverRoot); Label = "$($sp.Id) - $($sp.Name)" }) | Out-Null }
+    $dlResults = Invoke-CurlDownloadParallel -Items $dlItems
+    if (Test-Cancelled) { return $false }
+    $okIds = @{}
+    foreach ($r in $dlResults) { if ($r.Success) { $okIds[[System.IO.Path]::GetFileNameWithoutExtension($r.Item.OutFile)] = $true } }
+    $ready = @($sps | Where-Object { $okIds[$_.Id] })
+    $okCount = 0; $i = 0
+    foreach ($sp in $ready) {
+        $i++
+        if (Test-Cancelled) { return ($okCount -gt 0) }
+        if (-not $sp.SHA256) { Log "  $($sp.Id): CVA carries no SHA256 - not installing an unverified package."; continue }
+        if (Install-HpSoftpaqPostDownload -Sp $sp -DriverRoot $DriverRoot -Index $i -Total $ready.Count) { $okCount++ }
+    }
+    Log "  HP consumer tier: installed $okCount of $($ready.Count) SoftPaq(s)."
+    if ($okCount -gt 0) { try { $null = pnputil /scan-devices 2>&1 } catch {} }
+    return ($okCount -gt 0)
+}
+
 function Start-HpFullPackInstall {
     # v1.26.0 - the HP Driver Pack Matrix scrape + full-pack install, extracted
     # verbatim from Start-HpDriverInstall so the known-device rescue tier can run
@@ -6024,6 +6332,9 @@ function Start-HpFullPackInstall {
     if (Test-Cancelled) { return $false }
     if (-not $packUrl) {
         Log "Model '$ModelName' not found in HP Driver Pack Matrix."
+        # v1.30.0 - consumer lines (ENVY/Pavilion/OMEN/Spectre/Victus) never
+        # appear in the matrix: try the support-site tier before giving up.
+        if (Start-HpConsumerSupportInstall -DriverRoot $DriverRoot -ModelName $ModelName) { return $true }
         Log "Opening HP Driver Pack Matrix for manual selection..."
         Start-Process $matrixUrl
         return $false
@@ -8430,6 +8741,7 @@ function Start-Install {
     $script:AnalyticsInstalledDrivers = New-Object System.Collections.Generic.List[string]
     $script:AnalyticsDownloadUrls    = New-Object System.Collections.Generic.List[hashtable]   # v1.13.1
     $script:AnalyticsStartTime       = Get-Date
+    $script:AnalyticsStopwatch       = [System.Diagnostics.Stopwatch]::StartNew()   # v1.30.0 - duration survives a clock resync mid-run
     $script:7zInstalled              = $false
     $script:HtmlReportWritten        = $false   # v1.17.0 - crash-handler guards
     $script:AnalyticsEventSent       = $false
