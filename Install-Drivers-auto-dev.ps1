@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.30.3 (keep in sync with $SCRIPT_VERSION below)
+# Version: 1.30.4 (keep in sync with $SCRIPT_VERSION below)
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -74,6 +74,20 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.30.4 - HP consumer tier: first successful field run (ENVY 15-dr1xxx,
+#           run 20260916_111036: 5 of 5 matched SoftPaqs installed, missing
+#           8 -> 6) showed four gaps, all fixed:
+#           (1) Codecs enumerate as INTELAUDIO\FUNC_01&.. when the Intel Smart
+#               Sound controller is bound, but HP CVAs list them as HDAUDIO\..
+#               - the buses are now treated as one (ConvertTo-HpMatchId).
+#           (2) Smart Sound DSP and ISH sensor devices are children whose
+#               packages name the PCI PARENT; ancestor hardware IDs now take
+#               part in the match (Get-DeviceParentHardwareIds).
+#           (3) Three fingerprint packages matched one sensor and were run
+#               newest-first-then-older (sensor ended at code 31); now only
+#               the newest package per device is kept (Select-HpConsumerSoftpaqs).
+#           (4) Both NVIDIA downloads died mid-transfer (curl 56); failed
+#               items get one serial, resumable retry. Size total fixed (was 0 MB).
 # v1.30.3 - HP consumer tier ROOT CAUSE (run 20260916_110525 logged it:
 #           "Method 'POST' is not supported", 405). Invoke-HpSupportJson sent
 #           every GET as a POST because [string]$Body = $null is "" and the
@@ -1050,7 +1064,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.30.3"
+$SCRIPT_VERSION = "1.30.4"
 
 # =============================================================
 # TEMP RULE (v1.28.0) - CURRENTLY OFF (v1.28.1): when $true, the WINDOWS
@@ -6159,30 +6173,86 @@ function Get-HpCvaInfo {
     return $info
 }
 
+function ConvertTo-HpMatchId {
+    # Pure: normalise a PnP id for CVA matching. Upper-case, and treat the
+    # INTELAUDIO bus as HDAUDIO: HP CVAs list codecs as HDAUDIO\FUNC_01&VEN_..
+    # while a machine whose Intel Smart Sound controller is bound enumerates
+    # the same codec as INTELAUDIO\FUNC_01&VEN_.. (ENVY run 20260916_111036).
+    param([string]$Id)
+    $u = ([string]$Id).Trim().ToUpper()
+    if ($u.StartsWith('INTELAUDIO\')) { $u = 'HDAUDIO\' + $u.Substring(11) }
+    return $u
+}
+
 function Test-HpCvaAppliesToDevices {
     # Pure: return the names of the missing devices this CVA's [Devices] list
     # covers. A CVA id matches when it equals, or is a prefix of, one of the
-    # device's HardwareIDs/CompatibleIDs (CVAs usually omit &REV_xx). When the
-    # CVA names SysIds and the machine's SysId is not among them, nothing matches.
+    # device's HardwareIDs / CompatibleIDs / ParentHardwareIDs (CVAs usually
+    # omit &REV_xx; a child device such as the Smart Sound DSP or the ISH
+    # sensor bus is covered by the package that names its PCI parent). When
+    # the CVA names SysIds and the machine's SysId is not among them, nothing
+    # matches.
     param([hashtable]$Cva, $MissingDevices, [string]$SysId)
     $hits = New-Object System.Collections.Generic.List[string]
     if (-not $Cva -or $Cva.Devices.Count -eq 0) { return @() }
     if ($Cva.SysIds.Count -gt 0 -and $SysId) {
         if ($Cva.SysIds -notcontains $SysId.Trim().ToUpper()) { return @() }
     }
+    $cvaIds = @($Cva.Devices | ForEach-Object { ConvertTo-HpMatchId $_ })
     foreach ($dev in @($MissingDevices)) {
         $ids = @()
-        if ($dev.HardwareIDs)   { $ids += @($dev.HardwareIDs) }
-        if ($dev.CompatibleIDs) { $ids += @($dev.CompatibleIDs) }
-        $idsU = @($ids | Where-Object { $_ } | ForEach-Object { ([string]$_).ToUpper() })
+        if ($dev.HardwareIDs)       { $ids += @($dev.HardwareIDs) }
+        if ($dev.CompatibleIDs)     { $ids += @($dev.CompatibleIDs) }
+        if ($dev.ParentHardwareIDs) { $ids += @($dev.ParentHardwareIDs) }
+        $idsU = @($ids | Where-Object { $_ } | ForEach-Object { ConvertTo-HpMatchId $_ })
         $hit = $false
-        foreach ($cid in $Cva.Devices) {
+        foreach ($cid in $cvaIds) {
             foreach ($u in $idsU) { if ($u -eq $cid -or $u.StartsWith($cid + '&')) { $hit = $true; break } }
             if ($hit) { break }
         }
         if ($hit -and -not $hits.Contains([string]$dev.Name)) { $hits.Add([string]$dev.Name) }
     }
     return @($hits)
+}
+
+function Get-DeviceParentHardwareIds {
+    # Windows-only: hardware IDs of the device's ancestors (up to 3 levels),
+    # read from the registry via DEVPKEY_Device_Parent. Empty on any failure.
+    param([string]$InstanceId, [int]$MaxDepth = 3)
+    $out = @()
+    $current = $InstanceId
+    for ($d = 0; $d -lt $MaxDepth -and $current; $d++) {
+        $parent = $null
+        try { $parent = (Get-PnpDeviceProperty -InstanceId $current -KeyName 'DEVPKEY_Device_Parent' -EA Stop).Data } catch {}
+        if (-not $parent) { break }
+        try { $out += @((Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Enum\$parent" -EA Stop).HardwareID) } catch {}
+        $current = $parent
+    }
+    return @($out | Where-Object { $_ })
+}
+
+function Select-HpConsumerSoftpaqs {
+    # Pure: from CVA-matched candidates (@{ Id; Name; Version; Devices=@(names) ...})
+    # keep, for EACH missing device, only the newest package that covers it,
+    # then return the distinct winners. The first field run installed three
+    # fingerprint packages for one sensor, newest first and older ones after
+    # it, which left the sensor at code 31.
+    param($Candidates)
+    $best = @{}   # device name -> candidate
+    foreach ($c in @($Candidates)) {
+        if (-not $c) { continue }
+        foreach ($devName in @($c.Devices)) {
+            $prev = $best[$devName]
+            $newer = $true
+            if ($prev) {
+                try { $newer = ([version]$c.Version -gt [version]$prev.Version) } catch { $newer = ([string]$c.Version -gt [string]$prev.Version) }
+            }
+            if (-not $prev -or $newer) { $best[$devName] = $c }
+        }
+    }
+    $winners = @{}
+    foreach ($c in $best.Values) { if (-not $winners.ContainsKey($c.Id)) { $winners[$c.Id] = $c } }
+    return @($winners.Values | Sort-Object { $_.Name })
 }
 
 function Start-HpConsumerSupportInstall {
@@ -6195,6 +6265,13 @@ function Start-HpConsumerSupportInstall {
     $sysid = Get-HpSystemId
     $missing = @(Get-HpMissingDevicesWithHwIds)
     if ($missing.Count -eq 0) { Log "  No missing devices - nothing for the consumer tier to do."; return $false }
+    # v1.30.4 - add each missing device's ancestor hardware IDs so a package
+    # that names the PCI parent (Smart Sound, ISH) matches its stranded child.
+    foreach ($dev in $missing) {
+        $pids = @()
+        try { $pids = @(Get-DeviceParentHardwareIds -InstanceId $dev.DeviceID) } catch {}
+        $dev | Add-Member -NotePropertyName ParentHardwareIDs -NotePropertyValue $pids -Force
+    }
 
     # 1. Product OID. The product number (e.g. 7XX12UA#ABA) is the exact key;
     #    the WMI model name is the fallback and may return several SKUs.
@@ -6249,7 +6326,7 @@ function Start-HpConsumerSupportInstall {
 
     # 4. CVA match against the missing devices. One small CVA download per
     #    candidate; utilities, BIOS and anything without a [Devices] list drop out.
-    $matched = @{}   # softpaq id -> entry
+    $candidates = New-Object System.Collections.Generic.List[object]
     $ci = 0
     foreach ($d in $drivers) {
         if (Test-Cancelled) { return $false }
@@ -6266,20 +6343,15 @@ function Start-HpConsumerSupportInstall {
         if ($cva.Type -and $cva.Type -notmatch '(?i)driver') { continue }
         $hits = @(Test-HpCvaAppliesToDevices -Cva $cva -MissingDevices $missing -SysId $sysid)
         if ($hits.Count -eq 0) { continue }
-        $key = ($d.Title -replace '\s*\(.*$', '').Trim().ToLower()
-        $prev = $matched[$key]
-        $newer = $true
-        if ($prev) {
-            try { $newer = ([version]$d.Version -gt [version]$prev.Version) } catch { $newer = ($d.Version -gt $prev.Version) }
-        }
-        if (-not $prev -or $newer) {
-            $matched[$key] = @{ Id=$spId; Name=$d.Title; Version=$d.Version; Category=$cva.Category; Url=$d.Url; SHA256=$cva.SHA256; Size=$d.Size; SilentInstall=$cva.SilentInstall; Devices=$hits }
-        }
+        $ver = ($d.Version -replace '\s+Rev\..*$', '').Trim()   # "6.0.60.1111 Rev.H" -> "6.0.60.1111"
+        $candidates.Add(@{ Id=$spId; Name=$d.Title; Version=$ver; Category=$cva.Category; Url=$d.Url; SHA256=$cva.SHA256; Size=$d.Size; SilentInstall=$cva.SilentInstall; Devices=$hits }) | Out-Null
     }
-    $sps = @($matched.Values)
-    if ($sps.Count -eq 0) { Log "  No SoftPaq covers a missing device on this machine."; return $false }
-    $sps = @($sps | Sort-Object { $_.Name } | Select-Object -First $script:HpConsumerMaxSoftpaqs)
-    $totalMB = [math]::Round((($sps | Measure-Object -Property Size -Sum).Sum) / 1MB, 1)
+    if ($candidates.Count -eq 0) { Log "  No SoftPaq covers a missing device on this machine."; return $false }
+    Log "  $($candidates.Count) SoftPaq(s) cover a missing device; keeping the newest per device."
+    $sps = @(Select-HpConsumerSoftpaqs -Candidates $candidates | Select-Object -First $script:HpConsumerMaxSoftpaqs)
+    $totalBytes = 0L
+    foreach ($sp in $sps) { $totalBytes += [long]$sp.Size }
+    $totalMB = [math]::Round($totalBytes / 1MB, 1)
     Log "  $($sps.Count) SoftPaq(s) match missing devices ($totalMB MB):"
     foreach ($sp in $sps) { Log "    $($sp.Id)  $($sp.Name) v$($sp.Version)  -> $($sp.Devices -join ', ')" }
     if ($totalMB -gt $script:HpConsumerBudgetMB) { Log "  Total exceeds the $($script:HpConsumerBudgetMB) MB budget - skipping the consumer tier."; return $false }
@@ -6293,6 +6365,14 @@ function Start-HpConsumerSupportInstall {
     if (Test-Cancelled) { return $false }
     $okIds = @{}
     foreach ($r in $dlResults) { if ($r.Success) { $okIds[[System.IO.Path]::GetFileNameWithoutExtension($r.Item.OutFile)] = $true } }
+    # v1.30.4 - one serial, resumable retry for anything the parallel batch lost
+    # (field: both NVIDIA packages died with curl exit 56 mid-transfer).
+    foreach ($sp in $sps) {
+        if ($okIds[$sp.Id]) { continue }
+        if (Test-Cancelled) { return $false }
+        Log "  Retrying $($sp.Id) ($($sp.Name)) serially..."
+        if (Invoke-CurlDownload -Url $sp.Url -OutFile (Get-HpSoftpaqOutFile -Sp $sp -DriverRoot $DriverRoot)) { $okIds[$sp.Id] = $true }
+    }
     $ready = @($sps | Where-Object { $okIds[$_.Id] })
     $okCount = 0; $i = 0
     foreach ($sp in $ready) {

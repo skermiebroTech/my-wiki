@@ -20,7 +20,7 @@ $ErrorActionPreference = 'Stop'
 # script's main body creates a WinForms form, so it cannot be dot-sourced here).
 $tok=$null;$err=$null
 $ast=[System.Management.Automation.Language.Parser]::ParseFile($ScriptPath,[ref]$tok,[ref]$err)
-$want='Invoke-HpSupportJson','ConvertFrom-HpJson','ConvertTo-HpBytes','Find-HpSupportProductOids','Select-HpSupportOs','Get-HpCvaInfo','Test-HpCvaAppliesToDevices','Get-MsCatalogResultRows','Select-MsCatalogDriverGuid','Find-DellIndexManifestPath','Test-DellOsCode','Test-DellOsArch','Test-ActionableProblemCode','Get-ProblemCodeHint','Select-HpDriverPack','Find-DellCatalogDeviceMatches'
+$want='ConvertTo-HpMatchId','Select-HpConsumerSoftpaqs','Invoke-HpSupportJson','ConvertFrom-HpJson','ConvertTo-HpBytes','Find-HpSupportProductOids','Select-HpSupportOs','Get-HpCvaInfo','Test-HpCvaAppliesToDevices','Get-MsCatalogResultRows','Select-MsCatalogDriverGuid','Find-DellIndexManifestPath','Test-DellOsCode','Test-DellOsArch','Test-ActionableProblemCode','Get-ProblemCodeHint','Select-HpDriverPack','Find-DellCatalogDeviceMatches'
 foreach ($f in $ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst]},$true)) {
     if ($want -contains $f.Name) { Invoke-Expression $f.Extent.Text }
 }
@@ -124,6 +124,19 @@ $devs = @([pscustomobject]@{ Name='Synaptics WBDI'; HardwareIDs=@('USB\VID_06CB&
           [pscustomobject]@{ Name='Other'; HardwareIDs=@('PCI\VEN_8086&DEV_51F0'); CompatibleIDs=@() })
 Check "CVA matches the fingerprint device by prefix" (@(Test-HpCvaAppliesToDevices -Cva $cva -MissingDevices $devs -SysId '8830') -eq @('Synaptics WBDI'))
 Check "CVA rejects a machine whose SysId is not listed" (@(Test-HpCvaAppliesToDevices -Cva $cva -MissingDevices $devs -SysId '9999').Count -eq 0)
+$cvaAudio = @{ Devices=@('HDAUDIO\FUNC_01&VEN_10EC&DEV_0285&SUBSYS_103C86B2'); SysIds=@('86B2') }
+$devAudio = @([pscustomobject]@{ Name='Intel High Definition Audio'; HardwareIDs=@('INTELAUDIO\FUNC_01&VEN_10EC&DEV_0285&SUBSYS_103C86B2&REV_1000','INTELAUDIO\FUNC_01&VEN_10EC&DEV_0285&SUBSYS_103C86B2'); CompatibleIDs=@() })
+Check "INTELAUDIO codec matches an HDAUDIO CVA id" (@(Test-HpCvaAppliesToDevices -Cva $cvaAudio -MissingDevices $devAudio -SysId '86B2').Count -eq 1)
+$cvaSst = @{ Devices=@('PCI\VEN_8086&DEV_02C8&SUBSYS_86B2103C'); SysIds=@() }
+$devDsp = @([pscustomobject]@{ Name='Intel High Definition DSP'; HardwareIDs=@('INTELAUDIO\DSP_CTLR_DEV_02C8&VEN_8086&DEV_0222'); CompatibleIDs=@(); ParentHardwareIDs=@('PCI\VEN_8086&DEV_02C8&SUBSYS_86B2103C&REV_00') })
+Check "child DSP device matches via its PCI parent id" (@(Test-HpCvaAppliesToDevices -Cva $cvaSst -MissingDevices $devDsp -SysId '86B2').Count -eq 1)
+$cands = @(@{ Id='sp138969'; Name='Synaptics Fingerprint Driver'; Version='6.0.60.1111'; Devices=@('WBDI') },
+           @{ Id='sp98600';  Name='Synaptics Fingerprint Driver - Comet Lake'; Version='6.0.20.1111'; Devices=@('WBDI') },
+           @{ Id='sp105483'; Name='Synaptics Fingerprint Sensor Driver'; Version='6.0.39.1111'; Devices=@('WBDI') },
+           @{ Id='sp111684'; Name='NVIDIA Graphics Driver'; Version='27.21.14.5206'; Devices=@('3D Video Controller') },
+           @{ Id='sp100206'; Name='NVIDIA Graphics Driver - Comet Lake'; Version='26.21.14.3198'; Devices=@('3D Video Controller') })
+$win = @(Select-HpConsumerSoftpaqs -Candidates $cands)
+Check "newest package per device: 2 winners (sp138969, sp111684)" ($win.Count -eq 2 -and @($win | Where-Object { $_.Id -eq 'sp138969' }).Count -eq 1 -and @($win | Where-Object { $_.Id -eq 'sp111684' }).Count -eq 1)
 Check "CVA with no SysId check still matches" (@(Test-HpCvaAppliesToDevices -Cva $cva -MissingDevices $devs -SysId '').Count -eq 1)
 ""
 "passed: $pass  failed: $fail"
