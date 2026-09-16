@@ -20,11 +20,15 @@ $ErrorActionPreference = 'Stop'
 # script's main body creates a WinForms form, so it cannot be dot-sourced here).
 $tok=$null;$err=$null
 $ast=[System.Management.Automation.Language.Parser]::ParseFile($ScriptPath,[ref]$tok,[ref]$err)
-$want='ConvertTo-HpBytes','Find-HpSupportProductOids','Select-HpSupportOs','Get-HpCvaInfo','Test-HpCvaAppliesToDevices','Get-MsCatalogResultRows','Select-MsCatalogDriverGuid','Find-DellIndexManifestPath','Test-DellOsCode','Test-DellOsArch','Test-ActionableProblemCode','Get-ProblemCodeHint','Select-HpDriverPack','Find-DellCatalogDeviceMatches'
+$want='Invoke-HpSupportJson','ConvertFrom-HpJson','ConvertTo-HpBytes','Find-HpSupportProductOids','Select-HpSupportOs','Get-HpCvaInfo','Test-HpCvaAppliesToDevices','Get-MsCatalogResultRows','Select-MsCatalogDriverGuid','Find-DellIndexManifestPath','Test-DellOsCode','Test-DellOsArch','Test-ActionableProblemCode','Get-ProblemCodeHint','Select-HpDriverPack','Find-DellCatalogDeviceMatches'
 foreach ($f in $ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst]},$true)) {
     if ($want -contains $f.Name) { Invoke-Expression $f.Extent.Text }
 }
-function Log { param([string]$msg,$Level,$Event,$Context) }   # stub
+function Log { param([string]$msg,$Level,$Event,$Context) $script:LogLines += $msg }   # stub
+function Log-Diag { param([string]$msg,$Context) }
+$script:LogLines = @()
+if (-not $env:TEMP) { $env:TEMP = [System.IO.Path]::GetTempPath() }
+if (-not (Get-Command curl.exe -EA SilentlyContinue)) { function curl.exe { & (Get-Command curl -CommandType Application | Select-Object -First 1).Source @args } }   # macOS/Linux shim for the real-call tests
 $script:IgnoredProblemCodes = @(22, 24, 29, 45, 46, 53, 55)
 $pass=0;$fail=0
 function Check($name,$cond){ if($cond){$script:pass++; "  ok   $name"} else {$script:fail++; "  FAIL $name"} }
@@ -99,6 +103,12 @@ $rawTxt = Get-Content (Join-Path $Fixtures 'hp-support-search-model.json') -Raw
 $oidsRaw = @(Find-HpSupportProductOids -SearchJson $rawTxt)
 Check "raw-text search yields the same OIDs as the object walk" ($oidsRaw.Count -eq $oids.Count -and $oidsRaw[0].Oid -eq $oids[0].Oid)
 $rawTxt2 = Get-Content (Join-Path $Fixtures 'hp-support-search-product.json') -Raw
+# Real call through curl against a local file: proves the GET path, the -AsText switch and the body check.
+$fileUrl = "file://" + ((Resolve-Path (Join-Path $Fixtures 'hp-support-search-product.json')).Path -replace '\\','/' -replace '^([A-Za-z]):','/$1:')
+$script:LogLines = @()
+$viaHelper = Invoke-HpSupportJson -AsText -Url $fileUrl
+Check "Invoke-HpSupportJson -AsText returns the file text with no error" ($viaHelper -is [string] -and $viaHelper.Length -gt 500 -and @($script:LogLines | Where-Object { $_ -match 'failed|not JSON|empty' }).Count -eq 0)
+Check "Invoke-HpSupportJson GET parses to an object" ((Invoke-HpSupportJson -Url $fileUrl).data.kaaSResponse.code -eq 200)
 Check "raw-text product search yields OID 31291399" (@(Find-HpSupportProductOids -SearchJson $rawTxt2 | Where-Object { $_.Oid -eq '31291399' }).Count -eq 1)
 $oj = Get-Content (Join-Path $Fixtures 'hp-support-osVersionData.json') -Raw | ConvertFrom-Json
 $os = Select-HpSupportOs -OsJson $oj -IsWin11 $true -DisplayVersion '24H2'

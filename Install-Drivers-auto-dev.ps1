@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.30.2 (keep in sync with $SCRIPT_VERSION below)
+# Version: 1.30.3 (keep in sync with $SCRIPT_VERSION below)
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -74,6 +74,12 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.30.3 - HP consumer tier ROOT CAUSE (run 20260916_110525 logged it:
+#           "Method 'POST' is not supported", 405). Invoke-HpSupportJson sent
+#           every GET as a POST because [string]$Body = $null is "" and the
+#           `$null -ne $Body` test was always true; and its -Raw switch collided
+#           with the local $raw response variable. Present since v1.30.0. The
+#           tests now call the helper for real against a local file URL.
 # v1.30.2 - HP consumer tier, second field fix (run 20260916_103331: the
 #           call now reached HP and parsed, but 0 products were found). The
 #           v1.30.1 JavaScriptSerializer path returns Dictionary objects on
@@ -1044,7 +1050,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.30.2"
+$SCRIPT_VERSION = "1.30.3"
 
 # =============================================================
 # TEMP RULE (v1.28.0) - CURRENTLY OFF (v1.28.1): when $true, the WINDOWS
@@ -6023,14 +6029,19 @@ function Invoke-HpSupportJson {
     # for a query that answers from a workstation: the helper used the
     # automatic $args variable for its argument list and swallowed the parse
     # error. Renamed, raw size + failure reason now logged, large-JSON safe.
-    param([string]$Url, [string]$Body = $null, [int]$MaxTimeSec = 60, [switch]$Raw)
+    # v1.30.3 - [string]$Body = $null becomes "" (a typed string param cannot
+    # hold $null), so `$null -ne $Body` was ALWAYS true and every search went
+    # out as a POST (HP: 405 Method Not Allowed). And the -Raw switch shared
+    # its name with the local response variable, so the assignment threw.
+    # Root cause of every 0-match run since v1.30.0.
+    param([string]$Url, [string]$Body = "", [int]$MaxTimeSec = 60, [switch]$AsText)
     $bodyFile = $null
     try {
         $curlArgs = @("--silent", "--location", "--max-time", "$MaxTimeSec", "--connect-timeout", "15",
                       "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
                       "-H", "Accept: application/json", "-H", "Accept-Language: en-US,en;q=0.9",
                       "-H", "Referer: https://support.hp.com/us-en/drivers")
-        if ($null -ne $Body) {
+        if ($Body) {
             $bodyFile = Join-Path $env:TEMP ("hp_support_body_" + [guid]::NewGuid().ToString("N") + ".json")
             [System.IO.File]::WriteAllText($bodyFile, $Body, (New-Object System.Text.UTF8Encoding $false))
             $curlArgs += @("-X", "POST", "-H", "Content-Type: application/json", "--data", "@$bodyFile")
@@ -6040,13 +6051,13 @@ function Invoke-HpSupportJson {
         $null = & curl.exe @curlArgs 2>$null
         $rc = $LASTEXITCODE
         if (-not (Test-Path $outFile)) { Log "  support.hp.com: no response (curl exit $rc) for $Url"; return $null }
-        $raw = [System.IO.File]::ReadAllText($outFile, (New-Object System.Text.UTF8Encoding $false))
+        $text = [System.IO.File]::ReadAllText($outFile, (New-Object System.Text.UTF8Encoding $false))
         Remove-Item $outFile -Force -EA SilentlyContinue
-        Log-Diag "support.hp.com: $([math]::Round($raw.Length/1KB)) KB, curl exit $rc, $Url"
-        if (-not $raw) { Log "  support.hp.com: empty response (curl exit $rc)"; return $null }
-        if ($Raw) { return $raw }   # v1.30.2 - callers that regex the text
-        $obj = ConvertFrom-HpJson -Raw $raw
-        if ($null -eq $obj) { Log "  support.hp.com: response was not JSON ($([math]::Round($raw.Length/1KB)) KB, starts '$($raw.Substring(0, [math]::Min(60, $raw.Length)) -replace '\s+',' ')')" }
+        Log-Diag "support.hp.com: $([math]::Round($text.Length/1KB)) KB, curl exit $rc, $Url"
+        if (-not $text) { Log "  support.hp.com: empty response (curl exit $rc)"; return $null }
+        if ($AsText) { return $text }   # callers that regex the text
+        $obj = ConvertFrom-HpJson -Raw $text
+        if ($null -eq $obj) { Log "  support.hp.com: response was not JSON ($([math]::Round($text.Length/1KB)) KB, starts '$($text.Substring(0, [math]::Min(60, $text.Length)) -replace '\s+',' ')')" }
         return $obj
     } catch {
         Log "  support.hp.com call failed: $($_.Exception.Message)"
@@ -6200,7 +6211,7 @@ function Start-HpConsumerSupportInstall {
     foreach ($q in $queries) {
         if (Test-Cancelled) { return $false }
         $enc = [uri]::EscapeDataString($q)
-        $sj  = Invoke-HpSupportJson -Raw -Url "https://support.hp.com/wcc-services/searchresult/us-en?q=$enc&context=pdp&navigation=false&authState=anonymous&template=Search"
+        $sj  = Invoke-HpSupportJson -AsText -Url "https://support.hp.com/wcc-services/searchresult/us-en?q=$enc&context=pdp&navigation=false&authState=anonymous&template=Search"
         $found = @(Find-HpSupportProductOids -SearchJson $sj)
         Log "  Search '$q' -> $($found.Count) product match(es) ($([math]::Round(([string]$sj).Length/1KB)) KB answer)."
         foreach ($o in $found) { if (-not $seenOid[$o.Oid]) { $seenOid[$o.Oid] = $true; $oids += ,$o } }
