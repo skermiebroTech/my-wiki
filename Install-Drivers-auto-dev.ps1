@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.30.5 (keep in sync with $SCRIPT_VERSION below)
+# Version: 1.30.6 (keep in sync with $SCRIPT_VERSION below)
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -74,6 +74,11 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.30.6 - MS Update Catalog fallback: a single resolved .cab URL came back
+#           unrolled to a string, so $urls[0] was the letter "h" and curl
+#           failed with exit 6 (run 20260916_134241, Synaptics WBDI). The
+#           caller now wraps the result in @(), and the URL parse is a pure
+#           function (Get-MsCatalogCabUrls) with a test. Same bug is in prod.
 # v1.30.5 - HP consumer tier CRASH FIX (run 20260916_112743 aborted with
 #           "Argument types do not match" at foreach ($c in @($Candidates))).
 #           A List[object] made with New-Object comes back wrapped in a
@@ -1072,7 +1077,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.30.5"
+$SCRIPT_VERSION = "1.30.6"
 
 # =============================================================
 # TEMP RULE (v1.28.0) - CURRENTLY OFF (v1.28.1): when $true, the WINDOWS
@@ -2074,8 +2079,16 @@ function Resolve-MsCatalogDownloadUrls {
             "https://www.catalog.update.microsoft.com/DownloadDialog.aspx" 2>$null) -join "`n"
     } catch {}
     Remove-Item $bodyFile -EA SilentlyContinue
+    return @(Get-MsCatalogCabUrls -Text $resp)
+}
+
+function Get-MsCatalogCabUrls {
+    # Pure: the distinct .cab download URLs inside a DownloadDialog.aspx answer.
+    # NOTE for callers: a one-element array unrolls to a string on return -
+    # always wrap the call in @() before indexing (v1.30.6 field bug).
+    param([string]$Text)
     $urls = @()
-    foreach ($mm in [regex]::Matches($resp, "(?i)url\s*=\s*'([^']+)'")) {
+    foreach ($mm in [regex]::Matches([string]$Text, "(?i)url\s*=\s*'([^']+)'")) {
         $u = $mm.Groups[1].Value
         if ($u -match '^https?://' -and $u -match '\.cab(\?|$)') { $urls += $u }
     }
@@ -2157,7 +2170,7 @@ function Install-DriversFromMsUpdateCatalog {
         $idx++
         $devName = $guidToDevice[$guid]
         Log "  [$idx/$($guidToDevice.Count)] Resolving download for '$devName'..."
-        $urls = Resolve-MsCatalogDownloadUrls -Guid $guid
+        $urls = @(Resolve-MsCatalogDownloadUrls -Guid $guid)   # v1.30.6 - @() keeps one URL an array
         if (-not $urls -or $urls.Count -eq 0) { Log "    No .cab download URL returned - skipping."; continue }
         $outFile = Join-Path $catRoot ("mscat_{0}.cab" -f $idx)
         SetProgress (80 + [int](($idx / $guidToDevice.Count) * 8))

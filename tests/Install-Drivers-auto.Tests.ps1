@@ -20,7 +20,7 @@ $ErrorActionPreference = 'Stop'
 # script's main body creates a WinForms form, so it cannot be dot-sourced here).
 $tok=$null;$err=$null
 $ast=[System.Management.Automation.Language.Parser]::ParseFile($ScriptPath,[ref]$tok,[ref]$err)
-$want='Test-HpVersionNewer','ConvertTo-HpMatchId','Select-HpConsumerSoftpaqs','Invoke-HpSupportJson','ConvertFrom-HpJson','ConvertTo-HpBytes','Find-HpSupportProductOids','Select-HpSupportOs','Get-HpCvaInfo','Test-HpCvaAppliesToDevices','Get-MsCatalogResultRows','Select-MsCatalogDriverGuid','Find-DellIndexManifestPath','Test-DellOsCode','Test-DellOsArch','Test-ActionableProblemCode','Get-ProblemCodeHint','Select-HpDriverPack','Find-DellCatalogDeviceMatches'
+$want='Get-MsCatalogCabUrls','Test-HpVersionNewer','ConvertTo-HpMatchId','Select-HpConsumerSoftpaqs','Invoke-HpSupportJson','ConvertFrom-HpJson','ConvertTo-HpBytes','Find-HpSupportProductOids','Select-HpSupportOs','Get-HpCvaInfo','Test-HpCvaAppliesToDevices','Get-MsCatalogResultRows','Select-MsCatalogDriverGuid','Find-DellIndexManifestPath','Test-DellOsCode','Test-DellOsArch','Test-ActionableProblemCode','Get-ProblemCodeHint','Select-HpDriverPack','Find-DellCatalogDeviceMatches'
 foreach ($f in $ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst]},$true)) {
     if ($want -contains $f.Name) { Invoke-Expression $f.Extent.Text }
 }
@@ -146,6 +146,12 @@ try { $winList = @(Select-HpConsumerSoftpaqs -Candidates $candList) } catch { $w
 Check "selector accepts a New-Object List[object] (2 winners)" ($winList.Count -eq 2)
 Check "version compare: 6.0.60.1111 newer than 6.0.39.1111" ((Test-HpVersionNewer -Candidate '6.0.60.1111' -Current '6.0.39.1111') -eq $true)
 Check "version compare: text version loses to a numeric one" ((Test-HpVersionNewer -Candidate 'Rev.H' -Current '1.0') -eq $false)
+# v1.30.6 regression: one .cab URL must survive as an array element, not a string.
+$ddText = "downloadInformation[0].files[0].url = 'https://catalog.s.download.windowsupdate.com/d/msdownload/update/driver/drvs/2023/06/synaptics_1234abcd.cab';`nfiles[0].digest = 'x';"
+$cabUrls = @(Get-MsCatalogCabUrls -Text $ddText)
+Check "catalog download: one .cab URL stays a full URL at index 0" ($cabUrls.Count -eq 1 -and $cabUrls[0] -like 'https://*.cab')
+$callerLine = (Get-Content $ScriptPath | Where-Object { $_ -match 'Resolve-MsCatalogDownloadUrls -Guid' -and $_ -notmatch '^\s*#' -and $_ -match '=' })
+Check "catalog download caller wraps the resolver in @()" (@($callerLine).Count -eq 1 -and $callerLine -match '@\(Resolve-MsCatalogDownloadUrls')
 Check "CVA with no SysId check still matches" (@(Test-HpCvaAppliesToDevices -Cva $cva -MissingDevices $devs -SysId '').Count -eq 1)
 ""
 "passed: $pass  failed: $fail"
