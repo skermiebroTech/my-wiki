@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.30.0 (keep in sync with $SCRIPT_VERSION below)
+# Version: 1.30.1 (keep in sync with $SCRIPT_VERSION below)
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -74,6 +74,14 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.30.1 - HP consumer tier field fix (ENVY 15-dr1xxx run 20260916_102713:
+#           both support-site searches returned 0 matches on the bench while
+#           the same queries answer from a workstation). Invoke-HpSupportJson
+#           no longer assigns the automatic $args variable, writes the response
+#           to a file instead of the pipeline, parses large JSON on Windows
+#           PowerShell 5.1 (2 MB ConvertFrom-Json limit) via the
+#           JavaScriptSerializer, and LOGS the failure reason instead of
+#           returning $null silently. Missing-device dump prints numeric codes.
 # v1.30.0 - HP consumer tier + duration fix.
 #           (1) HP consumer machines (ENVY / Pavilion / OMEN / Spectre /
 #               Victus) have no HPIA reference catalog and no driver pack, so
@@ -1026,7 +1034,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.30.0"
+$SCRIPT_VERSION = "1.30.1"
 
 # =============================================================
 # TEMP RULE (v1.28.0) - CURRENTLY OFF (v1.28.1): when $true, the WINDOWS
@@ -5967,27 +5975,60 @@ function Start-HpDriverInstall {
 $script:HpConsumerMaxSoftpaqs = 15
 $script:HpConsumerBudgetMB    = 1500
 
+function ConvertFrom-HpJson {
+    # v1.30.1 - Windows PowerShell 5.1's ConvertFrom-Json rejects documents over
+    # 2 MB (JavaScriptSerializer MaxJsonLength) and the support-site search
+    # answer can exceed that. Use the serializer directly with the limit
+    # raised on 5.1; ConvertFrom-Json on 7+. Returns $null on any failure.
+    param([string]$Raw)
+    if (-not $Raw) { return $null }
+    if ($PSVersionTable.PSVersion.Major -ge 6) {
+        try { return ($Raw | ConvertFrom-Json) } catch { return $null }
+    }
+    try {
+        Add-Type -AssemblyName System.Web.Extensions -EA Stop
+        $ser = New-Object System.Web.Script.Serialization.JavaScriptSerializer
+        $ser.MaxJsonLength = [int]::MaxValue
+        $ser.RecursionLimit = 200
+        return $ser.DeserializeObject($Raw)
+    } catch {
+        try { return ($Raw | ConvertFrom-Json) } catch { return $null }
+    }
+}
+
 function Invoke-HpSupportJson {
     # GET (or POST when -Body is given) an HP support-site JSON endpoint via
     # curl.exe. Returns the parsed object or $null. Never throws.
+    # v1.30.1 - the first field run (ENVY 15-dr1xxx, 16 Sep 2026) got 0 matches
+    # for a query that answers from a workstation: the helper used the
+    # automatic $args variable for its argument list and swallowed the parse
+    # error. Renamed, raw size + failure reason now logged, large-JSON safe.
     param([string]$Url, [string]$Body = $null, [int]$MaxTimeSec = 60)
     $bodyFile = $null
     try {
-        $args = @("--silent", "--location", "--max-time", "$MaxTimeSec", "--connect-timeout", "15",
-                  "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                  "-H", "Accept: application/json", "-H", "Accept-Language: en-US,en;q=0.9",
-                  "-H", "Referer: https://support.hp.com/us-en/drivers")
+        $curlArgs = @("--silent", "--location", "--max-time", "$MaxTimeSec", "--connect-timeout", "15",
+                      "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                      "-H", "Accept: application/json", "-H", "Accept-Language: en-US,en;q=0.9",
+                      "-H", "Referer: https://support.hp.com/us-en/drivers")
         if ($null -ne $Body) {
             $bodyFile = Join-Path $env:TEMP ("hp_support_body_" + [guid]::NewGuid().ToString("N") + ".json")
             [System.IO.File]::WriteAllText($bodyFile, $Body, (New-Object System.Text.UTF8Encoding $false))
-            $args += @("-X", "POST", "-H", "Content-Type: application/json", "--data", "@$bodyFile")
+            $curlArgs += @("-X", "POST", "-H", "Content-Type: application/json", "--data", "@$bodyFile")
         }
-        $args += $Url
-        $raw = (& curl.exe @args 2>$null) -join "`n"
-        if (-not $raw) { return $null }
-        return ($raw | ConvertFrom-Json)
+        $outFile = Join-Path $env:TEMP ("hp_support_resp_" + [guid]::NewGuid().ToString("N") + ".json")
+        $curlArgs += @("--output", $outFile, $Url)
+        $null = & curl.exe @curlArgs 2>$null
+        $rc = $LASTEXITCODE
+        if (-not (Test-Path $outFile)) { Log "  support.hp.com: no response (curl exit $rc) for $Url"; return $null }
+        $raw = [System.IO.File]::ReadAllText($outFile, (New-Object System.Text.UTF8Encoding $false))
+        Remove-Item $outFile -Force -EA SilentlyContinue
+        Log-Diag "support.hp.com: $([math]::Round($raw.Length/1KB)) KB, curl exit $rc, $Url"
+        if (-not $raw) { Log "  support.hp.com: empty response (curl exit $rc)"; return $null }
+        $obj = ConvertFrom-HpJson -Raw $raw
+        if ($null -eq $obj) { Log "  support.hp.com: response was not JSON ($([math]::Round($raw.Length/1KB)) KB, starts '$($raw.Substring(0, [math]::Min(60, $raw.Length)) -replace '\s+',' ')')" }
+        return $obj
     } catch {
-        Log-Diag "HP support JSON call failed: $($_.Exception.Message)"
+        Log "  support.hp.com call failed: $($_.Exception.Message)"
         return $null
     } finally {
         if ($bodyFile) { Remove-Item $bodyFile -Force -EA SilentlyContinue }
