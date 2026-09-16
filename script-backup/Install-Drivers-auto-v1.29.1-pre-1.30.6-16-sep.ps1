@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.30.6 (keep in sync with $SCRIPT_VERSION below)
+# Version: 1.29.1 (keep in sync with $SCRIPT_VERSION below)
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -74,77 +74,6 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
-# v1.30.6 - MS Update Catalog fallback: a single resolved .cab URL came back
-#           unrolled to a string, so $urls[0] was the letter "h" and curl
-#           failed with exit 6 (run 20260916_134241, Synaptics WBDI). The
-#           caller now wraps the result in @(), and the URL parse is a pure
-#           function (Get-MsCatalogCabUrls) with a test. Same bug is in prod.
-# v1.30.5 - HP consumer tier CRASH FIX (run 20260916_112743 aborted with
-#           "Argument types do not match" at foreach ($c in @($Candidates))).
-#           A List[object] made with New-Object comes back wrapped in a
-#           PSObject, and @() on that wrapped list throws inside the PowerShell
-#           compiler (Windows PowerShell 5.1 and pwsh 7.6 both). The selector
-#           now walks the list directly, both tier lists are built with
-#           ::new() (no wrapper), and versions compare through
-#           [version]::TryParse (Test-HpVersionNewer) instead of try/catch.
-# v1.30.4 - HP consumer tier: first successful field run (ENVY 15-dr1xxx,
-#           run 20260916_111036: 5 of 5 matched SoftPaqs installed, missing
-#           8 -> 6) showed four gaps, all fixed:
-#           (1) Codecs enumerate as INTELAUDIO\FUNC_01&.. when the Intel Smart
-#               Sound controller is bound, but HP CVAs list them as HDAUDIO\..
-#               - the buses are now treated as one (ConvertTo-HpMatchId).
-#           (2) Smart Sound DSP and ISH sensor devices are children whose
-#               packages name the PCI PARENT; ancestor hardware IDs now take
-#               part in the match (Get-DeviceParentHardwareIds).
-#           (3) Three fingerprint packages matched one sensor and were run
-#               newest-first-then-older (sensor ended at code 31); now only
-#               the newest package per device is kept (Select-HpConsumerSoftpaqs).
-#           (4) Both NVIDIA downloads died mid-transfer (curl 56); failed
-#               items get one serial, resumable retry. Size total fixed (was 0 MB).
-# v1.30.3 - HP consumer tier ROOT CAUSE (run 20260916_110525 logged it:
-#           "Method 'POST' is not supported", 405). Invoke-HpSupportJson sent
-#           every GET as a POST because [string]$Body = $null is "" and the
-#           `$null -ne $Body` test was always true; and its -Raw switch collided
-#           with the local $raw response variable. Present since v1.30.0. The
-#           tests now call the helper for real against a local file URL.
-# v1.30.2 - HP consumer tier, second field fix (run 20260916_103331: the
-#           call now reached HP and parsed, but 0 products were found). The
-#           v1.30.1 JavaScriptSerializer path returns Dictionary objects on
-#           Windows PowerShell 5.1 and the product walk expects property
-#           objects. The product step now regexes the RAW response text for
-#           /model/<oid> entries (parser-independent); the other calls use
-#           ConvertFrom-Json (same object shape on 5.1 and 7). The search log
-#           line now shows the answer size. The HP driver-pack catalog CAB
-#           now expands via the single-file form first (bench runs logged
-#           "no XML after expand" from -F:*), then -F:*, then Shell COM.
-# v1.30.1 - HP consumer tier field fix (ENVY 15-dr1xxx run 20260916_102713:
-#           both support-site searches returned 0 matches on the bench while
-#           the same queries answer from a workstation). Invoke-HpSupportJson
-#           no longer assigns the automatic $args variable, writes the response
-#           to a file instead of the pipeline, parses large JSON on Windows
-#           PowerShell 5.1 (2 MB ConvertFrom-Json limit) via the
-#           JavaScriptSerializer, and LOGS the failure reason instead of
-#           returning $null silently. Missing-device dump prints numeric codes.
-# v1.30.0 - HP consumer tier + duration fix.
-#           (1) HP consumer machines (ENVY / Pavilion / OMEN / Spectre /
-#               Victus) have no HPIA reference catalog and no driver pack, so
-#               they ended at "not found in HP Driver Pack Matrix" and were
-#               left to Windows Update (field: ENVY x360 15-dr1xxx, five failed
-#               runs). New Start-HpConsumerSupportInstall queries the support
-#               site's JSON API (searchresult by SystemSKUNumber / model ->
-#               osVersionData -> driverDetails), downloads each candidate
-#               SoftPaq's CVA, matches its [Devices] hardware IDs against the
-#               machine's MISSING devices and its [System Information] SysIds
-#               against Win32_BaseBoard.Product, then installs the newest match
-#               per title through the existing SHA256 -> extract -> SilentInstall
-#               helper. Runs only when the matrix has no row. Caps: 15 SoftPaqs,
-#               1500 MB. Pure helpers (Find-HpSupportProductOids,
-#               Select-HpSupportOs, Get-HpCvaInfo, Test-HpCvaAppliesToDevices)
-#               are covered by tests/fixtures.
-#           (2) Run duration now comes from a Stopwatch (Get-RunDurationSec).
-#               v1.29.0 moved the w32tm clock resync AFTER the start timestamp,
-#               so a machine whose clock was hours out reported 19-hour and
-#               77-hour durations in the sheet (three rows on 15 Sep 2026).
 # v1.29.1 - Analytics: the Dell per-SKU catalog CAB (served as e.g.
 #           Latitude_0B0B.cab) was recorded as a DRIVER download and sent to
 #           the sheet's driver_urls column (seen in the first two v1.29.0
@@ -1077,7 +1006,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.30.6"
+$SCRIPT_VERSION = "1.29.1"
 
 # =============================================================
 # TEMP RULE (v1.28.0) - CURRENTLY OFF (v1.28.1): when $true, the WINDOWS
@@ -2079,16 +2008,8 @@ function Resolve-MsCatalogDownloadUrls {
             "https://www.catalog.update.microsoft.com/DownloadDialog.aspx" 2>$null) -join "`n"
     } catch {}
     Remove-Item $bodyFile -EA SilentlyContinue
-    return @(Get-MsCatalogCabUrls -Text $resp)
-}
-
-function Get-MsCatalogCabUrls {
-    # Pure: the distinct .cab download URLs inside a DownloadDialog.aspx answer.
-    # NOTE for callers: a one-element array unrolls to a string on return -
-    # always wrap the call in @() before indexing (v1.30.6 field bug).
-    param([string]$Text)
     $urls = @()
-    foreach ($mm in [regex]::Matches([string]$Text, "(?i)url\s*=\s*'([^']+)'")) {
+    foreach ($mm in [regex]::Matches($resp, "(?i)url\s*=\s*'([^']+)'")) {
         $u = $mm.Groups[1].Value
         if ($u -match '^https?://' -and $u -match '\.cab(\?|$)') { $urls += $u }
     }
@@ -2170,7 +2091,7 @@ function Install-DriversFromMsUpdateCatalog {
         $idx++
         $devName = $guidToDevice[$guid]
         Log "  [$idx/$($guidToDevice.Count)] Resolving download for '$devName'..."
-        $urls = @(Resolve-MsCatalogDownloadUrls -Guid $guid)   # v1.30.6 - @() keeps one URL an array
+        $urls = Resolve-MsCatalogDownloadUrls -Guid $guid
         if (-not $urls -or $urls.Count -eq 0) { Log "    No .cab download URL returned - skipping."; continue }
         $outFile = Join-Path $catRoot ("mscat_{0}.cab" -f $idx)
         SetProgress (80 + [int](($idx / $guidToDevice.Count) * 8))
@@ -2499,17 +2420,6 @@ function Test-Cancelled {
     return $false
 }
 
-function Get-RunDurationSec {
-    # v1.30.0 - Run duration from a monotonic stopwatch. Field rows in v1.29.x
-    # showed 19-hour and 77-hour "durations": the clock resync (w32tm) now
-    # runs after the start timestamp is taken, so a fresh image whose clock
-    # was hours out produced start-to-end wall-clock deltas that included the
-    # correction. Falls back to the wall clock only when the stopwatch is absent.
-    if ($script:AnalyticsStopwatch) { return [int]$script:AnalyticsStopwatch.Elapsed.TotalSeconds }
-    if ($script:AnalyticsStartTime) { return [int]((Get-Date) - $script:AnalyticsStartTime).TotalSeconds }
-    return 0
-}
-
 function Sync-BenchClock {
     # v1.29.0 - w32tm resync needs admin, so it runs here (after elevation)
     # instead of at script load. Skipped under -TestMode.
@@ -2693,7 +2603,7 @@ function Write-MissingDriverDetails {
         $name = if ($m.Name)         { $m.Name }
                 elseif ($m.Caption)  { $m.Caption }
                 else                 { '(unnamed device)' }
-        Log "  [ERR $([int]$m.ConfigManagerErrorCode)] $name$(Get-ProblemCodeHint $m.ConfigManagerErrorCode)"
+        Log "  [ERR $($m.ConfigManagerErrorCode)] $name$(Get-ProblemCodeHint $m.ConfigManagerErrorCode)"
         Log "    DeviceID:    $($m.DeviceID)"
         try {
             $pnp = Get-PnpDevice -InstanceId $m.DeviceID -EA Stop
@@ -2759,7 +2669,7 @@ function Invoke-ProblemDeviceRemediation {
                 elseif ($dev.Caption) { $dev.Caption }
                 else                  { '(unnamed device)' }
         $id = $dev.DeviceID
-        Log "  [ERR $([int]$dev.ConfigManagerErrorCode)] $name"
+        Log "  [ERR $($dev.ConfigManagerErrorCode)] $name"
         Log "    pnputil /restart-device `"$id`""
         $out = pnputil /restart-device "$id" 2>&1
         $rc  = $LASTEXITCODE
@@ -2879,7 +2789,9 @@ function Write-HtmlReport {
         [string]$Result
     )
     try {
-        $durationSec = Get-RunDurationSec   # v1.30.0 - stopwatch, not wall clock
+        $durationSec = if ($script:AnalyticsStartTime) {
+            [int]((Get-Date) - $script:AnalyticsStartTime).TotalSeconds
+        } else { 0 }
         $durationDisplay = if ($durationSec -ge 60) {
             "{0}m {1}s" -f ([math]::Floor($durationSec/60)), ($durationSec % 60)
         } else { "${durationSec}s" }
@@ -3288,7 +3200,7 @@ function Send-AnalyticsEvent {
     $script:AnalyticsEventSent = $true
     $durationSec = 0
     if ($script:AnalyticsStartTime) {
-        $durationSec = Get-RunDurationSec   # v1.30.0 - stopwatch, not wall clock
+        $durationSec = [int]((Get-Date) - $script:AnalyticsStartTime).TotalSeconds
     }
     # v1.11.0 - DRY helper. Was duplicated for installed_drivers; also used
     # for missing_after_list and (since v1.13.2) the driver_urls list. Strips
@@ -6007,419 +5919,6 @@ function Start-HpDriverInstall {
     return ($packResult -or $rescued)
 }
 
-# =========================
-# v1.30.0 - HP CONSUMER TIER (ENVY / Pavilion / OMEN / Spectre / Victus)
-# HP publishes reference catalogs (HPIA) and driver packs only for the
-# commercial lines, so a consumer unit reached this file with "no pack" and
-# was left to Windows Update. The support site has an undocumented JSON API
-# the drivers page itself uses (no cookies, no token; browser-style headers):
-#   1. searchresult  - product number (SystemSKUNumber) or model name -> product OID
-#   2. osVersionData - OID -> platformId + osTMSId for the Windows version
-#   3. driverDetails - POST -> every SoftPaq with title, version, URL, MD5, SSM flag
-# Each SoftPaq has a CVA text file next to it whose [Devices] section lists
-# PnP hardware IDs and whose [System Information] section lists SysIDs, so
-# SoftPaqs are matched to the machine's MISSING devices by hardware ID and
-# to the board by SysID, then installed through the same SHA256-verify ->
-# extract -> SilentInstall path as the commercial reference catalog.
-# Field trigger: HP ENVY x360 15-dr1xxx, five failed runs Aug-Sep 2026.
-# =========================
-$script:HpConsumerMaxSoftpaqs = 15
-$script:HpConsumerBudgetMB    = 1500
-
-function ConvertTo-HpBytes {
-    # Pure: "15.5 MB" / "627.42 KB" / "1.3 GB" / "12345" -> bytes (long). 0 when unparseable.
-    param($Size)
-    $t = ([string]$Size).Trim()
-    if (-not $t) { return 0 }
-    if ($t -match '^\d+$') { return [long]$t }
-    if ($t -match '^([0-9]+(?:\.[0-9]+)?)\s*(KB|MB|GB|B)?$') {
-        $n = [double]$Matches[1]
-        switch (([string]$Matches[2]).ToUpper()) { 'KB' { $n *= 1KB } 'MB' { $n *= 1MB } 'GB' { $n *= 1GB } }
-        return [long][math]::Round($n)
-    }
-    return 0
-}
-
-function ConvertFrom-HpJson {
-    # v1.30.2 - ConvertFrom-Json first: it yields the same PSCustomObject shape
-    # on Windows PowerShell 5.1 and 7, which the walkers below expect. v1.30.1
-    # used the JavaScriptSerializer on 5.1 and its Dictionary objects broke the
-    # product walk (field run 20260916_103331: 0 matches, no error). The
-    # serializer stays only as a fallback for a document over 5.1's 2 MB limit.
-    param([string]$Raw)
-    if (-not $Raw) { return $null }
-    try { return ($Raw | ConvertFrom-Json) } catch {}
-    try {
-        Add-Type -AssemblyName System.Web.Extensions -EA Stop
-        $ser = New-Object System.Web.Script.Serialization.JavaScriptSerializer
-        $ser.MaxJsonLength = [int]::MaxValue
-        return $ser.DeserializeObject($Raw)
-    } catch { return $null }
-}
-
-function Invoke-HpSupportJson {
-    # GET (or POST when -Body is given) an HP support-site JSON endpoint via
-    # curl.exe. Returns the parsed object or $null. Never throws.
-    # v1.30.1 - the first field run (ENVY 15-dr1xxx, 16 Sep 2026) got 0 matches
-    # for a query that answers from a workstation: the helper used the
-    # automatic $args variable for its argument list and swallowed the parse
-    # error. Renamed, raw size + failure reason now logged, large-JSON safe.
-    # v1.30.3 - [string]$Body = $null becomes "" (a typed string param cannot
-    # hold $null), so `$null -ne $Body` was ALWAYS true and every search went
-    # out as a POST (HP: 405 Method Not Allowed). And the -Raw switch shared
-    # its name with the local response variable, so the assignment threw.
-    # Root cause of every 0-match run since v1.30.0.
-    param([string]$Url, [string]$Body = "", [int]$MaxTimeSec = 60, [switch]$AsText)
-    $bodyFile = $null
-    try {
-        $curlArgs = @("--silent", "--location", "--max-time", "$MaxTimeSec", "--connect-timeout", "15",
-                      "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                      "-H", "Accept: application/json", "-H", "Accept-Language: en-US,en;q=0.9",
-                      "-H", "Referer: https://support.hp.com/us-en/drivers")
-        if ($Body) {
-            $bodyFile = Join-Path $env:TEMP ("hp_support_body_" + [guid]::NewGuid().ToString("N") + ".json")
-            [System.IO.File]::WriteAllText($bodyFile, $Body, (New-Object System.Text.UTF8Encoding $false))
-            $curlArgs += @("-X", "POST", "-H", "Content-Type: application/json", "--data", "@$bodyFile")
-        }
-        $outFile = Join-Path $env:TEMP ("hp_support_resp_" + [guid]::NewGuid().ToString("N") + ".json")
-        $curlArgs += @("--output", $outFile, $Url)
-        $null = & curl.exe @curlArgs 2>$null
-        $rc = $LASTEXITCODE
-        if (-not (Test-Path $outFile)) { Log "  support.hp.com: no response (curl exit $rc) for $Url"; return $null }
-        $text = [System.IO.File]::ReadAllText($outFile, (New-Object System.Text.UTF8Encoding $false))
-        Remove-Item $outFile -Force -EA SilentlyContinue
-        Log-Diag "support.hp.com: $([math]::Round($text.Length/1KB)) KB, curl exit $rc, $Url"
-        if (-not $text) { Log "  support.hp.com: empty response (curl exit $rc)"; return $null }
-        if ($AsText) { return $text }   # callers that regex the text
-        $obj = ConvertFrom-HpJson -Raw $text
-        if ($null -eq $obj) { Log "  support.hp.com: response was not JSON ($([math]::Round($text.Length/1KB)) KB, starts '$($text.Substring(0, [math]::Min(60, $text.Length)) -replace '\s+',' ')')" }
-        return $obj
-    } catch {
-        Log "  support.hp.com call failed: $($_.Exception.Message)"
-        return $null
-    } finally {
-        if ($bodyFile) { Remove-Item $bodyFile -Force -EA SilentlyContinue }
-    }
-}
-
-function Find-HpSupportProductOids {
-    # Pure: return @( @{ Name; Oid } ) for every product with a /model/<oid>
-    # targetUrl in a searchresult response. Accepts the RAW JSON text (regex,
-    # independent of how the JSON was parsed - the field-proven path) or an
-    # already-parsed object (walk of categories -> subCategoryList -> productList).
-    param($SearchJson)
-    $found = New-Object System.Collections.ArrayList
-    $seen  = @{}
-    if (-not $SearchJson) { return @() }
-    if ($SearchJson -is [string]) {
-        foreach ($m in [regex]::Matches($SearchJson, '"productName"\s*:\s*"([^"]*)"[^{}]*?"targetUrl"\s*:\s*"([^"]*?/model/(\d+)[^"]*)"')) {
-            $oid = $m.Groups[3].Value
-            if (-not $seen.ContainsKey($oid)) { $seen[$oid] = $true; [void]$found.Add(@{ Name = $m.Groups[1].Value; Oid = $oid }) }
-        }
-        return @($found.ToArray())
-    }
-    $cats = $null
-    try { $cats = $SearchJson.data.kaaSResponse.data.searchResults.categories } catch {}
-    if (-not $cats) { return @() }
-    $walk = $null
-    $walk = {
-        param($node)
-        if (-not $node) { return }
-        foreach ($pr in @($node.productList)) {
-            if (-not $pr) { continue }
-            $u = [string]$pr.targetUrl
-            if ($u -match '/model/(\d+)') {
-                $oid = $Matches[1]
-                if (-not $seen.ContainsKey($oid)) { $seen[$oid] = $true; [void]$found.Add(@{ Name = [string]$pr.productName; Oid = $oid }) }
-            }
-        }
-        foreach ($sc in @($node.subCategoryList)) { if ($sc) { & $walk $sc } }
-    }
-    foreach ($c in @($cats)) { & $walk $c }
-    return @($found.ToArray())
-}
-
-function Select-HpSupportOs {
-    # Pure: from osVersionData pick the Windows platform + version to query.
-    # Prefer the running generation (Windows 11 when build >= 22000) and the
-    # exact DisplayVersion; then the generic "(64-bit)" entry of that
-    # generation; then Windows 10 generic (HP consumer pages often stop at
-    # Windows 10 - the drivers still apply). Returns @{ PlatformId; OsTmsId;
-    # OsName } or $null.
-    param($OsJson, [bool]$IsWin11, [string]$DisplayVersion)
-    $plats = $null
-    try { $plats = @($OsJson.data.osAvailablePlatformsAnsOS.osPlatforms) } catch {}
-    if (-not $plats -or $plats.Count -eq 0) { return $null }
-    $win = $plats | Where-Object { [string]$_.name -match '(?i)windows' } | Select-Object -First 1
-    if (-not $win) { $win = $plats[0] }
-    $vers = @($win.osVersions | Where-Object { $_ -and $_.name -match '(?i)64' })
-    if ($vers.Count -eq 0) { return $null }
-    $gen = if ($IsWin11) { 'Windows 11' } else { 'Windows 10' }
-    $pick = $null
-    if ($DisplayVersion) { $pick = $vers | Where-Object { $_.name -match [regex]::Escape($gen) -and $_.name -match [regex]::Escape($DisplayVersion) } | Select-Object -First 1 }
-    if (-not $pick) { $pick = $vers | Where-Object { $_.name -match ('^' + [regex]::Escape($gen) + '\s*\(64-bit\)$') } | Select-Object -First 1 }
-    if (-not $pick) { $pick = $vers | Where-Object { $_.name -match [regex]::Escape($gen) } | Sort-Object { $_.name } -Descending | Select-Object -First 1 }
-    if (-not $pick) { $pick = $vers | Where-Object { $_.name -match '^Windows 10\s*\(64-bit\)$' } | Select-Object -First 1 }
-    if (-not $pick) { $pick = $vers | Sort-Object { $_.name } -Descending | Select-Object -First 1 }
-    return @{ PlatformId = [string]$win.id; OsTmsId = [string]$pick.id; OsName = [string]$pick.name }
-}
-
-function Get-HpCvaInfo {
-    # Pure: parse a SoftPaq CVA (INI-style text). Returns a hashtable with
-    # Title, Type, Category, Version, SoftpaqNumber, SHA256, MD5, SilentInstall,
-    # Devices (hardware IDs, upper-case) and SysIds (upper-case, no 0x).
-    param([string]$Text)
-    $info = @{ Title=""; Type=""; Category=""; Version=""; SoftpaqNumber=""; SHA256=""; MD5=""; SilentInstall=""; Devices=@(); SysIds=@() }
-    if (-not $Text) { return $info }
-    $section = ""
-    $devices = New-Object System.Collections.Generic.List[string]
-    $sysids  = New-Object System.Collections.Generic.List[string]
-    foreach ($rawLine in ($Text -split "`r?`n")) {
-        $line = $rawLine.Trim()
-        if (-not $line -or $line.StartsWith(';')) { continue }
-        if ($line -match '^\[(.+)\]$') { $section = $Matches[1]; continue }
-        $eq = $line.IndexOf('=')
-        if ($eq -lt 1) { continue }
-        $k = $line.Substring(0, $eq).Trim(); $v = $line.Substring($eq + 1).Trim()
-        switch ($section) {
-            'Software Title'     { if ($k -eq 'US') { $info.Title = $v } }
-            'General'            { switch ($k) { 'Type' { $info.Type = $v } 'Category' { $info.Category = $v } 'Version' { $info.Version = $v } } }
-            'Softpaq'            { switch ($k) { 'SoftpaqNumber' { $info.SoftpaqNumber = $v.ToLower() } 'SoftPaqSHA256' { $info.SHA256 = $v.ToUpper() } 'SoftPaqMD5' { $info.MD5 = $v.ToUpper() } } }
-            'Install Execution'  { if ($k -eq 'SilentInstall') { $info.SilentInstall = $v.Trim('"') } }
-            'Devices'            { $id = $k.Trim().ToUpper(); if ($id -and -not $devices.Contains($id)) { $devices.Add($id) } }
-            'System Information' { if ($k -match '^SysId\d+$') { $sid = $v.Trim().ToUpper() -replace '^0X', ''; if ($sid -and -not $sysids.Contains($sid)) { $sysids.Add($sid) } } }
-        }
-    }
-    $info.Devices = @($devices); $info.SysIds = @($sysids)
-    return $info
-}
-
-function ConvertTo-HpMatchId {
-    # Pure: normalise a PnP id for CVA matching. Upper-case, and treat the
-    # INTELAUDIO bus as HDAUDIO: HP CVAs list codecs as HDAUDIO\FUNC_01&VEN_..
-    # while a machine whose Intel Smart Sound controller is bound enumerates
-    # the same codec as INTELAUDIO\FUNC_01&VEN_.. (ENVY run 20260916_111036).
-    param([string]$Id)
-    $u = ([string]$Id).Trim().ToUpper()
-    if ($u.StartsWith('INTELAUDIO\')) { $u = 'HDAUDIO\' + $u.Substring(11) }
-    return $u
-}
-
-function Test-HpCvaAppliesToDevices {
-    # Pure: return the names of the missing devices this CVA's [Devices] list
-    # covers. A CVA id matches when it equals, or is a prefix of, one of the
-    # device's HardwareIDs / CompatibleIDs / ParentHardwareIDs (CVAs usually
-    # omit &REV_xx; a child device such as the Smart Sound DSP or the ISH
-    # sensor bus is covered by the package that names its PCI parent). When
-    # the CVA names SysIds and the machine's SysId is not among them, nothing
-    # matches.
-    param([hashtable]$Cva, $MissingDevices, [string]$SysId)
-    $hits = New-Object System.Collections.Generic.List[string]
-    if (-not $Cva -or $Cva.Devices.Count -eq 0) { return @() }
-    if ($Cva.SysIds.Count -gt 0 -and $SysId) {
-        if ($Cva.SysIds -notcontains $SysId.Trim().ToUpper()) { return @() }
-    }
-    $cvaIds = @($Cva.Devices | ForEach-Object { ConvertTo-HpMatchId $_ })
-    foreach ($dev in @($MissingDevices)) {
-        $ids = @()
-        if ($dev.HardwareIDs)       { $ids += @($dev.HardwareIDs) }
-        if ($dev.CompatibleIDs)     { $ids += @($dev.CompatibleIDs) }
-        if ($dev.ParentHardwareIDs) { $ids += @($dev.ParentHardwareIDs) }
-        $idsU = @($ids | Where-Object { $_ } | ForEach-Object { ConvertTo-HpMatchId $_ })
-        $hit = $false
-        foreach ($cid in $cvaIds) {
-            foreach ($u in $idsU) { if ($u -eq $cid -or $u.StartsWith($cid + '&')) { $hit = $true; break } }
-            if ($hit) { break }
-        }
-        if ($hit -and -not $hits.Contains([string]$dev.Name)) { $hits.Add([string]$dev.Name) }
-    }
-    return @($hits)
-}
-
-function Get-DeviceParentHardwareIds {
-    # Windows-only: hardware IDs of the device's ancestors (up to 3 levels),
-    # read from the registry via DEVPKEY_Device_Parent. Empty on any failure.
-    param([string]$InstanceId, [int]$MaxDepth = 3)
-    $out = @()
-    $current = $InstanceId
-    for ($d = 0; $d -lt $MaxDepth -and $current; $d++) {
-        $parent = $null
-        try { $parent = (Get-PnpDeviceProperty -InstanceId $current -KeyName 'DEVPKEY_Device_Parent' -EA Stop).Data } catch {}
-        if (-not $parent) { break }
-        try { $out += @((Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Enum\$parent" -EA Stop).HardwareID) } catch {}
-        $current = $parent
-    }
-    return @($out | Where-Object { $_ })
-}
-
-function Test-HpVersionNewer {
-    # Pure: $true when $Candidate is a newer version string than $Current.
-    # Numeric versions compare as [version]; a version that does not parse
-    # loses to one that does; two unparsable strings compare as text.
-    param([string]$Candidate, [string]$Current)
-    $vc = $null; $vp = $null
-    $okC = [version]::TryParse($Candidate, [ref]$vc)
-    $okP = [version]::TryParse($Current, [ref]$vp)
-    if ($okC -and $okP) { return [bool]($vc -gt $vp) }
-    if ($okC) { return $true }
-    if ($okP) { return $false }
-    return [bool]([string]::Compare($Candidate, $Current, $true) -gt 0)
-}
-
-function Select-HpConsumerSoftpaqs {
-    # Pure: from CVA-matched candidates (@{ Id; Name; Version; Devices=@(names) ...})
-    # keep, for EACH missing device, only the newest package that covers it,
-    # then return the distinct winners. The first field run installed three
-    # fingerprint packages for one sensor, newest first and older ones after
-    # it, which left the sensor at code 31.
-    # v1.30.5 - do NOT wrap $Candidates in @(): a New-Object List[object] is
-    # PSObject-wrapped and @() on it throws "Argument types do not match".
-    param($Candidates)
-    $best = @{}   # device name -> candidate
-    foreach ($c in $Candidates) {
-        if (-not $c) { continue }
-        foreach ($devName in @($c.Devices)) {
-            $prev = $best[$devName]
-            if ($null -eq $prev) { $best[$devName] = $c; continue }
-            if (Test-HpVersionNewer -Candidate ([string]$c.Version) -Current ([string]$prev.Version)) { $best[$devName] = $c }
-        }
-    }
-    $winners = @{}
-    foreach ($c in $best.Values) { if (-not $winners.ContainsKey($c.Id)) { $winners[$c.Id] = $c } }
-    return @($winners.Values | Sort-Object { $_.Name })
-}
-
-function Start-HpConsumerSupportInstall {
-    # Returns $true when at least one SoftPaq installed, else $false.
-    param([string]$DriverRoot, [string]$ModelName)
-    if ($script:TestMode) { Log "HP consumer tier skipped (TestMode)."; return $false }
-    if (Test-Cancelled) { return $false }
-    Log "=== HP CONSUMER TIER: support.hp.com driver list by product number ==="
-
-    $sysid = Get-HpSystemId
-    $missing = @(Get-HpMissingDevicesWithHwIds)
-    if ($missing.Count -eq 0) { Log "  No missing devices - nothing for the consumer tier to do."; return $false }
-    # v1.30.4 - add each missing device's ancestor hardware IDs so a package
-    # that names the PCI parent (Smart Sound, ISH) matches its stranded child.
-    foreach ($dev in $missing) {
-        $pids = @()
-        try { $pids = @(Get-DeviceParentHardwareIds -InstanceId $dev.DeviceID) } catch {}
-        $dev | Add-Member -NotePropertyName ParentHardwareIDs -NotePropertyValue $pids -Force
-    }
-
-    # 1. Product OID. The product number (e.g. 7XX12UA#ABA) is the exact key;
-    #    the WMI model name is the fallback and may return several SKUs.
-    $sku = ""
-    try { $sku = ([string](Get-CimInstance Win32_ComputerSystem -EA Stop).SystemSKUNumber).Trim() } catch {}
-    $sku = ($sku -split '#')[0].Trim()
-    $queries = @()
-    if ($sku)       { $queries += $sku }
-    if ($ModelName) { $queries += $ModelName }
-    # Collect product OIDs from BOTH searches (SKU first, then model name):
-    # an OID that resolves in the search can still answer an empty OS list,
-    # so every candidate gets a turn below.
-    $oids = @(); $seenOid = @{}
-    foreach ($q in $queries) {
-        if (Test-Cancelled) { return $false }
-        $enc = [uri]::EscapeDataString($q)
-        $sj  = Invoke-HpSupportJson -AsText -Url "https://support.hp.com/wcc-services/searchresult/us-en?q=$enc&context=pdp&navigation=false&authState=anonymous&template=Search"
-        $found = @(Find-HpSupportProductOids -SearchJson $sj)
-        Log "  Search '$q' -> $($found.Count) product match(es) ($([math]::Round(([string]$sj).Length/1KB)) KB answer)."
-        foreach ($o in $found) { if (-not $seenOid[$o.Oid]) { $seenOid[$o.Oid] = $true; $oids += ,$o } }
-    }
-    if ($oids.Count -eq 0) { Log "  support.hp.com has no product entry for this machine."; return $false }
-
-    # 2. OS selection - the first OID whose OS list answers wins.
-    $isWin11 = $false; $displayVer = $null
-    try { $isWin11 = ([int](Get-CimInstance Win32_OperatingSystem -EA Stop).BuildNumber -ge 22000) } catch {}
-    try { $displayVer = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -EA Stop).DisplayVersion } catch {}
-    $osSel = $null; $oid = $null
-    foreach ($o in ($oids | Select-Object -First 6)) {
-        if (Test-Cancelled) { return $false }
-        $oj = Invoke-HpSupportJson -Url "https://support.hp.com/wcc-services/swd-v2/osVersionData?cc=us&lc=en&productOid=$($o.Oid)&authState=anonymous&template=SWDSeriesDownload"
-        $osSel = Select-HpSupportOs -OsJson $oj -IsWin11 $isWin11 -DisplayVersion $displayVer
-        if ($osSel) { $oid = $o.Oid; Log "  Product '$($o.Name)' (OID $oid) -> $($osSel.OsName)"; break }
-    }
-    if (-not $osSel) { Log "  No OS list for any matched product - giving up on the consumer tier."; return $false }
-
-    # 3. Driver list.
-    $body = '{"productLineCode":"","lc":"en","cc":"us","osTMSId":"' + $osSel.OsTmsId + '","osName":"' + ($osSel.OsName -replace '"','') + '","productSeriesOid":"' + $oid + '","platformId":"' + $osSel.PlatformId + '"}'
-    $dj = Invoke-HpSupportJson -Url "https://support.hp.com/wcc-services/swd-v2/driverDetails?authState=anonymous&template=SWDSeriesDownload" -Body $body
-    $drivers = [System.Collections.Generic.List[object]]::new()   # v1.30.5 - ::new(), not New-Object (PSObject wrapper breaks @())
-    try {
-        foreach ($t in @($dj.data.softwareTypes)) {
-            foreach ($d in @($t.softwareDriversList)) {
-                $l = $d.latestVersionDriver
-                if (-not $l -or -not $l.fileUrl) { continue }
-                $drivers.Add(@{ Title=[string]$l.title; Version=[string]$l.version; Url=[string]$l.fileUrl; Ssm=[bool]$l.ssmCompliant; Size=(ConvertTo-HpBytes $l.fileSize); Type=[string]$t.accordionNameEn }) | Out-Null   # v1.30.2 - fileSize is text ("15.5 MB")
-            }
-        }
-    } catch { Log "  Driver list parse error: $($_.Exception.Message)" }
-    Log "  Driver list: $($drivers.Count) SoftPaq(s) published for this product."
-    if ($drivers.Count -eq 0) { return $false }
-
-    # 4. CVA match against the missing devices. One small CVA download per
-    #    candidate; utilities, BIOS and anything without a [Devices] list drop out.
-    $candidates = [System.Collections.Generic.List[object]]::new()
-    $ci = 0
-    foreach ($d in $drivers) {
-        if (Test-Cancelled) { return $false }
-        if (-not $d.Ssm) { continue }
-        if ($d.Url -notmatch '(?i)/(sp\d+)\.exe$') { continue }
-        $spId   = $Matches[1].ToLower()
-        $cvaUrl = $d.Url -replace '(?i)\.exe$', '.cva'
-        $ci++
-        SetDownload -Pct -1 -Label "Checking SoftPaq metadata $ci/$($drivers.Count)..."
-        $cvaText = ""
-        try { $cvaText = (& curl.exe --silent --location --max-time 30 --connect-timeout 10 --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" "$cvaUrl" 2>$null) -join "`n" } catch {}
-        if (-not $cvaText) { continue }
-        $cva = Get-HpCvaInfo -Text $cvaText
-        if ($cva.Type -and $cva.Type -notmatch '(?i)driver') { continue }
-        $hits = @(Test-HpCvaAppliesToDevices -Cva $cva -MissingDevices $missing -SysId $sysid)
-        if ($hits.Count -eq 0) { continue }
-        $ver = ($d.Version -replace '\s+Rev\..*$', '').Trim()   # "6.0.60.1111 Rev.H" -> "6.0.60.1111"
-        $candidates.Add(@{ Id=$spId; Name=$d.Title; Version=$ver; Category=$cva.Category; Url=$d.Url; SHA256=$cva.SHA256; Size=$d.Size; SilentInstall=$cva.SilentInstall; Devices=$hits }) | Out-Null
-    }
-    if ($candidates.Count -eq 0) { Log "  No SoftPaq covers a missing device on this machine."; return $false }
-    Log "  $($candidates.Count) SoftPaq(s) cover a missing device; keeping the newest per device."
-    $sps = @(Select-HpConsumerSoftpaqs -Candidates $candidates | Select-Object -First $script:HpConsumerMaxSoftpaqs)
-    $totalBytes = 0L
-    foreach ($sp in $sps) { $totalBytes += [long]$sp.Size }
-    $totalMB = [math]::Round($totalBytes / 1MB, 1)
-    Log "  $($sps.Count) SoftPaq(s) match missing devices ($totalMB MB):"
-    foreach ($sp in $sps) { Log "    $($sp.Id)  $($sp.Name) v$($sp.Version)  -> $($sp.Devices -join ', ')" }
-    if ($totalMB -gt $script:HpConsumerBudgetMB) { Log "  Total exceeds the $($script:HpConsumerBudgetMB) MB budget - skipping the consumer tier."; return $false }
-
-    # 5. Download in parallel, then SHA256-verify / extract / silent-install serially
-    #    through the same helper the commercial catalog uses.
-    if (-not (Test-Path $DriverRoot)) { New-Item -Path $DriverRoot -ItemType Directory -Force | Out-Null }
-    $dlItems = New-Object 'System.Collections.Generic.List[hashtable]'
-    foreach ($sp in $sps) { $dlItems.Add(@{ Url = $sp.Url; OutFile = (Get-HpSoftpaqOutFile -Sp $sp -DriverRoot $DriverRoot); Label = "$($sp.Id) - $($sp.Name)" }) | Out-Null }
-    $dlResults = Invoke-CurlDownloadParallel -Items $dlItems
-    if (Test-Cancelled) { return $false }
-    $okIds = @{}
-    foreach ($r in $dlResults) { if ($r.Success) { $okIds[[System.IO.Path]::GetFileNameWithoutExtension($r.Item.OutFile)] = $true } }
-    # v1.30.4 - one serial, resumable retry for anything the parallel batch lost
-    # (field: both NVIDIA packages died with curl exit 56 mid-transfer).
-    foreach ($sp in $sps) {
-        if ($okIds[$sp.Id]) { continue }
-        if (Test-Cancelled) { return $false }
-        Log "  Retrying $($sp.Id) ($($sp.Name)) serially..."
-        if (Invoke-CurlDownload -Url $sp.Url -OutFile (Get-HpSoftpaqOutFile -Sp $sp -DriverRoot $DriverRoot)) { $okIds[$sp.Id] = $true }
-    }
-    $ready = @($sps | Where-Object { $okIds[$_.Id] })
-    $okCount = 0; $i = 0
-    foreach ($sp in $ready) {
-        $i++
-        if (Test-Cancelled) { return ($okCount -gt 0) }
-        if (-not $sp.SHA256) { Log "  $($sp.Id): CVA carries no SHA256 - not installing an unverified package."; continue }
-        if (Install-HpSoftpaqPostDownload -Sp $sp -DriverRoot $DriverRoot -Index $i -Total $ready.Count) { $okCount++ }
-    }
-    Log "  HP consumer tier: installed $okCount of $($ready.Count) SoftPaq(s)."
-    if ($okCount -gt 0) { try { $null = pnputil /scan-devices 2>&1 } catch {} }
-    return ($okCount -gt 0)
-}
-
 function Start-HpFullPackInstall {
     # v1.26.0 - the HP Driver Pack Matrix scrape + full-pack install, extracted
     # verbatim from Start-HpDriverInstall so the known-device rescue tier can run
@@ -6525,9 +6024,6 @@ function Start-HpFullPackInstall {
     if (Test-Cancelled) { return $false }
     if (-not $packUrl) {
         Log "Model '$ModelName' not found in HP Driver Pack Matrix."
-        # v1.30.0 - consumer lines (ENVY/Pavilion/OMEN/Spectre/Victus) never
-        # appear in the matrix: try the support-site tier before giving up.
-        if (Start-HpConsumerSupportInstall -DriverRoot $DriverRoot -ModelName $ModelName) { return $true }
         Log "Opening HP Driver Pack Matrix for manual selection..."
         Start-Process $matrixUrl
         return $false
@@ -6578,28 +6074,10 @@ function Get-HpDriverPackCatalogXml {
     if (-not (Invoke-CurlDownload -Url $url -OutFile $cab)) { return $null }
     if (Test-CancelFlag) { return $null }
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
-    # v1.30.2 - the CAB holds one file. Field runs (ENVY, 16 Sep 2026) got "no
-    # XML after expand" from the -F:* form, so use the single-file form first
-    # (the same call the Dell catalogs use), then -F:*, then the Shell COM copy.
-    $magic = ""
-    try { $fs = [System.IO.File]::OpenRead($cab); $buf = New-Object byte[] 4; [void]$fs.Read($buf, 0, 4); $fs.Close(); $magic = -join ($buf | ForEach-Object { [char]$_ }) } catch {}
-    if ($magic -ne 'MSCF') { Log "  HP driver-pack catalog: download is not a CAB (magic '$magic')."; return $null }
-    $xmlPath = Join-Path $dir "HPClientDriverPackCatalog.xml"
-    $expandOut = & expand.exe "`"$cab`"" "`"$xmlPath`"" 2>&1
-    Log-Diag "expand (single-file): $expandOut"
+    try {
+        $null = Start-Process -FilePath "expand.exe" -ArgumentList @("-F:*", $cab, $dir) -NoNewWindow -Wait -PassThru -EA Stop
+    } catch { Log "  expand error: $($_.Exception.Message)"; return $null }
     $xmlFile = Get-ChildItem $dir -Filter "*.xml" -Recurse -EA SilentlyContinue | Select-Object -First 1
-    if (-not $xmlFile) {
-        try { $null = Start-Process -FilePath "expand.exe" -ArgumentList @("-F:*", "`"$cab`"", "`"$dir`"") -NoNewWindow -Wait -PassThru -EA Stop } catch { Log "  expand error: $($_.Exception.Message)" }
-        $xmlFile = Get-ChildItem $dir -Filter "*.xml" -Recurse -EA SilentlyContinue | Select-Object -First 1
-    }
-    if (-not $xmlFile) {
-        try {
-            $shell = New-Object -ComObject Shell.Application
-            $src = $shell.NameSpace($cab); $dst = $shell.NameSpace($dir)
-            if ($src -and $dst) { $dst.CopyHere($src.Items(), 0x14); $w = 0; while (-not (Get-ChildItem $dir -EA SilentlyContinue) -and $w -lt 30) { Start-Sleep -Milliseconds 250; $w++ } }
-        } catch { Log "  Shell.Application error: $($_.Exception.Message)" }
-        $xmlFile = Get-ChildItem $dir -Filter "*.xml" -Recurse -EA SilentlyContinue | Select-Object -First 1
-    }
     if (-not $xmlFile) { Log "  HP driver-pack catalog: no XML after expand."; return $null }
     try {
         $bytes = [System.IO.File]::ReadAllBytes($xmlFile.FullName)
@@ -8952,7 +8430,6 @@ function Start-Install {
     $script:AnalyticsInstalledDrivers = New-Object System.Collections.Generic.List[string]
     $script:AnalyticsDownloadUrls    = New-Object System.Collections.Generic.List[hashtable]   # v1.13.1
     $script:AnalyticsStartTime       = Get-Date
-    $script:AnalyticsStopwatch       = [System.Diagnostics.Stopwatch]::StartNew()   # v1.30.0 - duration survives a clock resync mid-run
     $script:7zInstalled              = $false
     $script:HtmlReportWritten        = $false   # v1.17.0 - crash-handler guards
     $script:AnalyticsEventSent       = $false
