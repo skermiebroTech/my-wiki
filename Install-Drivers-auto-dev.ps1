@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.30.1 (keep in sync with $SCRIPT_VERSION below)
+# Version: 1.30.2 (keep in sync with $SCRIPT_VERSION below)
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -74,6 +74,14 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.30.2 - HP consumer tier, second field fix (run 20260916_103331: the
+#           call now reached HP and parsed, but 0 products were found). The
+#           v1.30.1 JavaScriptSerializer path returns Dictionary objects on
+#           Windows PowerShell 5.1 and the product walk expects property
+#           objects. The product step now regexes the RAW response text for
+#           /model/<oid> entries (parser-independent); the other calls use
+#           ConvertFrom-Json (same object shape on 5.1 and 7). The search log
+#           line now shows the answer size.
 # v1.30.1 - HP consumer tier field fix (ENVY 15-dr1xxx run 20260916_102713:
 #           both support-site searches returned 0 matches on the bench while
 #           the same queries answer from a workstation). Invoke-HpSupportJson
@@ -1034,7 +1042,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.30.1"
+$SCRIPT_VERSION = "1.30.2"
 
 # =============================================================
 # TEMP RULE (v1.28.0) - CURRENTLY OFF (v1.28.1): when $true, the WINDOWS
@@ -5975,25 +5983,35 @@ function Start-HpDriverInstall {
 $script:HpConsumerMaxSoftpaqs = 15
 $script:HpConsumerBudgetMB    = 1500
 
+function ConvertTo-HpBytes {
+    # Pure: "15.5 MB" / "627.42 KB" / "1.3 GB" / "12345" -> bytes (long). 0 when unparseable.
+    param($Size)
+    $t = ([string]$Size).Trim()
+    if (-not $t) { return 0 }
+    if ($t -match '^\d+$') { return [long]$t }
+    if ($t -match '^([0-9]+(?:\.[0-9]+)?)\s*(KB|MB|GB|B)?$') {
+        $n = [double]$Matches[1]
+        switch (([string]$Matches[2]).ToUpper()) { 'KB' { $n *= 1KB } 'MB' { $n *= 1MB } 'GB' { $n *= 1GB } }
+        return [long][math]::Round($n)
+    }
+    return 0
+}
+
 function ConvertFrom-HpJson {
-    # v1.30.1 - Windows PowerShell 5.1's ConvertFrom-Json rejects documents over
-    # 2 MB (JavaScriptSerializer MaxJsonLength) and the support-site search
-    # answer can exceed that. Use the serializer directly with the limit
-    # raised on 5.1; ConvertFrom-Json on 7+. Returns $null on any failure.
+    # v1.30.2 - ConvertFrom-Json first: it yields the same PSCustomObject shape
+    # on Windows PowerShell 5.1 and 7, which the walkers below expect. v1.30.1
+    # used the JavaScriptSerializer on 5.1 and its Dictionary objects broke the
+    # product walk (field run 20260916_103331: 0 matches, no error). The
+    # serializer stays only as a fallback for a document over 5.1's 2 MB limit.
     param([string]$Raw)
     if (-not $Raw) { return $null }
-    if ($PSVersionTable.PSVersion.Major -ge 6) {
-        try { return ($Raw | ConvertFrom-Json) } catch { return $null }
-    }
+    try { return ($Raw | ConvertFrom-Json) } catch {}
     try {
         Add-Type -AssemblyName System.Web.Extensions -EA Stop
         $ser = New-Object System.Web.Script.Serialization.JavaScriptSerializer
         $ser.MaxJsonLength = [int]::MaxValue
-        $ser.RecursionLimit = 200
         return $ser.DeserializeObject($Raw)
-    } catch {
-        try { return ($Raw | ConvertFrom-Json) } catch { return $null }
-    }
+    } catch { return $null }
 }
 
 function Invoke-HpSupportJson {
@@ -6003,7 +6021,7 @@ function Invoke-HpSupportJson {
     # for a query that answers from a workstation: the helper used the
     # automatic $args variable for its argument list and swallowed the parse
     # error. Renamed, raw size + failure reason now logged, large-JSON safe.
-    param([string]$Url, [string]$Body = $null, [int]$MaxTimeSec = 60)
+    param([string]$Url, [string]$Body = $null, [int]$MaxTimeSec = 60, [switch]$Raw)
     $bodyFile = $null
     try {
         $curlArgs = @("--silent", "--location", "--max-time", "$MaxTimeSec", "--connect-timeout", "15",
@@ -6024,6 +6042,7 @@ function Invoke-HpSupportJson {
         Remove-Item $outFile -Force -EA SilentlyContinue
         Log-Diag "support.hp.com: $([math]::Round($raw.Length/1KB)) KB, curl exit $rc, $Url"
         if (-not $raw) { Log "  support.hp.com: empty response (curl exit $rc)"; return $null }
+        if ($Raw) { return $raw }   # v1.30.2 - callers that regex the text
         $obj = ConvertFrom-HpJson -Raw $raw
         if ($null -eq $obj) { Log "  support.hp.com: response was not JSON ($([math]::Round($raw.Length/1KB)) KB, starts '$($raw.Substring(0, [math]::Min(60, $raw.Length)) -replace '\s+',' ')')" }
         return $obj
@@ -6036,12 +6055,21 @@ function Invoke-HpSupportJson {
 }
 
 function Find-HpSupportProductOids {
-    # Pure: walk the searchresult categories -> subCategoryList -> productList
-    # tree and return @( @{ Name; Oid } ) for every /model/<oid> targetUrl.
+    # Pure: return @( @{ Name; Oid } ) for every product with a /model/<oid>
+    # targetUrl in a searchresult response. Accepts the RAW JSON text (regex,
+    # independent of how the JSON was parsed - the field-proven path) or an
+    # already-parsed object (walk of categories -> subCategoryList -> productList).
     param($SearchJson)
     $found = New-Object System.Collections.ArrayList
     $seen  = @{}
     if (-not $SearchJson) { return @() }
+    if ($SearchJson -is [string]) {
+        foreach ($m in [regex]::Matches($SearchJson, '"productName"\s*:\s*"([^"]*)"[^{}]*?"targetUrl"\s*:\s*"([^"]*?/model/(\d+)[^"]*)"')) {
+            $oid = $m.Groups[3].Value
+            if (-not $seen.ContainsKey($oid)) { $seen[$oid] = $true; [void]$found.Add(@{ Name = $m.Groups[1].Value; Oid = $oid }) }
+        }
+        return @($found.ToArray())
+    }
     $cats = $null
     try { $cats = $SearchJson.data.kaaSResponse.data.searchResults.categories } catch {}
     if (-not $cats) { return @() }
@@ -6054,10 +6082,7 @@ function Find-HpSupportProductOids {
             $u = [string]$pr.targetUrl
             if ($u -match '/model/(\d+)') {
                 $oid = $Matches[1]
-                if (-not $seen.ContainsKey($oid)) {
-                    $seen[$oid] = $true
-                    [void]$found.Add(@{ Name = [string]$pr.productName; Oid = $oid })
-                }
+                if (-not $seen.ContainsKey($oid)) { $seen[$oid] = $true; [void]$found.Add(@{ Name = [string]$pr.productName; Oid = $oid }) }
             }
         }
         foreach ($sc in @($node.subCategoryList)) { if ($sc) { & $walk $sc } }
@@ -6173,9 +6198,9 @@ function Start-HpConsumerSupportInstall {
     foreach ($q in $queries) {
         if (Test-Cancelled) { return $false }
         $enc = [uri]::EscapeDataString($q)
-        $sj  = Invoke-HpSupportJson -Url "https://support.hp.com/wcc-services/searchresult/us-en?q=$enc&context=pdp&navigation=false&authState=anonymous&template=Search"
+        $sj  = Invoke-HpSupportJson -Raw -Url "https://support.hp.com/wcc-services/searchresult/us-en?q=$enc&context=pdp&navigation=false&authState=anonymous&template=Search"
         $found = @(Find-HpSupportProductOids -SearchJson $sj)
-        Log "  Search '$q' -> $($found.Count) product match(es)."
+        Log "  Search '$q' -> $($found.Count) product match(es) ($([math]::Round(([string]$sj).Length/1KB)) KB answer)."
         foreach ($o in $found) { if (-not $seenOid[$o.Oid]) { $seenOid[$o.Oid] = $true; $oids += ,$o } }
     }
     if ($oids.Count -eq 0) { Log "  support.hp.com has no product entry for this machine."; return $false }
@@ -6202,10 +6227,10 @@ function Start-HpConsumerSupportInstall {
             foreach ($d in @($t.softwareDriversList)) {
                 $l = $d.latestVersionDriver
                 if (-not $l -or -not $l.fileUrl) { continue }
-                $drivers.Add(@{ Title=[string]$l.title; Version=[string]$l.version; Url=[string]$l.fileUrl; Ssm=[bool]$l.ssmCompliant; Size=[long]$l.fileSize; Type=[string]$t.accordionNameEn }) | Out-Null
+                $drivers.Add(@{ Title=[string]$l.title; Version=[string]$l.version; Url=[string]$l.fileUrl; Ssm=[bool]$l.ssmCompliant; Size=(ConvertTo-HpBytes $l.fileSize); Type=[string]$t.accordionNameEn }) | Out-Null   # v1.30.2 - fileSize is text ("15.5 MB")
             }
         }
-    } catch {}
+    } catch { Log "  Driver list parse error: $($_.Exception.Message)" }
     Log "  Driver list: $($drivers.Count) SoftPaq(s) published for this product."
     if ($drivers.Count -eq 0) { return $false }
 

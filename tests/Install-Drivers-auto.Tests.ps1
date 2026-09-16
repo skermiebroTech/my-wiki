@@ -20,7 +20,7 @@ $ErrorActionPreference = 'Stop'
 # script's main body creates a WinForms form, so it cannot be dot-sourced here).
 $tok=$null;$err=$null
 $ast=[System.Management.Automation.Language.Parser]::ParseFile($ScriptPath,[ref]$tok,[ref]$err)
-$want='Find-HpSupportProductOids','Select-HpSupportOs','Get-HpCvaInfo','Test-HpCvaAppliesToDevices','Get-MsCatalogResultRows','Select-MsCatalogDriverGuid','Find-DellIndexManifestPath','Test-DellOsCode','Test-DellOsArch','Test-ActionableProblemCode','Get-ProblemCodeHint','Select-HpDriverPack','Find-DellCatalogDeviceMatches'
+$want='ConvertTo-HpBytes','Find-HpSupportProductOids','Select-HpSupportOs','Get-HpCvaInfo','Test-HpCvaAppliesToDevices','Get-MsCatalogResultRows','Select-MsCatalogDriverGuid','Find-DellIndexManifestPath','Test-DellOsCode','Test-DellOsArch','Test-ActionableProblemCode','Get-ProblemCodeHint','Select-HpDriverPack','Find-DellCatalogDeviceMatches'
 foreach ($f in $ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst]},$true)) {
     if ($want -contains $f.Name) { Invoke-Expression $f.Extent.Text }
 }
@@ -95,6 +95,11 @@ $sj2 = Get-Content (Join-Path $Fixtures 'hp-support-search-product.json') -Raw |
 $oids2 = @(Find-HpSupportProductOids -SearchJson $sj2)
 Check "product-name search yields OID 31291399" (@($oids2 | Where-Object { $_.Oid -eq '31291399' }).Count -eq 1)
 Check "empty search yields nothing" (@(Find-HpSupportProductOids -SearchJson $null).Count -eq 0)
+$rawTxt = Get-Content (Join-Path $Fixtures 'hp-support-search-model.json') -Raw
+$oidsRaw = @(Find-HpSupportProductOids -SearchJson $rawTxt)
+Check "raw-text search yields the same OIDs as the object walk" ($oidsRaw.Count -eq $oids.Count -and $oidsRaw[0].Oid -eq $oids[0].Oid)
+$rawTxt2 = Get-Content (Join-Path $Fixtures 'hp-support-search-product.json') -Raw
+Check "raw-text product search yields OID 31291399" (@(Find-HpSupportProductOids -SearchJson $rawTxt2 | Where-Object { $_.Oid -eq '31291399' }).Count -eq 1)
 $oj = Get-Content (Join-Path $Fixtures 'hp-support-osVersionData.json') -Raw | ConvertFrom-Json
 $os = Select-HpSupportOs -OsJson $oj -IsWin11 $true -DisplayVersion '24H2'
 Check "Win11 machine falls back to Windows 10 (64-bit) generic" ($os -and $os.OsName -eq 'Windows 10 (64-bit)' -and $os.OsTmsId -eq '792898937266030878164166465223921' -and $os.PlatformId -eq '487192269364721453674728010296573')
@@ -103,6 +108,7 @@ Check "Win10 20H2 machine picks the 20H2 row" ($os10.OsName -like '*20H2*')
 $cva = Get-HpCvaInfo -Text (Get-Content (Join-Path $Fixtures 'hp-sp144777.cva') -Raw)
 Check "CVA softpaq number + SHA256" ($cva.SoftpaqNumber -eq 'sp144777' -and $cva.SHA256 -eq 'F009CC64AE92EBD6F32CE6348E5E5171E2E0EB1E4A628BC96913A5C792C0071A')
 Check "CVA type Driver, 8 device ids, silent install" ($cva.Type -eq 'Driver' -and $cva.Devices.Count -eq 8 -and $cva.Devices -contains 'USB\VID_06CB&PID_00DF' -and $cva.SilentInstall)
+Check "size text parses (15.5 MB, 627.42 KB, 1.3 GB, 12345)" ((ConvertTo-HpBytes "15.5 MB") -eq 16252928 -and (ConvertTo-HpBytes "627.42 KB") -eq 642478 -and (ConvertTo-HpBytes "1.3 GB") -eq 1395864371 -and (ConvertTo-HpBytes "12345") -eq 12345 -and (ConvertTo-HpBytes "") -eq 0)
 Check "CVA sysids include 8830 (ProBook 635 Aero G7)" ($cva.SysIds -contains '8830')
 $devs = @([pscustomobject]@{ Name='Synaptics WBDI'; HardwareIDs=@('USB\VID_06CB&PID_00DF&REV_0100','USB\VID_06CB&PID_00DF'); CompatibleIDs=@('USB\CLASS_FF') },
           [pscustomobject]@{ Name='Other'; HardwareIDs=@('PCI\VEN_8086&DEV_51F0'); CompatibleIDs=@() })
