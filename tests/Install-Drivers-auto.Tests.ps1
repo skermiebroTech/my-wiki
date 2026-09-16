@@ -20,7 +20,7 @@ $ErrorActionPreference = 'Stop'
 # script's main body creates a WinForms form, so it cannot be dot-sourced here).
 $tok=$null;$err=$null
 $ast=[System.Management.Automation.Language.Parser]::ParseFile($ScriptPath,[ref]$tok,[ref]$err)
-$want='ConvertTo-HpMatchId','Select-HpConsumerSoftpaqs','Invoke-HpSupportJson','ConvertFrom-HpJson','ConvertTo-HpBytes','Find-HpSupportProductOids','Select-HpSupportOs','Get-HpCvaInfo','Test-HpCvaAppliesToDevices','Get-MsCatalogResultRows','Select-MsCatalogDriverGuid','Find-DellIndexManifestPath','Test-DellOsCode','Test-DellOsArch','Test-ActionableProblemCode','Get-ProblemCodeHint','Select-HpDriverPack','Find-DellCatalogDeviceMatches'
+$want='Test-HpVersionNewer','ConvertTo-HpMatchId','Select-HpConsumerSoftpaqs','Invoke-HpSupportJson','ConvertFrom-HpJson','ConvertTo-HpBytes','Find-HpSupportProductOids','Select-HpSupportOs','Get-HpCvaInfo','Test-HpCvaAppliesToDevices','Get-MsCatalogResultRows','Select-MsCatalogDriverGuid','Find-DellIndexManifestPath','Test-DellOsCode','Test-DellOsArch','Test-ActionableProblemCode','Get-ProblemCodeHint','Select-HpDriverPack','Find-DellCatalogDeviceMatches'
 foreach ($f in $ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst]},$true)) {
     if ($want -contains $f.Name) { Invoke-Expression $f.Extent.Text }
 }
@@ -137,6 +137,15 @@ $cands = @(@{ Id='sp138969'; Name='Synaptics Fingerprint Driver'; Version='6.0.6
            @{ Id='sp100206'; Name='NVIDIA Graphics Driver - Comet Lake'; Version='26.21.14.3198'; Devices=@('3D Video Controller') })
 $win = @(Select-HpConsumerSoftpaqs -Candidates $cands)
 Check "newest package per device: 2 winners (sp138969, sp111684)" ($win.Count -eq 2 -and @($win | Where-Object { $_.Id -eq 'sp138969' }).Count -eq 1 -and @($win | Where-Object { $_.Id -eq 'sp111684' }).Count -eq 1)
+# v1.30.5 regression: a New-Object List[object] is PSObject-wrapped; @() on it
+# threw "Argument types do not match" and aborted the run.
+$candList = New-Object System.Collections.Generic.List[object]
+foreach ($c in $cands) { $candList.Add($c) | Out-Null }
+$winList = @()
+try { $winList = @(Select-HpConsumerSoftpaqs -Candidates $candList) } catch { $winList = @() }
+Check "selector accepts a New-Object List[object] (2 winners)" ($winList.Count -eq 2)
+Check "version compare: 6.0.60.1111 newer than 6.0.39.1111" ((Test-HpVersionNewer -Candidate '6.0.60.1111' -Current '6.0.39.1111') -eq $true)
+Check "version compare: text version loses to a numeric one" ((Test-HpVersionNewer -Candidate 'Rev.H' -Current '1.0') -eq $false)
 Check "CVA with no SysId check still matches" (@(Test-HpCvaAppliesToDevices -Cva $cva -MissingDevices $devs -SysId '').Count -eq 1)
 ""
 "passed: $pass  failed: $fail"

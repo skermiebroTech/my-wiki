@@ -1,6 +1,6 @@
 # =============================================================
 # Install-Drivers-auto.ps1
-# Version: 1.30.4 (keep in sync with $SCRIPT_VERSION below)
+# Version: 1.30.5 (keep in sync with $SCRIPT_VERSION below)
 # Author:  skermiebroTech
 # Repo:    https://github.com/skermiebroTech/my-wiki
 #
@@ -74,6 +74,14 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.30.5 - HP consumer tier CRASH FIX (run 20260916_112743 aborted with
+#           "Argument types do not match" at foreach ($c in @($Candidates))).
+#           A List[object] made with New-Object comes back wrapped in a
+#           PSObject, and @() on that wrapped list throws inside the PowerShell
+#           compiler (Windows PowerShell 5.1 and pwsh 7.6 both). The selector
+#           now walks the list directly, both tier lists are built with
+#           ::new() (no wrapper), and versions compare through
+#           [version]::TryParse (Test-HpVersionNewer) instead of try/catch.
 # v1.30.4 - HP consumer tier: first successful field run (ENVY 15-dr1xxx,
 #           run 20260916_111036: 5 of 5 matched SoftPaqs installed, missing
 #           8 -> 6) showed four gaps, all fixed:
@@ -1064,7 +1072,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.30.4"
+$SCRIPT_VERSION = "1.30.5"
 
 # =============================================================
 # TEMP RULE (v1.28.0) - CURRENTLY OFF (v1.28.1): when $true, the WINDOWS
@@ -6231,23 +6239,36 @@ function Get-DeviceParentHardwareIds {
     return @($out | Where-Object { $_ })
 }
 
+function Test-HpVersionNewer {
+    # Pure: $true when $Candidate is a newer version string than $Current.
+    # Numeric versions compare as [version]; a version that does not parse
+    # loses to one that does; two unparsable strings compare as text.
+    param([string]$Candidate, [string]$Current)
+    $vc = $null; $vp = $null
+    $okC = [version]::TryParse($Candidate, [ref]$vc)
+    $okP = [version]::TryParse($Current, [ref]$vp)
+    if ($okC -and $okP) { return [bool]($vc -gt $vp) }
+    if ($okC) { return $true }
+    if ($okP) { return $false }
+    return [bool]([string]::Compare($Candidate, $Current, $true) -gt 0)
+}
+
 function Select-HpConsumerSoftpaqs {
     # Pure: from CVA-matched candidates (@{ Id; Name; Version; Devices=@(names) ...})
     # keep, for EACH missing device, only the newest package that covers it,
     # then return the distinct winners. The first field run installed three
     # fingerprint packages for one sensor, newest first and older ones after
     # it, which left the sensor at code 31.
+    # v1.30.5 - do NOT wrap $Candidates in @(): a New-Object List[object] is
+    # PSObject-wrapped and @() on it throws "Argument types do not match".
     param($Candidates)
     $best = @{}   # device name -> candidate
-    foreach ($c in @($Candidates)) {
+    foreach ($c in $Candidates) {
         if (-not $c) { continue }
         foreach ($devName in @($c.Devices)) {
             $prev = $best[$devName]
-            $newer = $true
-            if ($prev) {
-                try { $newer = ([version]$c.Version -gt [version]$prev.Version) } catch { $newer = ([string]$c.Version -gt [string]$prev.Version) }
-            }
-            if (-not $prev -or $newer) { $best[$devName] = $c }
+            if ($null -eq $prev) { $best[$devName] = $c; continue }
+            if (Test-HpVersionNewer -Candidate ([string]$c.Version) -Current ([string]$prev.Version)) { $best[$devName] = $c }
         }
     }
     $winners = @{}
@@ -6311,7 +6332,7 @@ function Start-HpConsumerSupportInstall {
     # 3. Driver list.
     $body = '{"productLineCode":"","lc":"en","cc":"us","osTMSId":"' + $osSel.OsTmsId + '","osName":"' + ($osSel.OsName -replace '"','') + '","productSeriesOid":"' + $oid + '","platformId":"' + $osSel.PlatformId + '"}'
     $dj = Invoke-HpSupportJson -Url "https://support.hp.com/wcc-services/swd-v2/driverDetails?authState=anonymous&template=SWDSeriesDownload" -Body $body
-    $drivers = New-Object System.Collections.Generic.List[object]
+    $drivers = [System.Collections.Generic.List[object]]::new()   # v1.30.5 - ::new(), not New-Object (PSObject wrapper breaks @())
     try {
         foreach ($t in @($dj.data.softwareTypes)) {
             foreach ($d in @($t.softwareDriversList)) {
@@ -6326,7 +6347,7 @@ function Start-HpConsumerSupportInstall {
 
     # 4. CVA match against the missing devices. One small CVA download per
     #    candidate; utilities, BIOS and anything without a [Devices] list drop out.
-    $candidates = New-Object System.Collections.Generic.List[object]
+    $candidates = [System.Collections.Generic.List[object]]::new()
     $ci = 0
     foreach ($d in $drivers) {
         if (Test-Cancelled) { return $false }
