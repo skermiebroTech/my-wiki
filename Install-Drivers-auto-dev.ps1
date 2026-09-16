@@ -81,7 +81,9 @@
 #           objects. The product step now regexes the RAW response text for
 #           /model/<oid> entries (parser-independent); the other calls use
 #           ConvertFrom-Json (same object shape on 5.1 and 7). The search log
-#           line now shows the answer size.
+#           line now shows the answer size. The HP driver-pack catalog CAB
+#           now expands via the single-file form first (bench runs logged
+#           "no XML after expand" from -F:*), then -F:*, then Shell COM.
 # v1.30.1 - HP consumer tier field fix (ENVY 15-dr1xxx run 20260916_102713:
 #           both support-site searches returned 0 matches on the bench while
 #           the same queries answer from a workstation). Invoke-HpSupportJson
@@ -6451,10 +6453,28 @@ function Get-HpDriverPackCatalogXml {
     if (-not (Invoke-CurlDownload -Url $url -OutFile $cab)) { return $null }
     if (Test-CancelFlag) { return $null }
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
-    try {
-        $null = Start-Process -FilePath "expand.exe" -ArgumentList @("-F:*", $cab, $dir) -NoNewWindow -Wait -PassThru -EA Stop
-    } catch { Log "  expand error: $($_.Exception.Message)"; return $null }
+    # v1.30.2 - the CAB holds one file. Field runs (ENVY, 16 Sep 2026) got "no
+    # XML after expand" from the -F:* form, so use the single-file form first
+    # (the same call the Dell catalogs use), then -F:*, then the Shell COM copy.
+    $magic = ""
+    try { $fs = [System.IO.File]::OpenRead($cab); $buf = New-Object byte[] 4; [void]$fs.Read($buf, 0, 4); $fs.Close(); $magic = -join ($buf | ForEach-Object { [char]$_ }) } catch {}
+    if ($magic -ne 'MSCF') { Log "  HP driver-pack catalog: download is not a CAB (magic '$magic')."; return $null }
+    $xmlPath = Join-Path $dir "HPClientDriverPackCatalog.xml"
+    $expandOut = & expand.exe "`"$cab`"" "`"$xmlPath`"" 2>&1
+    Log-Diag "expand (single-file): $expandOut"
     $xmlFile = Get-ChildItem $dir -Filter "*.xml" -Recurse -EA SilentlyContinue | Select-Object -First 1
+    if (-not $xmlFile) {
+        try { $null = Start-Process -FilePath "expand.exe" -ArgumentList @("-F:*", "`"$cab`"", "`"$dir`"") -NoNewWindow -Wait -PassThru -EA Stop } catch { Log "  expand error: $($_.Exception.Message)" }
+        $xmlFile = Get-ChildItem $dir -Filter "*.xml" -Recurse -EA SilentlyContinue | Select-Object -First 1
+    }
+    if (-not $xmlFile) {
+        try {
+            $shell = New-Object -ComObject Shell.Application
+            $src = $shell.NameSpace($cab); $dst = $shell.NameSpace($dir)
+            if ($src -and $dst) { $dst.CopyHere($src.Items(), 0x14); $w = 0; while (-not (Get-ChildItem $dir -EA SilentlyContinue) -and $w -lt 30) { Start-Sleep -Milliseconds 250; $w++ } }
+        } catch { Log "  Shell.Application error: $($_.Exception.Message)" }
+        $xmlFile = Get-ChildItem $dir -Filter "*.xml" -Recurse -EA SilentlyContinue | Select-Object -First 1
+    }
     if (-not $xmlFile) { Log "  HP driver-pack catalog: no XML after expand."; return $null }
     try {
         $bytes = [System.IO.File]::ReadAllBytes($xmlFile.FullName)
