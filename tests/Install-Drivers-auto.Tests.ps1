@@ -20,7 +20,7 @@ $ErrorActionPreference = 'Stop'
 # script's main body creates a WinForms form, so it cannot be dot-sourced here).
 $tok=$null;$err=$null
 $ast=[System.Management.Automation.Language.Parser]::ParseFile($ScriptPath,[ref]$tok,[ref]$err)
-$want='Get-MsCatalogCabUrls','Test-HpVersionNewer','ConvertTo-HpMatchId','Select-HpConsumerSoftpaqs','Invoke-HpSupportJson','ConvertFrom-HpJson','ConvertTo-HpBytes','Find-HpSupportProductOids','Select-HpSupportOs','Get-HpCvaInfo','Test-HpCvaAppliesToDevices','Get-MsCatalogResultRows','Select-MsCatalogDriverGuid','Find-DellIndexManifestPath','Test-DellOsCode','Test-DellOsArch','Test-ActionableProblemCode','Get-ProblemCodeHint','Select-HpDriverPack','Find-DellCatalogDeviceMatches','Get-NormalizedManufacturer','Test-PlaceholderManufacturer','Get-AsusModelCandidates','Select-AsusOsId','ConvertTo-AsusVersion','Get-AsusDriverEntries','Find-AsusDriverMatches'
+$want='Get-MsCatalogCabUrls','Test-HpVersionNewer','ConvertTo-HpMatchId','Select-HpConsumerSoftpaqs','Invoke-HpSupportJson','ConvertFrom-HpJson','ConvertTo-HpBytes','Find-HpSupportProductOids','Select-HpSupportOs','Get-HpCvaInfo','Test-HpCvaAppliesToDevices','Get-MsCatalogResultRows','Select-MsCatalogDriverGuid','Find-DellIndexManifestPath','Test-DellOsCode','Test-DellOsArch','Test-ActionableProblemCode','Get-ProblemCodeHint','Select-HpDriverPack','Find-DellCatalogDeviceMatches','Get-NormalizedManufacturer','Test-PlaceholderManufacturer','Get-AsusModelCandidates','Select-AsusOsId','ConvertTo-AsusVersion','Get-AsusDriverEntries','Find-AsusDriverMatches','Get-InfHardwareIds','Select-AsusInfScanCandidates'
 foreach ($f in $ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst]},$true)) {
     if ($want -contains $f.Name) { Invoke-Expression $f.Extent.Text }
 }
@@ -245,6 +245,37 @@ $iAsus    = ($body | Select-String -SimpleMatch 'elseif ($manufacturer -match "A
 $iUnknown = ($body | Select-String -SimpleMatch "Unrecognised manufacturer: '" | Select-Object -First 1).LineNumber
 Check "dispatch: ASUS branch sits before the unknown branch" ($iAsus -and $iUnknown -and $iAsus -lt $iUnknown)
 Check "7-Zip prep includes ASUS"                          (@($body | Where-Object { $_ -match 'manufacturer -match "Dell\|HP\|Hewlett\|ASUS"' }).Count -eq 1)
+
+
+"== ASUS INF scan and pnputil marker (v1.31.1) =="
+# Run 20260921_134333 (Vivobook S 16 M5606UA): the ASUS list names only GPIO
+# ids for "AMD Chipset Driver", so the PSP device stayed missing.
+$infIds = @(Get-InfHardwareIds -Text (Get-Content (Join-Path $Fixtures 'asus-sample-chipset.inf') -Raw))
+Check "INF: model-line ids read"                         ($infIds -contains 'PCI\VEN_1022&DEV_17E0' -and $infIds -contains 'PCI\VEN_1022&DEV_1649')
+Check "INF: every id after the install section kept"     ($infIds -contains 'ACPI\AMDI0102' -and $infIds -contains 'ACPI\AMDI0103')
+Check "INF: commented-out line ignored"                  ($infIds -notcontains 'PCI\VEN_1022&DEV_0000')
+Check "INF: [Strings] text and file lines ignored"       ($infIds.Count -eq 4)
+Check "INF: empty text gives nothing"                    (@(Get-InfHardwareIds -Text '').Count -eq 0)
+$pspDev = @([pscustomobject]@{ Name='PCI Encryption/Decryption Controller'; DeviceID='PCI\VEN_1022&DEV_17E0\x'; HardwareIDs=@('PCI\VEN_1022&DEV_17E0&SUBSYS_1F4D1043&REV_00'); CompatibleIDs=@(); ParentHardwareIDs=@() })
+Check "INF: scanned ids match the PSP device"            (@(Test-HpCvaAppliesToDevices -Cva @{ Devices=$infIds; SysIds=@() } -MissingDevices $pspDev -SysId '').Count -eq 1)
+
+$m56 = Get-Content (Join-Path $Fixtures 'asus-GetPDDrivers-M5606UA-trimmed.json') -Raw | ConvertFrom-Json
+$m56All = Get-AsusDriverEntries -DriverJson $m56 -IncludeUnlisted
+Check "IncludeUnlisted keeps the Alcor card reader"      (@($m56All | Where-Object { $_.Name -eq 'Alcor Card Reader Driver' }).Count -eq 2)
+Check "IncludeUnlisted still drops Store links"          (@($m56All | Where-Object { $_.Url -match 'microsoft\.com' }).Count -eq 0)
+$chosen = @('MediaTek WLAN Driver', 'MediaTek Bluetooth Driver', 'ASUS System Control Interface v3')
+$scan = @(Select-AsusInfScanCandidates -Entries $m56All -ChosenNames $chosen -MaxBytes (60MB))
+Check "scan: AMD Chipset Driver is a candidate"          (@($scan | Where-Object { $_.Name -eq 'AMD Chipset Driver' }).Count -eq 1)
+Check "scan: newest Alcor only (2.0.154.10337)"          (@($scan | Where-Object { $_.Name -eq 'Alcor Card Reader Driver' }).Count -eq 1 -and (@($scan | Where-Object { $_.Name -eq 'Alcor Card Reader Driver' })[0].Version -eq '2.0.154.10337'))
+Check "scan: chosen titles excluded, older versions too" (@($scan | Where-Object { $chosen -contains $_.Name }).Count -eq 0)
+Check "scan: packages over the cap excluded"             (@($scan | Where-Object { $_.Name -match 'Graphics|Realtek Audio' }).Count -eq 0)
+Check "scan: one entry per title"                        (@($scan | Group-Object Name | Where-Object { $_.Count -gt 1 }).Count -eq 0)
+
+$markerLine = @($body | Where-Object { $_ -match 'outText -match' -and $_ -match 'Driver package installed on matching' })
+Check "pnputil marker: both call sites know the Win10/11 wording" ($markerLine.Count -eq 2)
+$rx = [regex]::Match($markerLine[0], "-match '([^']+)'").Groups[1].Value
+Check "pnputil marker: Win10/11 bind line matches"       ("Driver package added successfully.`nDriver package installed on matching devices." -match $rx)
+Check "pnputil marker: store-only add does not match"    (-not ("Driver package added successfully.`nFailed to install the driver on any devices on the system : No more data is available." -match $rx))
 
 ""
 "passed: $pass  failed: $fail"

@@ -1,0 +1,775 @@
+{
+ "Result": {
+  "Count": 25,
+  "Obj": [
+   {
+    "Name": "Networking",
+    "Files": [
+     {
+      "Id": "3@1861@0@1@52@67@WirelessLan_DCH_MediaTek_Z_V3.4.2.1304_44135_1.exe",
+      "Version": "V3.4.2.1304",
+      "Title": "MediaTek WLAN Driver",
+      "FileSize": "13.33 MB",
+      "ReleaseDate": "2025/08/05",
+      "DownloadUrl": {
+       "Global": "https://dlcdnets.asus.com/pub/ASUS/nb/Image/Driver/Networking/44135/WirelessLan_DCH_MediaTek_Z_V3.4.2.1304_44135_1.exe?model=M5606UA",
+       "China": ""
+      },
+      "HardwareInfoList": [
+       {
+        "hardwareid": "PCI\\VEN_14C3&DEV_0616&SUBSYS_061614C3",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_14C3&DEV_0616&SUBSYS_51421A3B",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_14C3&DEV_0616&SUBSYS_59171A3B",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_14C3&DEV_0616&SUBSYS_C61614C3",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_14C3&DEV_0616&SUBSYS_D61614C3",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_14C3&DEV_0616&SUBSYS_E0CD105B",
+        "date": null,
+        "version": null
+       }
+      ],
+      "sha256": "C9FBDB090706F5BDB0E80E73BB158E5E21AEC1162C5BEA7D8890C7D51C0681F9"
+     },
+     {
+      "Id": "3@1861@0@1@52@67@WirelessLan_DCH_MediaTek_B_V3.4.2.1191_43093_1.exe",
+      "Version": "V3.4.2.1191",
+      "Title": "MediaTek WLAN Driver",
+      "FileSize": "12.1 MB",
+      "ReleaseDate": "2025/04/08",
+      "DownloadUrl": {
+       "Global": "https://dlcdnets.asus.com/pub/ASUS/nb/Image/Driver/Networking/43093/WirelessLan_DCH_MediaTek_B_V3.4.2.1191_43093_1.exe?model=M5606UA",
+       "China": ""
+      },
+      "HardwareInfoList": [
+       {
+        "hardwareid": "PCI\\VEN_14C3&DEV_0616&SUBSYS_061614C3",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_14C3&DEV_0616&SUBSYS_51421A3B",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_14C3&DEV_0616&SUBSYS_59171A3B",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_14C3&DEV_0616&SUBSYS_C61614C3",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_14C3&DEV_0616&SUBSYS_D61614C3",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_14C3&DEV_0616&SUBSYS_E0CD105B",
+        "date": null,
+        "version": null
+       }
+      ],
+      "sha256": "4B1A61CBBCAD5D51F1847313B87D0F361CEFD06457341B46502C827D98A3F375"
+     }
+    ]
+   },
+   {
+    "Name": "Chipset",
+    "Files": [
+     {
+      "Id": "3@1861@0@1@52@23@AMD_Chipset_DriverOnly_DCH_AMD_B_V1.2.0.124Sub24_49749.exe",
+      "Version": "V1.2.0.124",
+      "Title": "AMD Chipset Driver",
+      "FileSize": "4.81 MB",
+      "ReleaseDate": "2026/05/27",
+      "DownloadUrl": {
+       "Global": "https://dlcdnets.asus.com/pub/ASUS/nb/Image/Driver/Chipset/49749/AMD_Chipset_DriverOnly_DCH_AMD_B_V1.2.0.124Sub24_49749.exe?model=M5606UA",
+       "China": ""
+      },
+      "HardwareInfoList": [
+       {
+        "hardwareid": "ACPI\\AMD0010",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "ACPI\\AMDI0010",
+        "date": null,
+        "version": null
+       }
+      ],
+      "sha256": "A1EC0D505E00B2B7504E67F429DC96153414F7641D9601EA10F793A308D324E5"
+     }
+    ]
+   },
+   {
+    "Name": "Audio",
+    "Files": [
+     {
+      "Id": "3@1861@0@1@52@4@Realtek Codec Console Application",
+      "Version": "latest version at the MS store",
+      "Title": "Realtek Codec Console Application",
+      "FileSize": "9.13 MB",
+      "ReleaseDate": "2022/09/07",
+      "DownloadUrl": {
+       "Global": "https://www.microsoft.com/store/apps/9p2b8mcsvpln?tp=RHJpdmVyTm90ZWJvb2s=",
+       "China": "https://www.microsoft.com/store/apps/9p2b8mcsvpln?tp=RHJpdmVyTm90ZWJvb2s="
+      },
+      "HardwareInfoList": [],
+      "sha256": "8BBA97C6B45088AC319CEAF6AD9CF969A1B69B4A3917AB218A244474D704CDAD"
+     },
+     {
+      "Id": "3@1861@0@1@52@4@Audio_DriverOnly_Dolby_DCH_Realtek_B_V6.0.9692.1_38777_1.exe",
+      "Version": "V6.0.9692.1",
+      "Title": "Realtek Audio Driver",
+      "FileSize": "179.92 MB",
+      "ReleaseDate": "2024/06/28",
+      "DownloadUrl": {
+       "Global": "https://dlcdnets.asus.com/pub/ASUS/nb/Image/Driver/Audio/38777/Audio_DriverOnly_Dolby_DCH_Realtek_B_V6.0.9692.1_38777_1.exe?model=M5606UA",
+       "China": ""
+      },
+      "HardwareInfoList": [
+       {
+        "hardwareid": "HDAUDIO\\FUNC_01&VEN_10EC&DEV_0255&SUBSYS_10438818",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "HDAUDIO\\FUNC_01&VEN_10EC&DEV_0256&SUBSYS_1043105F",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "HDAUDIO\\FUNC_01&VEN_10EC&DEV_0256&SUBSYS_1043106F",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "HDAUDIO\\FUNC_01&VEN_10EC&DEV_0256&SUBSYS_10431083",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "HDAUDIO\\FUNC_01&VEN_10EC&DEV_0256&SUBSYS_104310A3",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "HDAUDIO\\FUNC_01&VEN_10EC&DEV_0256&SUBSYS_104310B2",
+        "date": null,
+        "version": null
+       }
+      ],
+      "sha256": "CBB2CFF744D4B6C6BF6880BE50F58A5506C4CFB405864E533175349CB7C82BCA"
+     },
+     {
+      "Id": "3@1861@0@1@52@4@Audio_DriverOnly_Dolby_DCH_Realtek_B_V6.0.9648.1_37458_1.exe",
+      "Version": "V6.0.9648.1",
+      "Title": "Realtek Audio Driver",
+      "FileSize": "96.01 MB",
+      "ReleaseDate": "2024/03/26",
+      "DownloadUrl": {
+       "Global": "https://dlcdnets.asus.com/pub/ASUS/nb/Image/Driver/Audio/37458/Audio_DriverOnly_Dolby_DCH_Realtek_B_V6.0.9648.1_37458_1.exe?model=M5606UA",
+       "China": ""
+      },
+      "HardwareInfoList": [
+       {
+        "hardwareid": "HDAUDIO\\FUNC_01&VEN_10EC&DEV_0255&SUBSYS_10438818",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "HDAUDIO\\FUNC_01&VEN_10EC&DEV_0256&SUBSYS_1043105F",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "HDAUDIO\\FUNC_01&VEN_10EC&DEV_0256&SUBSYS_1043106F",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "HDAUDIO\\FUNC_01&VEN_10EC&DEV_0256&SUBSYS_10431083",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "HDAUDIO\\FUNC_01&VEN_10EC&DEV_0256&SUBSYS_104310A3",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "HDAUDIO\\FUNC_01&VEN_10EC&DEV_0256&SUBSYS_104310B2",
+        "date": null,
+        "version": null
+       }
+      ],
+      "sha256": "2BAAF506F0FF885F148004F918BF65A0FB5DEBD9BF4C874276C549302E154346"
+     }
+    ]
+   },
+   {
+    "Name": "Graphics",
+    "Files": [
+     {
+      "Id": "3@1861@0@1@52@68@AMD_Graphic_V32.0.13022.3006_43721_2_1.exe",
+      "Version": "V32.0.13022.3006",
+      "Title": "AMD Graphics Driver",
+      "FileSize": "752.93 MB",
+      "ReleaseDate": "2025/05/29",
+      "DownloadUrl": {
+       "Global": "https://dlcdnets.asus.com/pub/ASUS/nb/Image/Driver/Graphics/43721/AMD_Graphic_V32.0.13022.3006_43721_2_1.exe?model=M5606UA",
+       "China": ""
+      },
+      "HardwareInfoList": [
+       {
+        "hardwareid": "PCI\\VEN_1002&DEV_1114&SUBSYS_10241043&REV_C2",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_1002&DEV_1114&SUBSYS_10241043&REV_C3",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_1002&DEV_1114&SUBSYS_10441043&REV_C2",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_1002&DEV_1114&SUBSYS_10441043&REV_C3",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_1002&DEV_1114&SUBSYS_10D41043&REV_C2",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_1002&DEV_1114&SUBSYS_10D41043&REV_D2",
+        "date": null,
+        "version": null
+       }
+      ],
+      "sha256": "8A9EB30F4E449B57024AD6AF00669B10D7FD83FFF16E8DFDABBCA7A35277DD53"
+     },
+     {
+      "Id": "3@1861@0@1@52@68@AMD Graphic Control Panel Application",
+      "Version": "latest version at the MS store",
+      "Title": "AMD Graphic Control Panel Application",
+      "FileSize": "124.05 MB",
+      "ReleaseDate": "2022/09/06",
+      "DownloadUrl": {
+       "Global": "https://www.microsoft.com/store/apps/9N9370CRZ0FN?tp=RHJpdmVyTm90ZWJvb2s=",
+       "China": "https://www.microsoft.com/store/apps/9N9370CRZ0FN?tp=RHJpdmVyTm90ZWJvb2s="
+      },
+      "HardwareInfoList": [],
+      "sha256": "96F62344B1915E222154C90614DE1D2A6AE8E338AE738FB6AB60CA6B113DA042"
+     }
+    ]
+   },
+   {
+    "Name": "Card Reader",
+    "Files": [
+     {
+      "Id": "3@1861@0@1@52@8@CardReader_DCH_Alcor_B_V2.0.154.10337_38782_1.exe",
+      "Version": "V2.0.154.10337",
+      "Title": "Alcor Card Reader Driver",
+      "FileSize": "4.82 MB",
+      "ReleaseDate": "2024/06/28",
+      "DownloadUrl": {
+       "Global": "https://dlcdnets.asus.com/pub/ASUS/nb/Image/Driver/CardReader/38782/CardReader_DCH_Alcor_B_V2.0.154.10337_38782_1.exe?model=M5606UA",
+       "China": ""
+      },
+      "HardwareInfoList": [],
+      "sha256": "D5363D720123D0DFE3517B2966F53AA0353C6A12F24F91DFED3C226DA1B58171"
+     },
+     {
+      "Id": "3@1861@0@1@52@8@CardReader_DCH_Alcor_B_V2.0.154.10336Sub1_36365_2.exe",
+      "Version": "V2.0.154.10336",
+      "Title": "Alcor Card Reader Driver",
+      "FileSize": "4.82 MB",
+      "ReleaseDate": "2024/01/03",
+      "DownloadUrl": {
+       "Global": "https://dlcdnets.asus.com/pub/ASUS/nb/Image/Driver/CardReader/36365/CardReader_DCH_Alcor_B_V2.0.154.10336Sub1_36365_2.exe?model=M5606UA",
+       "China": ""
+      },
+      "HardwareInfoList": [],
+      "sha256": "1024E88C9FE26315FC39299287263DB84116A26778C286C16F7BFBAA3CF83389"
+     }
+    ]
+   },
+   {
+    "Name": "Pointing Device",
+    "Files": [
+     {
+      "Id": "3@1861@0@1@52@10@PrecisionTouchPad_DCH_ASUS_Z_V16.0.0.41_47015.exe",
+      "Version": "V16.0.0.41",
+      "Title": "ASUS Precision TouchPad Driver",
+      "FileSize": "5.79 MB",
+      "ReleaseDate": "2025/11/28",
+      "DownloadUrl": {
+       "Global": "https://dlcdnets.asus.com/pub/ASUS/nb/Image/Driver/PointingDevice/47015/PrecisionTouchPad_DCH_ASUS_Z_V16.0.0.41_47015.exe?model=M5606UA",
+       "China": ""
+      },
+      "HardwareInfoList": [
+       {
+        "hardwareid": "HID\\ASCE1200&COL02",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "HID\\ASCE1201&COL02",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "HID\\ASCE1202&COL02",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "HID\\ASCE1203&COL02",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "HID\\ASCE1204&COL02",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "HID\\ASCE1205&COL02",
+        "date": null,
+        "version": null
+       }
+      ],
+      "sha256": "D8468EEB99C09518AD2F67807728DD38FD3F7A7B7FB43F5222EDCD4704F722D3"
+     },
+     {
+      "Id": "3@1861@0@1@52@10@PrecisionTouchPad_DCH_ASUS_X_V16.0.0.31_40009_1.exe",
+      "Version": "V16.0.0.31",
+      "Title": "ASUS Precision TouchPad Driver",
+      "FileSize": "4.34 MB",
+      "ReleaseDate": "2024/10/07",
+      "DownloadUrl": {
+       "Global": "https://dlcdnets.asus.com/pub/ASUS/nb/Image/Driver/PointingDevice/40009/PrecisionTouchPad_DCH_ASUS_X_V16.0.0.31_40009_1.exe?model=M5606UA",
+       "China": ""
+      },
+      "HardwareInfoList": [
+       {
+        "hardwareid": "HID\\ASCE1200&Col02",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "HID\\ASCE1201&Col02",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "HID\\ASCE1202&Col02",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "HID\\ASCE1203&Col02",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "HID\\ASCE1204&Col02",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "HID\\ASCE1205&Col02",
+        "date": null,
+        "version": null
+       }
+      ],
+      "sha256": "FCD2FCE000F5BACC103F5BBCCABCB6B12654C100021F29321916E798D62539AB"
+     }
+    ]
+   },
+   {
+    "Name": "USB",
+    "Files": [
+     {
+      "Id": "3@1861@0@1@52@22@Parade_Retimer_DCH_Parade_B_V1.0.016.00_38787_1.exe",
+      "Version": "V1.0.016.00",
+      "Title": "Parade Retimer Driver",
+      "FileSize": "4.2 MB",
+      "ReleaseDate": "2024/06/28",
+      "DownloadUrl": {
+       "Global": "https://dlcdnets.asus.com/pub/ASUS/nb/Image/Driver/USB/38787/Parade_Retimer_DCH_Parade_B_V1.0.016.00_38787_1.exe?model=M5606UA",
+       "China": ""
+      },
+      "HardwareInfoList": [
+       {
+        "hardwareid": "ACPI\\PS883008",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "ACPI\\PS883010",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "ACPI\\PS883018",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "ACPI\\PS883020",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "ACPI\\PS883028",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "ACPI\\PS883030",
+        "date": null,
+        "version": null
+       }
+      ],
+      "sha256": "6827E087451C3F4A2BAFB15F628160294F7D318C8FB7270C341C1F92DB840142"
+     }
+    ]
+   },
+   {
+    "Name": "Bluetooth",
+    "Files": [
+     {
+      "Id": "3@1861@0@1@52@27@Bluetooth_DCH_MediaTek_Z_V1.1043.2.545_44136_1.exe",
+      "Version": "V1.1043.2.545",
+      "Title": "MediaTek Bluetooth Driver",
+      "FileSize": "13.33 MB",
+      "ReleaseDate": "2025/08/05",
+      "DownloadUrl": {
+       "Global": "https://dlcdnets.asus.com/pub/ASUS/nb/Image/Driver/Bluetooth/44136/Bluetooth_DCH_MediaTek_Z_V1.1043.2.545_44136_1.exe?model=M5606UA",
+       "China": ""
+      },
+      "HardwareInfoList": [
+       {
+        "hardwareid": "USB\\VID_0489&PID_E0E2&MI_00",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "USB\\VID_0489&PID_E0F5&MI_00",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "USB\\VID_0489&PID_E0F6&MI_00",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "USB\\VID_0E8D&PID_0616&MI_00",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "USB\\VID_0E8D&PID_7902&MI_00",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "USB\\VID_0E8D&PID_7920&MI_00",
+        "date": null,
+        "version": null
+       }
+      ],
+      "sha256": "233FBBBE61E02F0532ACA231632708B0E40078DDCC6719928C7E205A39EB3815"
+     },
+     {
+      "Id": "3@1861@0@1@52@27@Bluetooth_DCH_MediaTek_B_V1.1042.2.504_43095_1.exe",
+      "Version": "V1.1042.2.504",
+      "Title": "MediaTek Bluetooth Driver",
+      "FileSize": "12.1 MB",
+      "ReleaseDate": "2025/04/08",
+      "DownloadUrl": {
+       "Global": "https://dlcdnets.asus.com/pub/ASUS/nb/Image/Driver/Bluetooth/43095/Bluetooth_DCH_MediaTek_B_V1.1042.2.504_43095_1.exe?model=M5606UA",
+       "China": ""
+      },
+      "HardwareInfoList": [
+       {
+        "hardwareid": "USB\\VID_0489&PID_E0E2&MI_00",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "USB\\VID_0489&PID_E0F5&MI_00",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "USB\\VID_0489&PID_E0F6&MI_00",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "USB\\VID_0E8D&PID_0616&MI_00",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "USB\\VID_0E8D&PID_7902&MI_00",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "USB\\VID_0E8D&PID_7920&MI_00",
+        "date": null,
+        "version": null
+       }
+      ],
+      "sha256": "9D7B64B1D7647F334BA4503F68B590BE136EB21B5923448CD3261376EB8E7829"
+     }
+    ]
+   },
+   {
+    "Name": "Software and Utility",
+    "Files": [
+     {
+      "Id": "3@1861@0@1@52@14@ScreenXpert",
+      "Version": "latest version at the MS store",
+      "Title": "ScreenXpert",
+      "FileSize": "66.01 MB",
+      "ReleaseDate": "2022/09/05",
+      "DownloadUrl": {
+       "Global": "https://www.microsoft.com/store/apps/9N5RFFGFHHP6?tp=U29mdHdhcmVOb3RlYm9vaw==",
+       "China": "https://www.microsoft.com/store/apps/9N5RFFGFHHP6?tp=U29mdHdhcmVOb3RlYm9vaw=="
+      },
+      "HardwareInfoList": [],
+      "sha256": "837183A5F5BBC7DD170533FDC54B2FCE6EDDEDC6A983E4D9C77C664EAEAC4E45"
+     },
+     {
+      "Id": "3@1861@0@1@52@14@MyASUS",
+      "Version": "latest version at the MS store",
+      "Title": "MyASUS",
+      "FileSize": "97.91 MB",
+      "ReleaseDate": "2022/09/08",
+      "DownloadUrl": {
+       "Global": "https://www.microsoft.com/store/apps/9N7R5S6B0ZZH?tp=U29mdHdhcmVOb3RlYm9vaw==",
+       "China": "https://www.microsoft.com/store/apps/9N7R5S6B0ZZH?tp=U29mdHdhcmVOb3RlYm9vaw=="
+      },
+      "HardwareInfoList": [],
+      "sha256": "893FC7BCACC6334271C187B6F1FB31CD880D838C7F01A27A0F677D9A461C5C72"
+     },
+     {
+      "Id": "3@1861@0@1@52@14@MyASUSSplendid_ASUS_X_V3.0.0.573_37498_1.exe",
+      "Version": "V3.0.0.573",
+      "Title": "MyASUS Splendid",
+      "FileSize": "4.11 MB",
+      "ReleaseDate": "2024/03/26",
+      "DownloadUrl": {
+       "Global": "https://dlcdnets.asus.com/pub/ASUS/nb/Image/Driver/SoftwareandUtility/37498/MyASUSSplendid_ASUS_X_V3.0.0.573_37498_1.exe?model=M5606UA",
+       "China": ""
+      },
+      "HardwareInfoList": [
+       {
+        "hardwareid": "MONITOR\\SDC416E",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "MONITOR\\SDC4178",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "MONITOR\\SDC4180",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "MONITOR\\SDC419D",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "MONITOR\\SDC41A0",
+        "date": null,
+        "version": null
+       }
+      ],
+      "sha256": "6C7D50DFEBFF7620677CBF5344139841D89B64BED784E1045576942171A912B3"
+     },
+     {
+      "Id": "3@1861@0@1@52@14@MyASUSSplendid_ASUS_X_V1.0.0.539_36664_2.exe",
+      "Version": "V1.0.0.539",
+      "Title": "MyASUS Splendid",
+      "FileSize": "4.11 MB",
+      "ReleaseDate": "2024/01/03",
+      "DownloadUrl": {
+       "Global": "https://dlcdnets.asus.com/pub/ASUS/nb/Image/Driver/SoftwareandUtility/36664/MyASUSSplendid_ASUS_X_V1.0.0.539_36664_2.exe?model=M5606UA",
+       "China": ""
+      },
+      "HardwareInfoList": [
+       {
+        "hardwareid": "MONITOR\\SDC416E",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "MONITOR\\SDC4178",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "MONITOR\\SDC419D",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "MONITOR\\SDC41A0",
+        "date": null,
+        "version": null
+       }
+      ],
+      "sha256": "BD09A6221C5A571D6BE9D74CDC927D33C152A1B588B6F2F24247D6353AC88880"
+     },
+     {
+      "Id": "3@1861@0@1@52@14@MSFT_MEP_DCH_Microsoft_X_V1.0.42.0Sub1_43712_1.exe",
+      "Version": "V1.0.42.0",
+      "Title": "Microsoft Effect Pack(MEP) driver",
+      "FileSize": "33.49 MB",
+      "ReleaseDate": "2025/05/29",
+      "DownloadUrl": {
+       "Global": "https://dlcdnets.asus.com/pub/ASUS/nb/Image/Driver/SoftwareandUtility/43712/MSFT_MEP_DCH_Microsoft_X_V1.0.42.0Sub1_43712_1.exe?model=M5606UA",
+       "China": ""
+      },
+      "HardwareInfoList": [
+       {
+        "hardwareid": "SWC\\MEP_VEN_1022_DEV_1502",
+        "date": null,
+        "version": null
+       }
+      ],
+      "sha256": "B4244B66CD3FECE5E7C91F08155399DA23A6FE46D8B01838B024B8FCD267F880"
+     },
+     {
+      "Id": "3@1861@0@1@52@14@GlideX",
+      "Version": "latest version at the MS store",
+      "Title": "GlideX",
+      "FileSize": "39.95 MB",
+      "ReleaseDate": "2021/12/23",
+      "DownloadUrl": {
+       "Global": "https://www.microsoft.com/store/apps/9PLH2SV1DVK5?tp=U29mdHdhcmVOb3RlYm9vaw==",
+       "China": "https://www.microsoft.com/store/apps/9PLH2SV1DVK5?tp=U29mdHdhcmVOb3RlYm9vaw=="
+      },
+      "HardwareInfoList": [],
+      "sha256": "B2476C6B9E3E1811104D6D748E1D0CAC1A1D6EE0A29B064558AFC20122E89F4E"
+     },
+     {
+      "Id": "3@1861@0@1@52@14@ASUS_Z_V10.305.722.23_16577_2.exe",
+      "Version": "V10.305.722.23",
+      "Title": "Dolby Atmos driver",
+      "FileSize": "8.42 MB",
+      "ReleaseDate": "2025/03/19",
+      "DownloadUrl": {
+       "Global": "https://dlcdnets.asus.com/pub/ASUS/nb/Image/Software/SoftwareandUtility/16577/ASUS_Z_V10.305.722.23_16577_2.exe?model=M5606UA",
+       "China": ""
+      },
+      "HardwareInfoList": [],
+      "sha256": "2CAEFBD10E3B7E9EF2EB9743CAF8AE4406416C056690FF6A268E4E161F53115C"
+     },
+     {
+      "Id": "3@1861@0@1@52@14@ASUS_Z_V10.123.533.43_16509_2.exe",
+      "Version": "V10.123.533.43",
+      "Title": "Dolby Atmos driver",
+      "FileSize": "8.43 MB",
+      "ReleaseDate": "2025/02/12",
+      "DownloadUrl": {
+       "Global": "https://dlcdnets.asus.com/pub/ASUS/nb/Image/Software/SoftwareandUtility/16509/ASUS_Z_V10.123.533.43_16509_2.exe?model=M5606UA",
+       "China": ""
+      },
+      "HardwareInfoList": [],
+      "sha256": "13F8E66FE6693C97B93814F32D4DAC513F1C489E3C81CCC14D99195C819C9C7D"
+     },
+     {
+      "Id": "3@1861@0@1@52@14@ASUSSystemControlInterfacev3_ASUS_Z_V3.1.70.0_17972.exe",
+      "Version": "V3.1.70.0",
+      "Title": "ASUS System Control Interface v3",
+      "FileSize": "14.3 MB",
+      "ReleaseDate": "2026/08/24",
+      "DownloadUrl": {
+       "Global": "https://dlcdnets.asus.com/pub/ASUS/nb/Image/Software/SoftwareandUtility/17972/ASUSSystemControlInterfacev3_ASUS_Z_V3.1.70.0_17972.exe?model=M5606UA",
+       "China": ""
+      },
+      "HardwareInfoList": [
+       {
+        "hardwareid": "ACPI\\ASUS2018",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "ACPI\\ASUS2025",
+        "date": null,
+        "version": null
+       }
+      ],
+      "sha256": "05AB51F189B3847670DD2E74C2DE541DC17B4A96FB85AC75CF859BAA0F93F4F5"
+     },
+     {
+      "Id": "3@1861@0@1@52@14@ASUSSystemControlInterfacev3_ASUS_Z_V3.1.68.0_17922.exe",
+      "Version": "V3.1.68.0",
+      "Title": "ASUS System Control Interface v3",
+      "FileSize": "15.77 MB",
+      "ReleaseDate": "2026/08/13",
+      "DownloadUrl": {
+       "Global": "https://dlcdnets.asus.com/pub/ASUS/nb/Image/Software/SoftwareandUtility/17922/ASUSSystemControlInterfacev3_ASUS_Z_V3.1.68.0_17922.exe?model=M5606UA",
+       "China": ""
+      },
+      "HardwareInfoList": [
+       {
+        "hardwareid": "ACPI\\ASUS2018",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "ACPI\\ASUS2025",
+        "date": null,
+        "version": null
+       }
+      ],
+      "sha256": "B7D5148CF31AAEBD881D0B1D094AEDF887774ABBCBF14525001FB1D4F93C34F0"
+     }
+    ]
+   }
+  ]
+ },
+ "Status": "SUCCESS",
+ "Message": "SUCCESS"
+}

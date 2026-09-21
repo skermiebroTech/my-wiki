@@ -1,0 +1,25 @@
+; Synthetic INF modelled on an AMD chipset package (v1.31.1 test fixture)
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = System
+Provider    = %ProviderName%
+
+[SourceDisksFiles]
+sample.sys = 1,,
+
+[Manufacturer]
+%MfgName% = SampleMfg, NTamd64
+
+[SampleMfg.NTamd64]
+%Psp.DeviceDesc%  = Psp_Device, PCI\VEN_1022&DEV_1649          ; old part
+%Psp.DeviceDesc%  = Psp_Device, PCI\VEN_1022&DEV_17E0
+%Pmf.DeviceDesc%=Pmf_Install, ACPI\AMDI0102, ACPI\AMDI0103
+;%Old.DeviceDesc% = Old_Install, PCI\VEN_1022&DEV_0000
+
+[Psp_Device.NT]
+CopyFiles = Psp.CopyFiles
+
+[Strings]
+ProviderName   = "Sample, Inc."
+Psp.DeviceDesc = "Sample PSP Device, PCI\VEN_FAKE"
+MfgName        = "Sample"

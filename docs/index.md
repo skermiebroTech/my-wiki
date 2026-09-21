@@ -5,8 +5,9 @@ powershell -WindowStyle Hidden -ExecutionPolicy Bypass -Command "irm https://raw
 ```
 ## DEV Version (could be unstable)
 ```
-powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto-dev.ps1 | iex"
+powershell -WindowStyle Hidden -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto-dev.ps1 | iex"
 ```
+⚠️ Windows Defender wont let you run this without the  `-WindowStyle Hidden` tag it flags with `!ML` this is a false positive 
 ## Windows 11 OOBE bypass
 Creates a local admin `user` with no password, skips OOBE, and reboots. Press Shift+F10 at any OOBE screen:
 ```
