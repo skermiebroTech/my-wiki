@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
       
@@ -29,7 +29,7 @@
       
     
     
-      <link rel="stylesheet" href="assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="assets/stylesheets/main.484c7ddc.min.css">
       
         
         <link rel="stylesheet" href="assets/stylesheets/palette.ab4e12ef.min.css">
@@ -871,19 +871,20 @@
 
 <h1 id="quick-driver-installation">⚡ Quick Driver Installation<a class="headerlink" href="#quick-driver-installation" title="Permanent link">&para;</a></h1>
 <h2 id="automatic-one-liner">Automatic one liner:<a class="headerlink" href="#automatic-one-liner" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>powershell -WindowStyle Hidden -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto.ps1 | iex"
+<div class="highlight"><pre><span></span><code>powershell -WindowStyle Hidden -ExecutionPolicy Bypass -Command &quot;irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto.ps1 | iex&quot;
 </code></pre></div>
 <h2 id="dev-version-could-be-unstable">DEV Version (could be unstable)<a class="headerlink" href="#dev-version-could-be-unstable" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto-dev.ps1 | iex"
+<p><div class="highlight"><pre><span></span><code>powershell -WindowStyle Hidden -ExecutionPolicy Bypass -Command &quot;irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto-dev.ps1 | iex&quot;
 </code></pre></div>
+⚠️ Windows Defender wont let you run this without the  <code>-WindowStyle Hidden</code> tag it flags with <code>!ML</code> this is a false positive </p>
 <h2 id="windows-11-oobe-bypass">Windows 11 OOBE bypass<a class="headerlink" href="#windows-11-oobe-bypass" title="Permanent link">&para;</a></h2>
 <p>Creates a local admin <code>user</code> with no password, skips OOBE, and reboots. Press Shift+F10 at any OOBE screen:
-<div class="highlight"><pre><span></span><code>powershell -ep bypass -nop -c "irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Bypass-OOBE.ps1 | iex"
+<div class="highlight"><pre><span></span><code>powershell -ep bypass -nop -c &quot;irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Bypass-OOBE.ps1 | iex&quot;
 </code></pre></div>
 No network at OOBE? Put <a href="https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Bypass-OOBE.cmd">Bypass-OOBE.cmd</a> on a USB stick and run <code>X:\Bypass-OOBE.cmd</code>. See the <a href="oobe-bypass/">full guide</a>.</p>
 <h2 id="battery-health-label">Battery Health Label<a class="headerlink" href="#battery-health-label" title="Permanent link">&para;</a></h2>
 <p>Prints battery health % to the Zebra label printer (172.17.21.186). Run from Win+R:
-<div class="highlight"><pre><span></span><code>powershell -NoProfile -Command "irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Print-BatteryLabel.ps1|iex"
+<div class="highlight"><pre><span></span><code>powershell -NoProfile -Command &quot;irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Print-BatteryLabel.ps1|iex&quot;
 </code></pre></div></p>
 <h2 id="macos-sticker-printer">MacOS sticker printer<a class="headerlink" href="#macos-sticker-printer" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>curl -s https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Print-Sticker-mac.sh | zsh
@@ -898,16 +899,16 @@ No network at OOBE? Put <a href="https://raw.githubusercontent.com/skermiebroTec
 <li><a href="https://openthecamera.com/camtest">Camera Test</a></li>
 </ul>
 <h2 id="dell">Dell<a class="headerlink" href="#dell" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>pnputil<span class="w"> </span>/add-driver<span class="w"> </span><span class="s2">"C:\Users\Administrator\&lt;model&gt;\*.inf"</span><span class="w"> </span>/subdirs<span class="w"> </span>/install
+<div class="highlight"><pre><span></span><code>pnputil<span class="w"> </span>/add-driver<span class="w"> </span><span class="s2">&quot;C:\Users\Administrator\&lt;model&gt;\*.inf&quot;</span><span class="w"> </span>/subdirs<span class="w"> </span>/install
 </code></pre></div>
 <p>⚠️ Folder name changes per model. Replace <code>&lt;model&gt;</code> with folder name.</p>
 <hr />
 <h2 id="lenovo">Lenovo<a class="headerlink" href="#lenovo" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>pnputil<span class="w"> </span>/add-driver<span class="w"> </span><span class="s2">"C:\DRIVERS\*.inf"</span><span class="w"> </span>/subdirs<span class="w"> </span>/install
+<div class="highlight"><pre><span></span><code>pnputil<span class="w"> </span>/add-driver<span class="w"> </span><span class="s2">&quot;C:\DRIVERS\*.inf&quot;</span><span class="w"> </span>/subdirs<span class="w"> </span>/install
 </code></pre></div>
 <hr />
 <h2 id="hp">HP<a class="headerlink" href="#hp" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>pnputil<span class="w"> </span>/add-driver<span class="w"> </span><span class="s2">"C:\SWSetup\*.inf"</span><span class="w"> </span>/subdirs<span class="w"> </span>/install
+<div class="highlight"><pre><span></span><code>pnputil<span class="w"> </span>/add-driver<span class="w"> </span><span class="s2">&quot;C:\SWSetup\*.inf&quot;</span><span class="w"> </span>/subdirs<span class="w"> </span>/install
 </code></pre></div>
 <hr />
 <p>Author: Joel Skerman | Date: 23 Apr 2026 | updated: 26 Aug 2026</p>
@@ -963,7 +964,7 @@ No network at OOBE? Put <a href="https://raw.githubusercontent.com/skermiebroTec
       <script id="__config" type="application/json">{"annotate": null, "base": ".", "features": ["content.code.copy"], "search": "assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="assets/javascripts/bundle.79ae519e.min.js"></script>
       
         <script src="js/open_in_new_tab.js"></script>
       
