@@ -74,6 +74,20 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.30.8 - Unknown brands no longer dead-end at the Surface picker (run
+#           20260921_201150, Razer Blade 16 RZ09-0483: 21 missing drivers, 0
+#           installed, 0 MB downloaded). 'Razer' matched no vendor, so the run
+#           offered a SURFACE model list; Cancel was the only honest answer,
+#           and Cancel returned before the vendor-agnostic tiers. Razer (like
+#           most boutique OEMs) publishes no driver catalog, but the missing
+#           devices are stock Intel/NVIDIA/Realtek parts that the Windows
+#           Update and MS Update Catalog tiers can serve by hardware ID.
+#           The picker now shows only for a blank or placeholder manufacturer
+#           (Test-PlaceholderManufacturer: OEMBY, "To Be Filled By O.E.M.",
+#           "System manufacturer", "Default string"...) - the case it was
+#           built for. A real, unsupported brand skips the vendor phase and
+#           falls through to the fallbacks, in GUI and headless alike. The
+#           headless "looks like a Surface" -Model override is unchanged.
 # v1.30.7 - Alienware machines never reached the Dell path (run 20260921_110550,
 #           Alienware m18 R2, SKU 0C9D: 26 missing drivers, 0 installed).
 #           Win32_ComputerSystem.Manufacturer reads 'Alienware', not 'Dell
@@ -1093,7 +1107,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.30.7"
+$SCRIPT_VERSION = "1.30.8"
 
 # =============================================================
 # TEMP RULE (v1.28.0) - CURRENTLY OFF (v1.28.1): when $true, the WINDOWS
@@ -4293,6 +4307,20 @@ function Get-NormalizedManufacturer {
     $m = $Manufacturer.Trim()
     if ($m -match '(?i)^\s*alienware\b') { return 'Dell' }
     return $m
+}
+
+function Test-PlaceholderManufacturer {
+    # v1.30.8 - Pure: $true when a WMI Manufacturer string names no real
+    # brand - blank, or a firmware placeholder a board vendor left unfilled.
+    # Only these runs get the Surface model picker: a real but unsupported
+    # brand (Razer, MSI, ASUS...) is never a Surface, so it goes straight to
+    # the vendor-agnostic Windows Update / MS Update Catalog fallbacks.
+    param([string]$Manufacturer)
+    if (-not $Manufacturer) { return $true }
+    $m = $Manufacturer.Trim()
+    if (-not $m) { return $true }
+    $placeholders = '^(?i)(oemby|oem|o\.?e\.?m\.?|to be filled by o\.?e\.?m\.?|system manufacturer|default string|not applicable|n/a|none|unknown|manufacturer|invalid|x+)$'
+    return [bool]($m -match $placeholders)
 }
 
 function Test-DellOsArch {
@@ -9273,7 +9301,15 @@ function Start-Install {
         Log "Unrecognised manufacturer: '$manufacturer'"
         Log "  Model reported as: '$model'"
 
-        if ($script:Headless) {
+        $surfaceModelMatch = $SurfaceDownloadIds.Keys | Where-Object { $model -ilike "*$_*" } | Select-Object -First 1
+        if (-not $surfaceModelMatch -and -not (Test-PlaceholderManufacturer -Manufacturer $manufacturer)) {
+            # v1.30.8 - A real brand with no vendor driver source (e.g. Razer).
+            # Skip the vendor phase; the Windows Update / MS Update Catalog
+            # fallbacks below still run against every missing hardware ID.
+            Log "  No vendor driver source for '$manufacturer' - skipping the vendor driver-pack phase."
+            Log "  Continuing with the Windows Update and Microsoft Update Catalog fallbacks."
+            $success = $false
+        } elseif ($script:Headless) {
             # Allow headless override: if -Model param contains a known Surface name, proceed.
             $headlessSurfaceMatch = $SurfaceDownloadIds.Keys | Where-Object { $model -ilike "*$_*" } | Select-Object -First 1
             if ($headlessSurfaceMatch) {

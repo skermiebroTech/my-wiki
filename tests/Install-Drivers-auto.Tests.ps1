@@ -20,7 +20,7 @@ $ErrorActionPreference = 'Stop'
 # script's main body creates a WinForms form, so it cannot be dot-sourced here).
 $tok=$null;$err=$null
 $ast=[System.Management.Automation.Language.Parser]::ParseFile($ScriptPath,[ref]$tok,[ref]$err)
-$want='Get-MsCatalogCabUrls','Test-HpVersionNewer','ConvertTo-HpMatchId','Select-HpConsumerSoftpaqs','Invoke-HpSupportJson','ConvertFrom-HpJson','ConvertTo-HpBytes','Find-HpSupportProductOids','Select-HpSupportOs','Get-HpCvaInfo','Test-HpCvaAppliesToDevices','Get-MsCatalogResultRows','Select-MsCatalogDriverGuid','Find-DellIndexManifestPath','Test-DellOsCode','Test-DellOsArch','Test-ActionableProblemCode','Get-ProblemCodeHint','Select-HpDriverPack','Find-DellCatalogDeviceMatches','Get-NormalizedManufacturer'
+$want='Get-MsCatalogCabUrls','Test-HpVersionNewer','ConvertTo-HpMatchId','Select-HpConsumerSoftpaqs','Invoke-HpSupportJson','ConvertFrom-HpJson','ConvertTo-HpBytes','Find-HpSupportProductOids','Select-HpSupportOs','Get-HpCvaInfo','Test-HpCvaAppliesToDevices','Get-MsCatalogResultRows','Select-MsCatalogDriverGuid','Find-DellIndexManifestPath','Test-DellOsCode','Test-DellOsArch','Test-ActionableProblemCode','Get-ProblemCodeHint','Select-HpDriverPack','Find-DellCatalogDeviceMatches','Get-NormalizedManufacturer','Test-PlaceholderManufacturer'
 foreach ($f in $ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst]},$true)) {
     if ($want -contains $f.Name) { Invoke-Expression $f.Extent.Text }
 }
@@ -175,6 +175,26 @@ $iNorm     = ($body | Select-String -SimpleMatch '$manufacturer = Get-Normalized
 $iDispatch = ($body | Select-String -SimpleMatch 'elseif ($manufacturer -match "Dell")' | Select-Object -First 1).LineNumber
 Check "analytics captures the raw string first" ($iAnalytic -and $iNorm -and $iAnalytic -lt $iNorm)
 Check "normalisation runs before the dispatch"  ($iNorm -and $iDispatch -and $iNorm -lt $iDispatch)
+
+
+"== Unknown brands skip the Surface picker (v1.30.8) =="
+# Run 20260921_201150: a Razer Blade 16 got the Surface model list, the operator
+# cancelled, and the run returned before the Windows Update / catalog fallbacks.
+Check "Razer is a real brand"                  (-not (Test-PlaceholderManufacturer -Manufacturer 'Razer'))
+Check "Micro-Star is a real brand"             (-not (Test-PlaceholderManufacturer -Manufacturer 'Micro-Star International Co., Ltd.'))
+Check "ASUSTeK is a real brand"                (-not (Test-PlaceholderManufacturer -Manufacturer 'ASUSTeK COMPUTER INC.'))
+Check "OEMBY is a placeholder"                 (Test-PlaceholderManufacturer -Manufacturer 'OEMBY')
+Check "blank is a placeholder"                 (Test-PlaceholderManufacturer -Manufacturer '')
+Check "whitespace is a placeholder"            (Test-PlaceholderManufacturer -Manufacturer '   ')
+Check "To Be Filled By O.E.M. is a placeholder" (Test-PlaceholderManufacturer -Manufacturer 'To Be Filled By O.E.M.')
+Check "System manufacturer is a placeholder"   (Test-PlaceholderManufacturer -Manufacturer 'System manufacturer')
+Check "Default string is a placeholder"        (Test-PlaceholderManufacturer -Manufacturer 'Default string')
+# Ordering guard: the real-brand skip must come before the picker and the headless error.
+$iSkip   = ($body | Select-String -SimpleMatch 'No vendor driver source for' | Select-Object -First 1).LineNumber
+$iPicker = ($body | Select-String -SimpleMatch '$pickedModel = Show-SurfaceModelPicker' | Select-Object -First 1).LineNumber
+$iHlErr  = ($body | Select-String -SimpleMatch "doesn't match a known Surface" | Select-Object -First 1).LineNumber
+Check "real-brand skip runs before the picker"        ($iSkip -and $iPicker -and $iSkip -lt $iPicker)
+Check "real-brand skip runs before the headless error" ($iSkip -and $iHlErr -and $iSkip -lt $iHlErr)
 
 ""
 "passed: $pass  failed: $fail"
