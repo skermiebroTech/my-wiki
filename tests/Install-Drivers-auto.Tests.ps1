@@ -20,7 +20,7 @@ $ErrorActionPreference = 'Stop'
 # script's main body creates a WinForms form, so it cannot be dot-sourced here).
 $tok=$null;$err=$null
 $ast=[System.Management.Automation.Language.Parser]::ParseFile($ScriptPath,[ref]$tok,[ref]$err)
-$want='Get-MsCatalogCabUrls','Test-HpVersionNewer','ConvertTo-HpMatchId','Select-HpConsumerSoftpaqs','Invoke-HpSupportJson','ConvertFrom-HpJson','ConvertTo-HpBytes','Find-HpSupportProductOids','Select-HpSupportOs','Get-HpCvaInfo','Test-HpCvaAppliesToDevices','Get-MsCatalogResultRows','Select-MsCatalogDriverGuid','Find-DellIndexManifestPath','Test-DellOsCode','Test-DellOsArch','Test-ActionableProblemCode','Get-ProblemCodeHint','Select-HpDriverPack','Find-DellCatalogDeviceMatches'
+$want='Get-MsCatalogCabUrls','Test-HpVersionNewer','ConvertTo-HpMatchId','Select-HpConsumerSoftpaqs','Invoke-HpSupportJson','ConvertFrom-HpJson','ConvertTo-HpBytes','Find-HpSupportProductOids','Select-HpSupportOs','Get-HpCvaInfo','Test-HpCvaAppliesToDevices','Get-MsCatalogResultRows','Select-MsCatalogDriverGuid','Find-DellIndexManifestPath','Test-DellOsCode','Test-DellOsArch','Test-ActionableProblemCode','Get-ProblemCodeHint','Select-HpDriverPack','Find-DellCatalogDeviceMatches','Get-NormalizedManufacturer'
 foreach ($f in $ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst]},$true)) {
     if ($want -contains $f.Name) { Invoke-Expression $f.Extent.Text }
 }
@@ -153,6 +153,29 @@ Check "catalog download: one .cab URL stays a full URL at index 0" ($cabUrls.Cou
 $callerLine = (Get-Content $ScriptPath | Where-Object { $_ -match 'Resolve-MsCatalogDownloadUrls -Guid' -and $_ -notmatch '^\s*#' -and $_ -match '=' })
 Check "catalog download caller wraps the resolver in @()" (@($callerLine).Count -eq 1 -and $callerLine -match '@\(Resolve-MsCatalogDownloadUrls')
 Check "CVA with no SysId check still matches" (@(Test-HpCvaAppliesToDevices -Cva $cva -MissingDevices $devs -SysId '').Count -eq 1)
+
+"== Manufacturer normalisation (v1.30.7) =="
+# Run 20260921_110550: WMI said "Alienware", the dispatch tests "Dell", and the
+# machine fell through to the Surface model picker with 26 drivers missing.
+Check "Alienware maps to Dell"                 ((Get-NormalizedManufacturer -Manufacturer 'Alienware') -eq 'Dell')
+Check "case and padding do not matter"         ((Get-NormalizedManufacturer -Manufacturer '  ALIENWARE ') -eq 'Dell')
+Check "normalised value satisfies the dispatch" ((Get-NormalizedManufacturer -Manufacturer 'Alienware') -match 'Dell')
+Check "normalised value satisfies 7-Zip prep"  ((Get-NormalizedManufacturer -Manufacturer 'Alienware') -match 'Dell|HP|Hewlett')
+Check "Dell Inc. passes through unchanged"     ((Get-NormalizedManufacturer -Manufacturer 'Dell Inc.') -eq 'Dell Inc.')
+Check "HP passes through unchanged"            ((Get-NormalizedManufacturer -Manufacturer 'HP') -eq 'HP')
+Check "LENOVO passes through unchanged"        ((Get-NormalizedManufacturer -Manufacturer 'LENOVO') -eq 'LENOVO')
+Check "Microsoft passes through unchanged"     ((Get-NormalizedManufacturer -Manufacturer 'Microsoft Corporation') -eq 'Microsoft Corporation')
+Check "an unknown OEM still reaches the unknown branch" ((Get-NormalizedManufacturer -Manufacturer 'OEMBY') -eq 'OEMBY')
+Check "an empty string stays empty"            ((Get-NormalizedManufacturer -Manufacturer '') -eq '')
+# Ordering guard: analytics must capture the RAW string BEFORE normalisation,
+# so the Sheet keeps Alienware and Dell Inc. apart.
+$body      = Get-Content $ScriptPath
+$iAnalytic = ($body | Select-String -SimpleMatch '$script:AnalyticsManufacturer = $manufacturer' | Select-Object -First 1).LineNumber
+$iNorm     = ($body | Select-String -SimpleMatch '$manufacturer = Get-NormalizedManufacturer' | Select-Object -First 1).LineNumber
+$iDispatch = ($body | Select-String -SimpleMatch 'elseif ($manufacturer -match "Dell")' | Select-Object -First 1).LineNumber
+Check "analytics captures the raw string first" ($iAnalytic -and $iNorm -and $iAnalytic -lt $iNorm)
+Check "normalisation runs before the dispatch"  ($iNorm -and $iDispatch -and $iNorm -lt $iDispatch)
+
 ""
 "passed: $pass  failed: $fail"
 if ($fail -gt 0) { exit 1 }

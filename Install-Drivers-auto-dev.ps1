@@ -74,6 +74,22 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
+# v1.30.7 - Alienware machines never reached the Dell path (run 20260921_110550,
+#           Alienware m18 R2, SKU 0C9D: 26 missing drivers, 0 installed).
+#           Win32_ComputerSystem.Manufacturer reads 'Alienware', not 'Dell
+#           Inc.', so the vendor dispatch fell through every -match test and
+#           landed in the unknown-manufacturer branch, which offers a SURFACE
+#           model picker. The same string test also skipped the 7-Zip prep.
+#           Alienware IS Dell: every PCI SUBSYS on that run ends in 1028, the
+#           service tag 3CJML34 is a Dell tag, and Dell publishes the per-SKU
+#           catalog as Alienware_Notebook_0C9D.cab (verified against the live
+#           catalog: 69 applicable Win11 x64 DRVR packages, covering the RTX
+#           GPU, Killer BE1775 Wi-Fi, Killer E3100 Ethernet, Intel ME,
+#           Thunderbolt, Serial IO, ISS, IPF and the card reader).
+#           Manufacturer is now normalised once, right after detection
+#           (Get-NormalizedManufacturer), so the dispatch, the 7-Zip prep and
+#           every later vendor test agree. Analytics still reports the RAW
+#           string, so the Sheet keeps Alienware separate from Dell.
 # v1.30.6 - MS Update Catalog fallback: a single resolved .cab URL came back
 #           unrolled to a string, so $urls[0] was the letter "h" and curl
 #           failed with exit 6 (run 20260916_134241, Synaptics WBDI). The
@@ -1077,7 +1093,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.30.6"
+$SCRIPT_VERSION = "1.30.7"
 
 # =============================================================
 # TEMP RULE (v1.28.0) - CURRENTLY OFF (v1.28.1): when $true, the WINDOWS
@@ -4262,6 +4278,21 @@ function Test-DellOsCode {
     $c = $Code.ToUpper()
     if ($IsWin11) { return (($Win11Codes -contains $c) -or $c.StartsWith('W11') -or $c.StartsWith('W21')) }
     return (($Win10Codes -contains $c) -or $c.StartsWith('W10'))
+}
+
+function Get-NormalizedManufacturer {
+    # v1.30.7 - Pure: map a WMI Manufacturer string onto the vendor whose
+    # driver path actually serves that machine. A sub-brand reports its own
+    # name in Win32_ComputerSystem, so a literal -match "Dell" never fires:
+    #   Alienware -> Dell  (Dell PCI subsystem 1028, Dell service tag, and a
+    #                       per-SKU catalog named Alienware_Notebook_<SKU>.cab)
+    # Anything already recognised, or genuinely unknown, passes through
+    # untouched - the unknown-manufacturer branch keeps its behaviour.
+    param([string]$Manufacturer)
+    if (-not $Manufacturer) { return $Manufacturer }
+    $m = $Manufacturer.Trim()
+    if ($m -match '(?i)^\s*alienware\b') { return 'Dell' }
+    return $m
 }
 
 function Test-DellOsArch {
@@ -9049,8 +9080,22 @@ function Start-Install {
     $manufacturer = if ($mfgOverridden)   { $Manufacturer } else { $cs.Manufacturer.Trim() }
     $model        = if ($modelOverridden) { $Model }        else { $cs.Model.Trim() }
 
+    # v1.30.7 - analytics keeps the RAW vendor string: the Sheet must still
+    # tell an Alienware apart from a Dell Inc. machine. Only the vendor
+    # dispatch sees the normalised name set just below.
     $script:AnalyticsManufacturer = $manufacturer
     $script:AnalyticsModel        = $model
+
+    # v1.30.7 - fold vendor aliases onto the brand whose driver path serves
+    # them, BEFORE any -match test in the dispatch. Left un-normalised, an
+    # Alienware fell through to the unknown branch and got a Surface picker.
+    $mfgRaw       = $manufacturer
+    $manufacturer = Get-NormalizedManufacturer -Manufacturer $manufacturer
+    if ($manufacturer -ne $mfgRaw) {
+        Log "Manufacturer '$mfgRaw' treated as '$manufacturer' for driver lookup." `
+            -Level "info" -Event "manufacturer_normalised" `
+            -Context @{ raw = $mfgRaw; normalised = $manufacturer }
+    }
     try {
         $osObj = Get-CimInstance Win32_OperatingSystem
         $script:AnalyticsOsVersion = $osObj.Version
@@ -9062,11 +9107,13 @@ function Start-Install {
         try { [System.Windows.Forms.Clipboard]::SetText($model) } catch {}
         # v1.11.0 - title stays static; the detected model lives in the subtitle row
         # for a cleaner header hierarchy. The window title bar matches the subtitle.
-        Set-UiTitle "$manufacturer  $([char]0xB7)  $model"
+        # v1.30.7 - display the RAW vendor string; $manufacturer may be an alias
+        # folded onto another brand for the driver lookup (Alienware -> Dell).
+        Set-UiTitle "$mfgRaw  $([char]0xB7)  $model"
     }
 
     $overrideNote = if ($mfgOverridden -or $modelOverridden) { "  [OVERRIDDEN via param]" } else { "  (from WMI)" }
-    Log "Manufacturer : $manufacturer$overrideNote"
+    Log "Manufacturer : $mfgRaw$overrideNote"
     Log "Model        : $model$overrideNote"
 
     Write-DeviceInfo
