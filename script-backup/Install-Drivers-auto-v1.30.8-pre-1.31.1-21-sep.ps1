@@ -21,7 +21,7 @@
 #   powershell -WindowStyle Hidden -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm https://raw.githubusercontent.com/skermiebroTech/my-wiki/main/Install-Drivers-auto.ps1))) -AutoReboot"
 #
 # Parameters:
-#   -Manufacturer  Override WMI manufacturer detection (Dell, HP, Lenovo, Microsoft, Dynabook, ASUS)
+#   -Manufacturer  Override WMI manufacturer detection (Dell, HP, Lenovo, Microsoft, Dynabook)
 #   -Model         Override WMI model detection
 #   -Headless      Skip GUI, write to console only (auto-set when any param is passed)
 #   -Gui           v1.17.0 - force GUI mode even when other params are passed
@@ -66,7 +66,7 @@
 #                  In headless mode, automatically opens Windows Update if drivers
 #                  remain unresolved. Pass -PromptWindowsUpdate:$false to disable.
 #
-# Supports: Dell, HP, Lenovo, Microsoft (Surface), Dynabook (formerly Toshiba), ASUS
+# Supports: Dell, HP, Lenovo, Microsoft (Surface), Dynabook (formerly Toshiba)
 #
 # Output files written to %USERPROFILE%\Downloads\ (timestamped, one set per run):
 #   DriverInstaller_<ts>.log         - human-readable text log (always)
@@ -74,35 +74,6 @@
 #   DriverInstaller_<ts>.analytics.json - final analytics payload (always)
 #   DriverInstaller_<ts>.report.html - install summary report (on completion)
 #
-# v1.31.1 - ASUS field run 20260921_134333 (Vivobook S 16 M5606UA, AMD):
-#           12 missing -> 9. The ASUS list matched only Wi-Fi, Bluetooth and
-#           the System Control Interface. Its hardware ID list is incomplete:
-#           "AMD Chipset Driver" names only ACPI\AMD0010/AMDI0010 (GPIO) but
-#           carries the PSP, I2C, PMF, MicroPEP and DRTM INFs, and the Alcor
-#           card reader names no IDs at all. New INF-scan pass: for devices
-#           the list does not cover, download the newest version of each
-#           package not already chosen (<= 60 MB each, <= 400 MB total),
-#           verify, extract, read the INF model lines (Get-InfHardwareIds) and
-#           install the packages whose INFs name a still-missing device.
-#           Same run: installed_drivers was empty although 3 devices were
-#           fixed. The pnputil bind marker now also accepts the Windows 10/11
-#           wording "Driver package installed on matching devices" (both
-#           call sites, case-insensitive).
-# v1.31.0 - ASUS support. New vendor branch Start-AsusDriverInstall
-#           (Manufacturer matches "ASUS", e.g. "ASUSTeK COMPUTER INC.").
-#           ASUS has no driver pack or catalog file, but the support site's
-#           JSON API (product.asmx GetPDOS / GetPDDrivers) lists every driver
-#           for a model code, and each entry carries its hardware IDs and a
-#           sha256. The branch derives the model code from WMI Model (text
-#           after the last "_") and the baseboard product, matches the
-#           hardware IDs against the missing devices with the HP CVA prefix
-#           rule (parents included), keeps the newest package per device,
-#           downloads in parallel, verifies the sha256, extracts with
-#           "7z x -t7z" and runs pnputil /add-driver *.inf /subdirs /install
-#           - the same command as the package's own Install.bat. Checked by
-#           hand on 21 Sep 2026 against UX3405MA, X1504VA, G614JV and FA507NV
-#           (API) and five packages (SHA256 + 7z -t7z extraction). Not yet
-#           field-tested on an ASUS machine. 7-Zip prep now includes ASUS.
 # v1.30.8 - Unknown brands no longer dead-end at the Surface picker (run
 #           20260921_201150, Razer Blade 16 RZ09-0483: 21 missing drivers, 0
 #           installed, 0 MB downloaded). 'Razer' matched no vendor, so the run
@@ -1136,7 +1107,7 @@ if ($Silent) { $Headless = $true }
 # VERSION DEFINITION - Single source of truth for all version refs
 # Update this number when making changes to the script
 # =============================================================
-$SCRIPT_VERSION = "1.31.1"
+$SCRIPT_VERSION = "1.30.8"
 
 # =============================================================
 # TEMP RULE (v1.28.0) - CURRENTLY OFF (v1.28.1): when $true, the WINDOWS
@@ -3925,7 +3896,7 @@ function Install-DriversFromPath {
         # exact wording varies by Windows version so we accept any of three.
         if ($infExit -in @(0, 1641, 3010)) {
             $outText = ($out | Out-String)
-            if ($outText -match '(?i)Installed driver package on matching|Driver package installed on matching|Installed on\s+[1-9]\d*\s+device|Successfully installed driver') {
+            if ($outText -match 'Installed driver package on matching|Installed on\s+[1-9]\d*\s+device|Successfully installed driver') {
                 $null = $script:AnalyticsInstalledDrivers.Add($inf.Name)
             }
         }
@@ -4342,7 +4313,7 @@ function Test-PlaceholderManufacturer {
     # v1.30.8 - Pure: $true when a WMI Manufacturer string names no real
     # brand - blank, or a firmware placeholder a board vendor left unfilled.
     # Only these runs get the Surface model picker: a real but unsupported
-    # brand (Razer, MSI, Gigabyte...) is never a Surface, so it goes straight to
+    # brand (Razer, MSI, ASUS...) is never a Surface, so it goes straight to
     # the vendor-agnostic Windows Update / MS Update Catalog fallbacks.
     param([string]$Manufacturer)
     if (-not $Manufacturer) { return $true }
@@ -8829,365 +8800,6 @@ function Start-DynabookDriverInstall {
 }
 
 # =========================
-# ASUS (v1.31.0)
-# =========================
-# ASUS publishes no driver pack or catalog file, but its support site answers
-# a public JSON API per model code:
-#   GetPDOS?website=global&model=<code>                -> OS ids (52 = Windows 11 64-bit)
-#   GetPDDrivers?website=global&model=<code>&osid=<id> -> every driver, by category
-# Each driver entry carries a HardwareInfoList (PCI\VEN_8086&DEV_7E50,
-# HDAUDIO\FUNC_01&VEN_10EC&DEV_0235&SUBSYS_104313B1 ...) and a sha256 of the
-# download. Verified 21 Sep 2026 on UX3405MA (Zenbook), X1504VA (Vivobook),
-# G614JV and FA507NV (ROG): one endpoint serves consumer and gaming models.
-# Each package is an .exe wrapper around a 7z archive of INFs plus an ASUS
-# Install.bat whose whole content is "pnputil -i -a *.inf /subdirs"; 7-Zip
-# reaches the INFs with -t7z (a plain "7z x" opens the PE sections instead).
-$script:AsusApiBase      = "https://www.asus.com/support/api/product.asmx"
-$script:AsusMaxPackages  = 30
-$script:AsusBudgetMB     = 3000
-$script:AsusInfScanMaxMB    = 60    # v1.31.1 - only packages up to this size are INF-scanned
-$script:AsusInfScanBudgetMB = 400   # v1.31.1 - total download cap for the INF scan
-
-function Get-AsusModelCandidates {
-    # Pure: model codes to try against the ASUS API, most specific first.
-    # WMI Model reads "ASUS Zenbook 14 UX3405MA_UX3405MA" or "ROG Strix
-    # G614JV_G614JV"; the code after the last "_" is the API key. The baseboard
-    # product (usually the bare code) and any code-shaped token follow.
-    param([string]$Model, [string]$BaseboardProduct)
-    $out = New-Object System.Collections.Generic.List[string]
-    $add = { param($c) $c = ([string]$c).Trim(); if ($c -and $c.Length -ge 4 -and -not $out.Contains($c.ToUpper())) { $out.Add($c.ToUpper()) } }
-    $m = ([string]$Model).Trim()
-    if ($m -match '_([A-Za-z0-9-]+)\s*$') { & $add $Matches[1] }
-    & $add $BaseboardProduct
-    foreach ($tok in ($m -split '[\s_]+')) {
-        if ($tok -match '^[A-Za-z]{1,4}\d{2,5}[A-Za-z0-9]*$') { & $add $tok }
-    }
-    return @($out)
-}
-
-function Select-AsusOsId {
-    # Pure: from a GetPDOS answer pick the OS id for the running Windows
-    # generation (64-bit), else the other generation. $null when none fits.
-    param($OsJson, [bool]$IsWin11)
-    $list = @()
-    try { $list = @($OsJson.Result.Obj) } catch {}
-    if ($list.Count -eq 0) { return $null }
-    $first  = if ($IsWin11) { 'Windows 11' } else { 'Windows 10' }
-    $second = if ($IsWin11) { 'Windows 10' } else { 'Windows 11' }
-    foreach ($gen in @($first, $second)) {
-        $hit = $list | Where-Object { [string]$_.Name -match [regex]::Escape($gen) -and [string]$_.Name -match '64' } | Select-Object -First 1
-        if ($hit) { return @{ Id = [string]$hit.Id; Name = [string]$hit.Name } }
-    }
-    return $null
-}
-
-function ConvertTo-AsusVersion {
-    # Pure: "V30.100.2318.58" -> "30.100.2318.58"; "V6001.15.155.1Sub2" ->
-    # "6001.15.155.1". Keeps the leading numeric part for version compare.
-    param([string]$Version)
-    $v = ([string]$Version).Trim() -replace '^(?i)v', ''
-    if ($v -match '^(\d+(?:\.\d+)*)') { return $Matches[1] }
-    return $v
-}
-
-function Get-AsusDriverEntries {
-    # Pure: flatten a GetPDDrivers answer into installable driver entries.
-    # Drops Microsoft Store links, anything that is not an .exe/.zip download,
-    # and every entry without a hardware ID list (utilities, recovery tools):
-    # only an entry that names hardware can be matched to a missing device.
-    # v1.31.1 - -IncludeUnlisted keeps the entries with no hardware ID list
-    # too (INF-scan candidates: the Alcor card reader lists none at all).
-    param($DriverJson, [switch]$IncludeUnlisted)
-    $list = [System.Collections.Generic.List[object]]::new()
-    $cats = @()
-    try { $cats = @($DriverJson.Result.Obj) } catch {}
-    foreach ($c in $cats) {
-        if (-not $c) { continue }
-        foreach ($f in @($c.Files)) {
-            if (-not $f) { continue }
-            $url = ""
-            try { $url = [string]$f.DownloadUrl.Global } catch {}
-            if (-not $url) { continue }
-            $path = ($url -split '\?')[0]
-            if ($path -notmatch '(?i)^https://.+\.(exe|zip)$') { continue }
-            $ids = @()
-            foreach ($h in @($f.HardwareInfoList)) { if ($h -and $h.hardwareid) { $ids += ([string]$h.hardwareid).Trim().ToUpper() } }
-            if ($ids.Count -eq 0 -and -not $IncludeUnlisted) { continue }
-            $file = [System.IO.Path]::GetFileNameWithoutExtension($path)
-            $list.Add(@{
-                Id       = ($file -replace '[^A-Za-z0-9._-]', '_')
-                Name     = [string]$f.Title
-                Version  = (ConvertTo-AsusVersion ([string]$f.Version))
-                Category = [string]$c.Name
-                Url      = $url
-                Ext      = [System.IO.Path]::GetExtension($path).ToLower()
-                SHA256   = ([string]$f.sha256).Trim().ToUpper()
-                Size     = (ConvertTo-HpBytes $f.FileSize)
-                HwIds    = $ids
-            }) | Out-Null
-        }
-    }
-    return $list
-}
-
-function Find-AsusDriverMatches {
-    # Pure: attach the names of the missing devices each entry covers (same
-    # prefix rule as the HP CVA match: an id matches when it equals, or is a
-    # prefix of, a device's hardware/compatible/parent id) and keep, for each
-    # device, only the newest package. Returns the distinct winners.
-    param($Entries, $MissingDevices)
-    $cands = [System.Collections.Generic.List[object]]::new()
-    foreach ($e in $Entries) {
-        if (-not $e) { continue }
-        $hits = @(Test-HpCvaAppliesToDevices -Cva @{ Devices = @($e.HwIds); SysIds = @() } -MissingDevices $MissingDevices -SysId '')
-        if ($hits.Count -eq 0) { continue }
-        $c = $e.Clone(); $c.Devices = $hits
-        $cands.Add($c) | Out-Null
-    }
-    return @(Select-HpConsumerSoftpaqs -Candidates $cands)
-}
-
-function Get-InfHardwareIds {
-    # v1.31.1 - Pure: the hardware IDs an INF's models sections name. A model
-    # line reads "%Desc% = InstallSection, PCI\VEN_1022&DEV_1649[, more ids]";
-    # every comma field after the install section that looks like BUS\ID is
-    # kept (upper-case). Comments after ';', [Strings] sections and quoted
-    # values (display text) are skipped.
-    param([string]$Text)
-    $ids = New-Object System.Collections.Generic.List[string]
-    if (-not $Text) { return @() }
-    $inStrings = $false
-    foreach ($raw in ($Text -split "`r?`n")) {
-        $line = ($raw -replace ';.*$', '').Trim()
-        if ($line -match '^\[(.+)\]$') { $inStrings = ($Matches[1] -match '(?i)^strings(\.|$)'); continue }
-        if ($inStrings) { continue }
-        $eq = $line.IndexOf('=')
-        if ($eq -lt 1) { continue }
-        $rhs = $line.Substring($eq + 1).Trim()
-        if ($rhs.StartsWith('"')) { continue }
-        $parts = $rhs.Split(',')
-        if ($parts.Count -lt 2) { continue }
-        for ($k = 1; $k -lt $parts.Count; $k++) {
-            $id = $parts[$k].Trim().Trim('"').ToUpper()
-            if ($id -match '^[A-Z0-9_]+\\[^\s"%]+$' -and -not $ids.Contains($id)) { $ids.Add($id) }
-        }
-    }
-    return @($ids)
-}
-
-function Select-AsusInfScanCandidates {
-    # v1.31.1 - Pure: packages worth an INF scan. The ASUS list is incomplete
-    # (M5606UA run 20260921_134333: "AMD Chipset Driver" lists only the two
-    # GPIO ids, yet it carries the PSP, I2C, PMF and MicroPEP INFs, so the
-    # PSP "PCI Encryption/Decryption Controller" stayed missing). Keep the
-    # newest version of each title the list match did not already choose
-    # (an older version of a chosen title is never scanned), under the cap.
-    param($Entries, [string[]]$ChosenNames, [long]$MaxBytes)
-    $best = @{}
-    foreach ($e in $Entries) {
-        if (-not $e) { continue }
-        if ($ChosenNames -contains $e.Name) { continue }
-        if ($MaxBytes -gt 0 -and [long]$e.Size -gt $MaxBytes) { continue }
-        $prev = $best[$e.Name]
-        if ($null -eq $prev -or (Test-HpVersionNewer -Candidate ([string]$e.Version) -Current ([string]$prev.Version))) { $best[$e.Name] = $e }
-    }
-    return @($best.Values | Sort-Object { $_.Name })
-}
-
-function Invoke-AsusApiJson {
-    # GET an ASUS support API endpoint via curl.exe. Parsed object or $null.
-    param([string]$Url)
-    $text = Invoke-HpSupportJson -Url $Url -AsText -MaxTimeSec 45
-    if (-not $text) { return $null }
-    $obj = ConvertFrom-HpJson -Raw $text
-    if ($null -eq $obj) { return $null }
-    $status = ""
-    try { $status = [string]$obj.Status } catch {}
-    if ($status -ne 'SUCCESS') { Log-Diag "ASUS API: status '$status' for $Url"; return $null }
-    return $obj
-}
-
-function Expand-AsusPackage {
-    # Verify the sha256 and extract one downloaded ASUS package. Returns the
-    # extract folder, or $null on any failure.
-    param([hashtable]$Pkg, [string]$PkgFile, [string]$DriverRoot)
-    if (-not $Pkg.SHA256) { Log "  $($Pkg.Id): no sha256 in the ASUS answer - not using an unverified package."; return $null }
-    $hash = ""
-    try { $hash = (Get-FileHash -Path $PkgFile -Algorithm SHA256 -EA Stop).Hash.ToUpper() } catch {}
-    if ($hash -ne $Pkg.SHA256) { Log "  $($Pkg.Id): SHA256 mismatch (got $hash) - skipped."; return $null }
-
-    $dest = Join-Path $DriverRoot "asus\$($Pkg.Id)"
-    if (Test-Path $dest) { Remove-Item $dest -Recurse -Force -EA SilentlyContinue }
-    New-Item -Path $dest -ItemType Directory -Force | Out-Null
-    if ($Pkg.Ext -eq '.zip') {
-        try { Expand-Archive -Path $PkgFile -DestinationPath $dest -Force -EA Stop } catch { Log "  $($Pkg.Id): ZIP extract failed - $($_.Exception.Message)"; return $null }
-    } else {
-        if (-not (Test-Path $script:7zExe) -and -not (Install-7Zip)) { Log "  $($Pkg.Id): 7-Zip unavailable - cannot extract."; return $null }
-        $p = Start-Process -FilePath $script:7zExe -ArgumentList @("x", "-t7z", "`"$PkgFile`"", "-o`"$dest`"", "-y") -Wait -PassThru -WindowStyle Hidden
-        if ($p.ExitCode -ne 0) { Log "  $($Pkg.Id): 7-Zip exit $($p.ExitCode)." }
-    }
-    if (@(Get-ChildItem $dest -Recurse -Filter *.inf -EA SilentlyContinue).Count -eq 0) { Log "  $($Pkg.Id): no INF files after extraction - skipped."; return $null }
-    return $dest
-}
-
-function Install-AsusPackage {
-    # pnputil-install one ASUS package (extracting it unless -Dest is given).
-    # Returns $true when pnputil accepted the package.
-    param([hashtable]$Pkg, [string]$PkgFile, [string]$DriverRoot, [int]$Index, [int]$Total, [string]$Dest = "")
-    SetExtract -Pct ([int](($Index - 1) / [math]::Max($Total, 1) * 100)) -Label "[$Index/$Total] $($Pkg.Name)"
-    $dest = if ($Dest) { $Dest } else { Expand-AsusPackage -Pkg $Pkg -PkgFile $PkgFile -DriverRoot $DriverRoot }
-    if (-not $dest) { return $false }
-    $infs = @(Get-ChildItem $dest -Recurse -Filter *.inf -EA SilentlyContinue)
-    Log "  [$Index/$Total] $($Pkg.Name) v$($Pkg.Version): $($infs.Count) INF(s)."
-    if ($SkipInstall) { Log "    SkipInstall set - extraction verified, pnputil skipped."; return $true }
-
-    # Same command as the package's own Install.bat, plus /install to bind now.
-    $out = pnputil /add-driver "`"$dest\*.inf`"" /subdirs /install 2>&1
-    $rc  = $LASTEXITCODE
-    foreach ($l in $out) { if ("$l".Trim()) { Log "    $l" } }
-    $script:AnalyticsInfCount += $infs.Count
-    $outText = ($out | Out-String)
-    if ($outText -match '(?i)Installed driver package on matching|Driver package installed on matching|Installed on\s+[1-9]\d*\s+device|Successfully installed driver') {
-        $null = $script:AnalyticsInstalledDrivers.Add("$($Pkg.Name) ($($Pkg.Id))")
-    }
-    if ($rc -in @(1641, 3010)) { $script:DupRebootRequired = $true }
-    Play-Sound -Event "DriverAdded"
-    return ($rc -in @(0, 259, 1641, 3010))
-}
-
-function Start-AsusDriverInstall {
-    # Returns $true when at least one ASUS package installed.
-    param([string]$DriverRoot, [string]$ModelName)
-    Log "=== ASUS: support-site driver list by model code ==="
-    SetDownload -Pct 0 -Label "Waiting..."
-    SetExtract  -Pct 0 -Label "Waiting..."
-    try { $script:AnalyticsSerial = (Get-CimInstance Win32_BIOS).SerialNumber.Trim() } catch {}
-    if ($script:TestMode) { Log "ASUS tier skipped (TestMode)."; return $false }
-
-    $missing = @(Get-HpMissingDevicesWithHwIds)
-    if ($missing.Count -eq 0) { Log "  No missing devices - nothing for the ASUS tier to do."; return $false }
-    foreach ($dev in $missing) {
-        $pids = @()
-        try { $pids = @(Get-DeviceParentHardwareIds -InstanceId $dev.DeviceID) } catch {}
-        $dev | Add-Member -NotePropertyName ParentHardwareIDs -NotePropertyValue $pids -Force
-    }
-
-    # 1. Model code + OS id. The first code whose OS list answers wins.
-    $board = ""
-    try { $board = ([string](Get-CimInstance Win32_BaseBoard -EA Stop).Product).Trim() } catch {}
-    $codes = @(Get-AsusModelCandidates -Model $ModelName -BaseboardProduct $board)
-    Log "  Model code candidates: $(if ($codes.Count) { $codes -join ', ' } else { '(none)' })"
-    $isWin11 = $false
-    try { $isWin11 = ([int](Get-CimInstance Win32_OperatingSystem -EA Stop).BuildNumber -ge 22000) } catch {}
-    $code = $null; $os = $null
-    foreach ($c in $codes) {
-        if (Test-Cancelled) { return $false }
-        $oj = Invoke-AsusApiJson -Url "$($script:AsusApiBase)/GetPDOS?website=global&model=$([uri]::EscapeDataString($c))"
-        $os = Select-AsusOsId -OsJson $oj -IsWin11 $isWin11
-        if ($os) { $code = $c; break }
-    }
-    if (-not $os) { Log "  The ASUS support site has no Windows driver list for this model."; return $false }
-    Log "  Model code $code -> $($os.Name) (osid $($os.Id))"
-
-    # 2. Driver list and hardware-ID match.
-    SetDownload -Pct -1 -Label "Reading the ASUS driver list..."
-    $dj = Invoke-AsusApiJson -Url "$($script:AsusApiBase)/GetPDDrivers?website=global&model=$([uri]::EscapeDataString($code))&osid=$($os.Id)"
-    $entries = Get-AsusDriverEntries -DriverJson $dj
-    Log "  Driver list: $($entries.Count) driver package(s) with hardware IDs."
-    if ($entries.Count -eq 0) { return $false }
-    $pkgs = @(Find-AsusDriverMatches -Entries $entries -MissingDevices $missing | Select-Object -First $script:AsusMaxPackages)
-    $totalMB = [math]::Round((($pkgs | ForEach-Object { [long]$_.Size }) | Measure-Object -Sum).Sum / 1MB, 1)
-    if ($pkgs.Count -gt 0) {
-        Log "  $($pkgs.Count) package(s) match missing devices by the ASUS list ($totalMB MB), newest per device:"
-        foreach ($p in $pkgs) { Log "    $($p.Name) v$($p.Version)  -> $($p.Devices -join ', ')" }
-    } else { Log "  The ASUS list names no missing device's hardware ID." }
-    if ($totalMB -gt $script:AsusBudgetMB) { Log "  Total exceeds the $($script:AsusBudgetMB) MB budget - skipping the ASUS tier."; return $false }
-
-    # 2b. v1.31.1 - INF scan. The ASUS hardware ID list is incomplete, so for
-    #     devices it does not cover, download the small packages not already
-    #     chosen, read the hardware IDs out of their INFs, and keep each one
-    #     whose INFs name a still-unmatched device.
-    $covered = @{}
-    foreach ($p in $pkgs) { foreach ($d in @($p.Devices)) { $covered[$d] = $true } }
-    $uncovered = @($missing | Where-Object { -not $covered[[string]$_.Name] })
-    $scanned = @{}   # package Id -> extract folder, for the install loop
-    if ($uncovered.Count -gt 0 -and -not (Test-Cancelled)) {
-        $all  = Get-AsusDriverEntries -DriverJson $dj -IncludeUnlisted
-        $scan = @(Select-AsusInfScanCandidates -Entries $all -ChosenNames @($pkgs | ForEach-Object { $_.Name }) -MaxBytes ($script:AsusInfScanMaxMB * 1MB))
-        $scanMB = [math]::Round((($scan | ForEach-Object { [long]$_.Size }) | Measure-Object -Sum).Sum / 1MB, 1)
-        if ($scan.Count -gt 0 -and $scanMB -le $script:AsusInfScanBudgetMB) {
-            Log "  INF scan: $($uncovered.Count) device(s) not covered by the list; checking $($scan.Count) package(s) ($scanMB MB)."
-            $scanDir = Join-Path $DriverRoot "asus"
-            if (-not (Test-Path $scanDir)) { New-Item -Path $scanDir -ItemType Directory -Force | Out-Null }
-            $scanItems = New-Object 'System.Collections.Generic.List[hashtable]'
-            foreach ($c in $scan) { $scanItems.Add(@{ Url = $c.Url; OutFile = (Join-Path $scanDir "$($c.Id)$($c.Ext)"); Label = "INF scan: $($c.Name)" }) | Out-Null }
-            $scanRes = Invoke-CurlDownloadParallel -Items $scanItems
-            $gotScan = @{}
-            foreach ($r in $scanRes) { if ($r.Success) { $gotScan[$r.Item.OutFile] = $true } }
-            $scanHits = [System.Collections.Generic.List[object]]::new()
-            foreach ($c in $scan) {
-                if (Test-Cancelled) { break }
-                $f = Join-Path $scanDir "$($c.Id)$($c.Ext)"
-                if (-not $gotScan[$f]) { continue }
-                $dest = Expand-AsusPackage -Pkg $c -PkgFile $f -DriverRoot $DriverRoot
-                if (-not $dest) { continue }
-                $infIds = New-Object System.Collections.Generic.List[string]
-                foreach ($inf in @(Get-ChildItem $dest -Recurse -Filter *.inf -EA SilentlyContinue)) {
-                    $txt = ""
-                    try { $txt = Get-Content -LiteralPath $inf.FullName -Raw -EA Stop } catch {}
-                    foreach ($id in @(Get-InfHardwareIds -Text $txt)) { if (-not $infIds.Contains($id)) { $infIds.Add($id) } }
-                }
-                $hits = @(Test-HpCvaAppliesToDevices -Cva @{ Devices = @($infIds); SysIds = @() } -MissingDevices $uncovered -SysId '')
-                if ($hits.Count -eq 0) { continue }
-                $h = $c.Clone(); $h.Devices = $hits
-                $scanHits.Add($h) | Out-Null
-                $scanned[$c.Id] = $dest
-            }
-            foreach ($h in @(Select-HpConsumerSoftpaqs -Candidates $scanHits)) {
-                Log "    INF scan match: $($h.Name) v$($h.Version)  -> $($h.Devices -join ', ')"
-                $pkgs += ,$h
-            }
-            if ($scanHits.Count -eq 0) { Log "  INF scan: no package names a still-missing device." }
-        } elseif ($scan.Count -gt 0) {
-            Log "  INF scan skipped: $scanMB MB exceeds the $($script:AsusInfScanBudgetMB) MB scan budget."
-        }
-    }
-    if ($pkgs.Count -eq 0) { Log "  No ASUS package covers a missing device on this machine."; return $false }
-
-    # 3. Download in parallel, one serial retry, then verify/extract/install serially.
-    $pkgDir = Join-Path $DriverRoot "asus"
-    if (-not (Test-Path $pkgDir)) { New-Item -Path $pkgDir -ItemType Directory -Force | Out-Null }
-    $fileOf = @{}
-    foreach ($p in $pkgs) { $fileOf[$p.Id] = Join-Path $pkgDir "$($p.Id)$($p.Ext)" }
-    $dlItems = New-Object 'System.Collections.Generic.List[hashtable]'
-    foreach ($p in $pkgs) { if (-not $scanned[$p.Id]) { $dlItems.Add(@{ Url = $p.Url; OutFile = $fileOf[$p.Id]; Label = $p.Name }) | Out-Null } }
-    $dlResults = if ($dlItems.Count -gt 0) { Invoke-CurlDownloadParallel -Items $dlItems } else { @() }
-    if (Test-Cancelled) { return $false }
-    $ok = @{}
-    foreach ($r in $dlResults) { if ($r.Success) { $ok[$r.Item.OutFile] = $true } }
-    foreach ($p in $pkgs) { if ($scanned[$p.Id]) { $ok[$fileOf[$p.Id]] = $true } }   # already downloaded and verified by the INF scan
-    foreach ($p in $pkgs) {
-        if ($ok[$fileOf[$p.Id]]) { continue }
-        if (Test-Cancelled) { return $false }
-        Log "  Retrying $($p.Name) serially..."
-        if (Invoke-CurlDownload -Url $p.Url -OutFile $fileOf[$p.Id]) { $ok[$fileOf[$p.Id]] = $true }
-    }
-    $ready = @($pkgs | Where-Object { $ok[$fileOf[$_.Id]] })
-    Set-ExHeader "Install INFs"
-    $okCount = 0; $i = 0
-    foreach ($p in $ready) {
-        $i++
-        if (Test-Cancelled) { break }
-        if (Install-AsusPackage -Pkg $p -PkgFile $fileOf[$p.Id] -DriverRoot $DriverRoot -Index $i -Total $ready.Count -Dest ([string]$scanned[$p.Id])) { $okCount++ }
-    }
-    Set-ExHeader "Extract & install"
-    SetExtract -Pct 100 -Label "ASUS drivers processed"
-    Log "  ASUS tier: installed $okCount of $($ready.Count) package(s) ($($pkgs.Count - $ready.Count) download failure(s))."
-    if ($okCount -gt 0 -and -not $SkipInstall) { try { $null = pnputil /scan-devices 2>&1 } catch {} }
-    return ($okCount -gt 0)
-}
-
-# =========================
 # DEVICE INFO DUMP
 # =========================
 function Write-DeviceInfo {
@@ -9650,8 +9262,8 @@ function Start-Install {
         Log "TEMP RULE: WU-first pass skipped ($(if (-not $PromptWindowsUpdate) {'-PromptWindowsUpdate:$false'} elseif ($SkipInstall) {'-SkipInstall set'} else {'cancel requested'}))."
     }
 
-    # Install 7-Zip for Dell, HP and ASUS extraction (not needed for Lenovo or Surface)
-    if (-not $wuFirstResolvedAll -and $manufacturer -match "Dell|HP|Hewlett|ASUS") {
+    # Install 7-Zip for Dell and HP extraction (not needed for Lenovo or Surface)
+    if (-not $wuFirstResolvedAll -and $manufacturer -match "Dell|HP|Hewlett") {
         Log "Preparing 7-Zip for fast extraction..."
         if (-not (Install-7Zip)) {
             Log "WARNING: 7-Zip unavailable - will fall back to vendor extractor."
@@ -9681,9 +9293,6 @@ function Start-Install {
     } elseif ($manufacturer -match "Dynabook|Toshiba") {
         if (-not (Assert-Curl)) { Send-AnalyticsEvent -Result "failure"; Set-ButtonIdle; return }
         $success = Start-DynabookDriverInstall -DriverRoot $driverRoot -ModelName $model
-    } elseif ($manufacturer -match "ASUS") {
-        if (-not (Assert-Curl)) { Send-AnalyticsEvent -Result "failure"; Set-ButtonIdle; return }
-        $success = Start-AsusDriverInstall -DriverRoot $driverRoot -ModelName $model
     } else {
         # Unknown manufacturer (e.g. "OEMBY", blank, generic OEM string).
         # In headless mode: if -Model was explicitly passed and looks like a Surface, run it.
