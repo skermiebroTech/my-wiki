@@ -20,7 +20,7 @@ $ErrorActionPreference = 'Stop'
 # script's main body creates a WinForms form, so it cannot be dot-sourced here).
 $tok=$null;$err=$null
 $ast=[System.Management.Automation.Language.Parser]::ParseFile($ScriptPath,[ref]$tok,[ref]$err)
-$want='Get-MsCatalogCabUrls','Test-HpVersionNewer','ConvertTo-HpMatchId','Select-HpConsumerSoftpaqs','Invoke-HpSupportJson','ConvertFrom-HpJson','ConvertTo-HpBytes','Find-HpSupportProductOids','Select-HpSupportOs','Get-HpCvaInfo','Test-HpCvaAppliesToDevices','Get-MsCatalogResultRows','Select-MsCatalogDriverGuid','Find-DellIndexManifestPath','Test-DellOsCode','Test-DellOsArch','Test-ActionableProblemCode','Get-ProblemCodeHint','Select-HpDriverPack','Find-DellCatalogDeviceMatches','Get-NormalizedManufacturer','Test-PlaceholderManufacturer'
+$want='Get-MsCatalogCabUrls','Test-HpVersionNewer','ConvertTo-HpMatchId','Select-HpConsumerSoftpaqs','Invoke-HpSupportJson','ConvertFrom-HpJson','ConvertTo-HpBytes','Find-HpSupportProductOids','Select-HpSupportOs','Get-HpCvaInfo','Test-HpCvaAppliesToDevices','Get-MsCatalogResultRows','Select-MsCatalogDriverGuid','Find-DellIndexManifestPath','Test-DellOsCode','Test-DellOsArch','Test-ActionableProblemCode','Get-ProblemCodeHint','Select-HpDriverPack','Find-DellCatalogDeviceMatches','Get-NormalizedManufacturer','Test-PlaceholderManufacturer','Get-AsusModelCandidates','Select-AsusOsId','ConvertTo-AsusVersion','Get-AsusDriverEntries','Find-AsusDriverMatches'
 foreach ($f in $ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst]},$true)) {
     if ($want -contains $f.Name) { Invoke-Expression $f.Extent.Text }
 }
@@ -195,6 +195,56 @@ $iPicker = ($body | Select-String -SimpleMatch '$pickedModel = Show-SurfaceModel
 $iHlErr  = ($body | Select-String -SimpleMatch "doesn't match a known Surface" | Select-Object -First 1).LineNumber
 Check "real-brand skip runs before the picker"        ($iSkip -and $iPicker -and $iSkip -lt $iPicker)
 Check "real-brand skip runs before the headless error" ($iSkip -and $iHlErr -and $iSkip -lt $iHlErr)
+
+
+"== ASUS support API (v1.31.0) =="
+# Fixtures: live GetPDOS / GetPDDrivers answers for UX3405MA (Zenbook 14),
+# captured 2026-09-21, trimmed to Networking/Chipset/Audio/Software entries.
+$c1 = @(Get-AsusModelCandidates -Model 'ASUS Zenbook 14 UX3405MA_UX3405MA' -BaseboardProduct 'UX3405MA')
+Check "model code: text after the last _ comes first"   ($c1.Count -ge 1 -and $c1[0] -eq 'UX3405MA')
+Check "model code: no duplicates"                        (@($c1 | Where-Object { $_ -eq 'UX3405MA' }).Count -eq 1)
+$c2 = @(Get-AsusModelCandidates -Model 'ROG Strix G614JV_G614JV' -BaseboardProduct 'G614JV')
+Check "model code: ROG model"                            ($c2[0] -eq 'G614JV')
+$c3 = @(Get-AsusModelCandidates -Model 'Vivobook 15 X1504VA' -BaseboardProduct '')
+Check "model code: code-shaped token without _"          ($c3 -contains 'X1504VA' -and $c3 -notcontains 'VIVOBOOK')
+Check "model code: empty input gives nothing"            (@(Get-AsusModelCandidates -Model '' -BaseboardProduct '').Count -eq 0)
+
+$osJ = Get-Content (Join-Path $Fixtures 'asus-GetPDOS-UX3405MA.json') -Raw | ConvertFrom-Json
+Check "OS id: Windows 11 64-bit is 52"                   ((Select-AsusOsId -OsJson $osJ -IsWin11 $true).Id -eq '52')
+Check "OS id: Win10 machine falls back to the Win11 list" ((Select-AsusOsId -OsJson $osJ -IsWin11 $false).Id -eq '52')
+Check "OS id: no list gives null"                        ($null -eq (Select-AsusOsId -OsJson $null -IsWin11 $true))
+
+Check "version: V prefix removed"                        ((ConvertTo-AsusVersion 'V30.100.2318.58') -eq '30.100.2318.58')
+Check "version: Sub suffix removed"                      ((ConvertTo-AsusVersion 'V6001.15.155.1Sub2') -eq '6001.15.155.1')
+
+$drvJ = Get-Content (Join-Path $Fixtures 'asus-GetPDDrivers-UX3405MA-trimmed.json') -Raw | ConvertFrom-Json
+$ent  = Get-AsusDriverEntries -DriverJson $drvJ
+Check "entries: store links and no-hardware-id entries dropped" ($ent.Count -eq 9)
+Check "entries: no Microsoft Store URL survives"         (@($ent | Where-Object { $_.Url -match 'microsoft\.com' }).Count -eq 0)
+Check "entries: every entry has a 64-hex sha256"         (@($ent | Where-Object { $_.SHA256 -notmatch '^[0-9A-F]{64}$' }).Count -eq 0)
+Check "entries: .exe extension and size parsed"          (@($ent | Where-Object { $_.Ext -ne '.exe' -or $_.Size -le 0 }).Count -eq 0)
+Check "entries: hardware ids upper-case"                 ((@($ent | Where-Object { $_.Name -eq 'Intel Serial IO Driver' })[0].HwIds -contains 'PCI\VEN_8086&DEV_7E50'))
+
+$asusMissing = @(
+    [pscustomobject]@{ Name='Serial IO I2C Host Controller'; DeviceID='PCI\VEN_8086&DEV_7E50&SUBSYS_1C131043&REV_20\3&11583659&0&A8'; HardwareIDs=@('PCI\VEN_8086&DEV_7E50&SUBSYS_1C131043&REV_20','PCI\VEN_8086&DEV_7E50&SUBSYS_1C131043'); CompatibleIDs=@('PCI\VEN_8086&DEV_7E50&REV_20','PCI\VEN_8086&DEV_7E50'); ParentHardwareIDs=@() },
+    [pscustomobject]@{ Name='Sensor Hub'; DeviceID='PCI\VEN_8086&DEV_7E45\x'; HardwareIDs=@('PCI\VEN_8086&DEV_7E45&SUBSYS_1C131043&REV_20'); CompatibleIDs=@(); ParentHardwareIDs=@() },
+    [pscustomobject]@{ Name='High Definition Audio Device'; DeviceID='HDAUDIO\FUNC_01&VEN_10EC&DEV_0233&SUBSYS_104312A0\x'; HardwareIDs=@('HDAUDIO\FUNC_01&VEN_10EC&DEV_0233&SUBSYS_104312A0&REV_1000'); CompatibleIDs=@(); ParentHardwareIDs=@() },
+    [pscustomobject]@{ Name='Unknown Razer thing'; DeviceID='ACPI\RZR0001\0'; HardwareIDs=@('ACPI\RZR0001'); CompatibleIDs=@(); ParentHardwareIDs=@() }
+)
+$win = @(Find-AsusDriverMatches -Entries $ent -MissingDevices $asusMissing)
+Check "match: three packages for three matchable devices" ($win.Count -eq 3)
+Check "match: Serial IO matched by prefix"               (@($win | Where-Object { $_.Name -eq 'Intel Serial IO Driver' }).Count -eq 1)
+Check "match: newest sensor package kept (5.8.0.5)"      ((@($win | Where-Object { $_.Name -like '*Sensor*' })[0].Version) -eq '5.8.0.5')
+Check "match: newest audio package kept (6.0.9780.1)"    ((@($win | Where-Object { $_.Name -eq 'Realtek Audio Driver' })[0].Version) -eq '6.0.9780.1')
+Check "match: an unmatched device pulls no package"      (@($win | Where-Object { $_.Devices -contains 'Unknown Razer thing' }).Count -eq 0)
+Check "match: no missing devices gives nothing"          (@(Find-AsusDriverMatches -Entries $ent -MissingDevices @()).Count -eq 0)
+
+Check "dispatch: ASUSTeK string reaches the ASUS branch" ('ASUSTeK COMPUTER INC.' -match 'ASUS')
+Check "dispatch: ASUS is not normalised away"            ((Get-NormalizedManufacturer -Manufacturer 'ASUSTeK COMPUTER INC.') -match 'ASUS')
+$iAsus    = ($body | Select-String -SimpleMatch 'elseif ($manufacturer -match "ASUS")' | Select-Object -First 1).LineNumber
+$iUnknown = ($body | Select-String -SimpleMatch "Unrecognised manufacturer: '" | Select-Object -First 1).LineNumber
+Check "dispatch: ASUS branch sits before the unknown branch" ($iAsus -and $iUnknown -and $iAsus -lt $iUnknown)
+Check "7-Zip prep includes ASUS"                          (@($body | Where-Object { $_ -match 'manufacturer -match "Dell\|HP\|Hewlett\|ASUS"' }).Count -eq 1)
 
 ""
 "passed: $pass  failed: $fail"

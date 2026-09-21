@@ -1,0 +1,492 @@
+{
+ "Result": {
+  "Count": 55,
+  "Obj": [
+   {
+    "Name": "Networking",
+    "Files": [
+     {
+      "Id": "3@1845@0@1@52@67@LAN_DCH_Realtek_Z_V1153.10.20.1104_31509_1.exe",
+      "Version": "V1153.10.20.1104",
+      "Title": "Realtek Ethernet Controller Driver",
+      "FileSize": "4.41 MB",
+      "ReleaseDate": "2022/12/09",
+      "DownloadUrl": {
+       "Global": "https://dlcdnets.asus.com/pub/ASUS/nb/Image/Driver/Networking/31509/LAN_DCH_Realtek_Z_V1153.10.20.1104_31509_1.exe?model=UX3405MA",
+       "China": ""
+      },
+      "HardwareInfoList": [],
+      "sha256": "22F1F58019EA9D7F5CAF217652A8A1FF4F9DFB25DC2879E8950A0E19E72109BD"
+     },
+     {
+      "Id": "3@1845@0@1@52@67@WirelessLan_PIE_DCH_Intel_Z_V24.30.1.1_49124.exe",
+      "Version": "V24.30.1.1",
+      "Title": "Intel WLAN Driver",
+      "FileSize": "26.09 MB",
+      "ReleaseDate": "2026/05/07",
+      "DownloadUrl": {
+       "Global": "https://dlcdnets.asus.com/pub/ASUS/nb/Image/Driver/Networking/49124/WirelessLan_PIE_DCH_Intel_Z_V24.30.1.1_49124.exe?model=UX3405MA",
+       "China": ""
+      },
+      "HardwareInfoList": [
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_2725&SUBSYS_00208086",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_2725&SUBSYS_00248086",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_2725&SUBSYS_16731A56",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_2725&SUBSYS_16741A56",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_2725&SUBSYS_20208086",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_2725&SUBSYS_40208086",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_2725&SUBSYS_60208086",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_2725&SUBSYS_60248086",
+        "date": null,
+        "version": null
+       }
+      ],
+      "sha256": "6FC110B565954D51F260EB043DC7C9C2D28E09D6A84CC5BAA01C5DBAA86B1285"
+     },
+     {
+      "Id": "3@1845@0@1@52@67@WirelessLan_PIE_DCH_Intel_Z_V23.160.0.4_44628.exe",
+      "Version": "V23.160.0.4",
+      "Title": "Intel WLAN Driver",
+      "FileSize": "21.86 MB",
+      "ReleaseDate": "2025/09/16",
+      "DownloadUrl": {
+       "Global": "https://dlcdnets.asus.com/pub/ASUS/nb/Image/Driver/Networking/44628/WirelessLan_PIE_DCH_Intel_Z_V23.160.0.4_44628.exe?model=UX3405MA",
+       "China": ""
+      },
+      "HardwareInfoList": [
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_02F0&SUBSYS_00308086",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_02F0&SUBSYS_00348086",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_02F0&SUBSYS_00388086",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_02F0&SUBSYS_003C8086",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_02F0&SUBSYS_00648086",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_02F0&SUBSYS_00708086",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_02F0&SUBSYS_00748086",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_02F0&SUBSYS_00788086",
+        "date": null,
+        "version": null
+       }
+      ],
+      "sha256": "3433D58E2E1F1C29847CF92A8871100B7A31C64940F7CC2F27B95AFF2C3A0B2C"
+     },
+     {
+      "Id": "3@1845@0@1@52@67@WirelessLan_PIE_DCH_Intel_Z_V23.130.1.1_43197_1.exe",
+      "Version": "V23.130.1.1",
+      "Title": "Intel WLAN Driver",
+      "FileSize": "21.69 MB",
+      "ReleaseDate": "2025/05/14",
+      "DownloadUrl": {
+       "Global": "https://dlcdnets.asus.com/pub/ASUS/nb/Image/Driver/Networking/43197/WirelessLan_PIE_DCH_Intel_Z_V23.130.1.1_43197_1.exe?model=UX3405MA",
+       "China": ""
+      },
+      "HardwareInfoList": [
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_2725&SUBSYS_00208086",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_2725&SUBSYS_00248086",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_2725&SUBSYS_16731A56",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_2725&SUBSYS_16741A56",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_2725&SUBSYS_20208086",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_2725&SUBSYS_40208086",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_2725&SUBSYS_60208086",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_2725&SUBSYS_60248086",
+        "date": null,
+        "version": null
+       }
+      ],
+      "sha256": "8175947452D84706F0CE5B4BBB9EC02E5CDB1322C7C7A8688356880880463480"
+     },
+     {
+      "Id": "3@1845@0@1@52@67@WirelessLan_PIE_DCH_Intel_Z_V23.10.0.8_36302_1.exe",
+      "Version": "V23.10.0.8",
+      "Title": "Intel WLAN Driver",
+      "FileSize": "15.35 MB",
+      "ReleaseDate": "2023/12/06",
+      "DownloadUrl": {
+       "Global": "https://dlcdnets.asus.com/pub/ASUS/nb/Image/Driver/Networking/36302/WirelessLan_PIE_DCH_Intel_Z_V23.10.0.8_36302_1.exe?model=UX3405MA",
+       "China": ""
+      },
+      "HardwareInfoList": [
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_2725&SUBSYS_00208086",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_2725&SUBSYS_00248086",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_2725&SUBSYS_16731A56",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_2725&SUBSYS_16741A56",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_2725&SUBSYS_20208086",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_2725&SUBSYS_40208086",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_2725&SUBSYS_60208086",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_2725&SUBSYS_60248086",
+        "date": null,
+        "version": null
+       }
+      ],
+      "sha256": "33613D633E16EB43B67A7B09ED1DCC7BAC6EFCB45A05EA464957EBF7F2DDB42C"
+     },
+     {
+      "Id": "3@1845@0@1@52@67@Intel Connectivity Performance Suite",
+      "Version": "latest version at the MS store",
+      "Title": "Intel Connectivity Performance Suite",
+      "FileSize": "4.43 MB",
+      "ReleaseDate": "2022/09/08",
+      "DownloadUrl": {
+       "Global": "https://www.microsoft.com/store/apps/9NSG1HWGCKVM?tp=RHJpdmVyTm90ZWJvb2s=",
+       "China": "https://www.microsoft.com/store/apps/9NSG1HWGCKVM?tp=RHJpdmVyTm90ZWJvb2s="
+      },
+      "HardwareInfoList": [],
+      "sha256": "C15A0C4DAD48250C8C5314B5C5F7985A227B0BECBA89E9CEB1FB2CE127022AE8"
+     }
+    ]
+   },
+   {
+    "Name": "Chipset",
+    "Files": [
+     {
+      "Id": "3@1845@0@1@52@23@SerialIO_Intel_Z_V30.100.2318.58_35197_1.exe",
+      "Version": "V30.100.2318.58",
+      "Title": "Intel Serial IO Driver",
+      "FileSize": "4.35 MB",
+      "ReleaseDate": "2023/09/26",
+      "DownloadUrl": {
+       "Global": "https://dlcdnets.asus.com/pub/ASUS/nb/Image/Driver/Chipset/35197/SerialIO_Intel_Z_V30.100.2318.58_35197_1.exe?model=UX3405MA",
+       "China": ""
+      },
+      "HardwareInfoList": [
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_7E50",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_7E51",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_7E78",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_7E79",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_7E7A",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_7E7B",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_7E7C",
+        "date": null,
+        "version": null
+       }
+      ],
+      "sha256": "F195C14A294E72EDE067BFF45BC06DFB035E04DF723859948454E210B522FE79"
+     },
+     {
+      "Id": "3@1845@0@1@52@23@SensorHub_DCH_Intel_Z_V5.8.0.5_38349_1.exe",
+      "Version": "V5.8.0.5",
+      "Title": "Intel Integrated Sensor Solution Driver",
+      "FileSize": "4.42 MB",
+      "ReleaseDate": "2024/06/07",
+      "DownloadUrl": {
+       "Global": "https://dlcdnets.asus.com/pub/ASUS/nb/Image/Driver/Chipset/38349/SensorHub_DCH_Intel_Z_V5.8.0.5_38349_1.exe?model=UX3405MA",
+       "China": ""
+      },
+      "HardwareInfoList": [
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_7E45",
+        "date": null,
+        "version": null
+       }
+      ],
+      "sha256": "DCF7B32244F94C14E6E4BABBF645531F3BF141B81DBECFCACA19C31D490D3F0A"
+     },
+     {
+      "Id": "3@1845@0@1@52@23@SensorHub_DCH_Intel_Z_V5.8.0.4_36822_1.exe",
+      "Version": "V5.8.0.4",
+      "Title": "Intel Integrated Sensor Solution Driver",
+      "FileSize": "4.42 MB",
+      "ReleaseDate": "2024/01/08",
+      "DownloadUrl": {
+       "Global": "https://dlcdnets.asus.com/pub/ASUS/nb/Image/Driver/Chipset/36822/SensorHub_DCH_Intel_Z_V5.8.0.4_36822_1.exe?model=UX3405MA",
+       "China": ""
+      },
+      "HardwareInfoList": [
+       {
+        "hardwareid": "PCI\\VEN_8086&DEV_7E45",
+        "date": null,
+        "version": null
+       }
+      ],
+      "sha256": "9BA69543D1A5A71527473BEBF6AD149E5BEEFE50FF938908CA145E12F930D918"
+     }
+    ]
+   },
+   {
+    "Name": "Audio",
+    "Files": [
+     {
+      "Id": "3@1845@0@1@52@4@Realtek Codec Console Application",
+      "Version": "latest version at the MS store",
+      "Title": "Realtek Codec Console Application",
+      "FileSize": "9.13 MB",
+      "ReleaseDate": "2022/09/07",
+      "DownloadUrl": {
+       "Global": "https://www.microsoft.com/store/apps/9p2b8mcsvpln?tp=RHJpdmVyTm90ZWJvb2s=",
+       "China": "https://www.microsoft.com/store/apps/9p2b8mcsvpln?tp=RHJpdmVyTm90ZWJvb2s="
+      },
+      "HardwareInfoList": [],
+      "sha256": "8BBA97C6B45088AC319CEAF6AD9CF969A1B69B4A3917AB218A244474D704CDAD"
+     },
+     {
+      "Id": "3@1845@0@1@52@4@Audio_DriverOnly_Dolby_DCH_Realtek_Z_V6.0.9780.1_41921_1.exe",
+      "Version": "V6.0.9780.1",
+      "Title": "Realtek Audio Driver",
+      "FileSize": "228.53 MB",
+      "ReleaseDate": "2025/01/10",
+      "DownloadUrl": {
+       "Global": "https://dlcdnets.asus.com/pub/ASUS/nb/Image/Driver/Audio/41921/Audio_DriverOnly_Dolby_DCH_Realtek_Z_V6.0.9780.1_41921_1.exe?model=UX3405MA",
+       "China": ""
+      },
+      "HardwareInfoList": [
+       {
+        "hardwareid": "HDAUDIO\\FUNC_01&VEN_10EC&DEV_0233&SUBSYS_104312A0",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "HDAUDIO\\FUNC_01&VEN_10EC&DEV_0235&SUBSYS_104313B1",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "HDAUDIO\\FUNC_01&VEN_10EC&DEV_0235&SUBSYS_104313F1",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "HDAUDIO\\FUNC_01&VEN_10EC&DEV_0235&SUBSYS_10431441",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "HDAUDIO\\FUNC_01&VEN_10EC&DEV_0235&SUBSYS_1043185E",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "HDAUDIO\\FUNC_01&VEN_10EC&DEV_0235&SUBSYS_104318F1",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "HDAUDIO\\FUNC_01&VEN_10EC&DEV_0255&SUBSYS_104310C1",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "HDAUDIO\\FUNC_01&VEN_10EC&DEV_0255&SUBSYS_1043117E",
+        "date": null,
+        "version": null
+       }
+      ],
+      "sha256": "870253961DBF6865A3376C0D308BC760C51801637F465D03A77BB7377BEC1E3F"
+     },
+     {
+      "Id": "3@1845@0@1@52@4@Audio_DriverOnly_Dolby_DCH_Realtek_Z_V6.0.9629.1_36998_1.exe",
+      "Version": "V6.0.9629.1",
+      "Title": "Realtek Audio Driver",
+      "FileSize": "107.89 MB",
+      "ReleaseDate": "2024/02/19",
+      "DownloadUrl": {
+       "Global": "https://dlcdnets.asus.com/pub/ASUS/nb/Image/Driver/Audio/36998/Audio_DriverOnly_Dolby_DCH_Realtek_Z_V6.0.9629.1_36998_1.exe?model=UX3405MA",
+       "China": ""
+      },
+      "HardwareInfoList": [
+       {
+        "hardwareid": "HDAUDIO\\FUNC_01&VEN_10EC&DEV_0233&SUBSYS_104312A0",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "HDAUDIO\\FUNC_01&VEN_10EC&DEV_0235&SUBSYS_104313B1",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "HDAUDIO\\FUNC_01&VEN_10EC&DEV_0235&SUBSYS_104313F1",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "HDAUDIO\\FUNC_01&VEN_10EC&DEV_0235&SUBSYS_10431441",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "HDAUDIO\\FUNC_01&VEN_10EC&DEV_0235&SUBSYS_1043185E",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "HDAUDIO\\FUNC_01&VEN_10EC&DEV_0235&SUBSYS_104318F1",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "HDAUDIO\\FUNC_01&VEN_10EC&DEV_0235&SUBSYS_10431AB1",
+        "date": null,
+        "version": null
+       },
+       {
+        "hardwareid": "HDAUDIO\\FUNC_01&VEN_10EC&DEV_0255&SUBSYS_104310C1",
+        "date": null,
+        "version": null
+       }
+      ],
+      "sha256": "A879F761DBA85384F92A42A1E2BF0B305081A3370AAF08BC192A47BA3D354A61"
+     }
+    ]
+   },
+   {
+    "Name": "Software and Utility",
+    "Files": [
+     {
+      "Id": "3@1845@0@1@52@14@MyASUS",
+      "Version": "latest version at the MS store",
+      "Title": "MyASUS",
+      "FileSize": "97.91 MB",
+      "ReleaseDate": "2022/09/08",
+      "DownloadUrl": {
+       "Global": "https://www.microsoft.com/store/apps/9N7R5S6B0ZZH?tp=U29mdHdhcmVOb3RlYm9vaw==",
+       "China": "https://www.microsoft.com/store/apps/9N7R5S6B0ZZH?tp=U29mdHdhcmVOb3RlYm9vaw=="
+      },
+      "HardwareInfoList": [],
+      "sha256": "893FC7BCACC6334271C187B6F1FB31CD880D838C7F01A27A0F677D9A461C5C72"
+     }
+    ]
+   }
+  ]
+ },
+ "Status": "SUCCESS",
+ "Message": "SUCCESS"
+}
