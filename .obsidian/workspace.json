@@ -216,6 +216,7 @@
   },
   "active": "b98051cbc092f948",
   "lastOpenFiles": [
+    "script-backup/Install-Drivers-auto-v1.30.8-pre-1.31.1-21-sep.ps1",
     "site/search/search_index.json",
     "site/search",
     "site/Panasonic/panasonic-fzg1/index.html",
@@ -226,7 +227,6 @@
     "site/oobe-bypass/index.html",
     "site/oobe-bypass",
     "site/label-editor/index.html",
-    "site/label-editor",
     "docs/oobe-bypass.md",
     "docs/auto-driver-installer.md.old.md",
     "docs/label-editor.md",
